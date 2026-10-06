@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Xifre</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div id="app">
+
+        <!-- AUTH -->
+
+        <section id="auth-screen" class="screen">
+
+            <div class="auth-card">
+
+                <div class="logo">
+                    Xifre
+                </div>
+
+                <p class="subtitle">
+                    Mensajería simple.
+                </p>
+
+
+                <!-- LOGIN -->
+
+                <div id="login-form">
+
+                    <h1>Iniciar sesión</h1>
+
+                    <input
+                        id="login-email"
+                        type="email"
+                        placeholder="Correo electrónico"
+                    >
+
+                    <input
+                        id="login-password"
+                        type="password"
+                        placeholder="Contraseña"
+                    >
+
+                    <button id="login-button">
+                        Iniciar sesión
+                    </button>
+
+                    <button
+                        id="show-register"
+                        class="secondary-button"
+                    >
+                        Crear cuenta
+                    </button>
+
+                </div>
+
+
+                <!-- REGISTER -->
+
+                <div
+                    id="register-form"
+                    class="hidden"
+                >
+
+                    <h1>Crear cuenta</h1>
+
+                    <input
+                        id="register-username"
+                        type="text"
+                        placeholder="Username"
+                        maxlength="20"
+                    >
+
+                    <input
+                        id="register-email"
+                        type="email"
+                        placeholder="Correo electrónico"
+                    >
+
+                    <input
+                        id="register-password"
+                        type="password"
+                        placeholder="Contraseña"
+                    >
+
+                    <button id="register-button">
+                        Crear cuenta
+                    </button>
+
+                    <button
+                        id="show-login"
+                        class="secondary-button"
+                    >
+                        Ya tengo una cuenta
+                    </button>
+
+                </div>
+
+
+                <p id="auth-message"></p>
+
+            </div>
+
+        </section>
+
+
+        <!-- MAIN APP -->
+
+        <section
+            id="main-screen"
+            class="screen hidden"
+        >
+
+            <aside class="sidebar">
+
+                <div class="sidebar-header">
+                    <strong>Xifre</strong>
+                </div>
+
+
+                <div class="user-card">
+
+                    <div
+                        id="my-avatar"
+                        class="avatar"
+                    >
+                        ?
+                    </div>
+
+                    <div>
+
+                        <strong id="my-username">
+                            Usuario
+                        </strong>
+
+                        <small>
+                            Cuenta
+                        </small>
+
+                    </div>
+
+                </div>
+
+
+                <button id="add-friend-button">
+                    + Añadir amigo
+                </button>
+
+                <button id="create-group-button">
+                    + Crear grupo
+                </button>
+
+
+                <div class="section-title">
+                    Conversaciones
+                </div>
+
+                <div id="conversation-list"></div>
+
+
+                <button
+                    id="logout-button"
+                    class="logout-button"
+                >
+                    Cerrar sesión
+                </button>
+
+            </aside>
+
+
+            <main class="chat">
+
+                <header class="chat-header">
+
+                    <div>
+
+                        <strong id="chat-title">
+                            Selecciona una conversación
+                        </strong>
+
+                        <small id="chat-subtitle"></small>
+
+                    </div>
+
+                </header>
+
+
+                <div id="messages"></div>
+
+
+                <form
+                    id="message-form"
+                    class="message-form"
+                >
+
+                    <input
+                        id="message-input"
+                        type="text"
+                        autocomplete="off"
+                        placeholder="Escribe un mensaje..."
+                    >
+
+                    <button type="submit">
+                        Enviar
+                    </button>
+
+                </form>
+
+            </main>
+
+        </section>
+
+
+        <!-- ADD FRIEND MODAL -->
+
+        <div
+            id="friend-modal"
+            class="modal hidden"
+        >
+
+            <div class="modal-card">
+
+                <h2>Añadir amigo</h2>
+
+                <input
+                    id="friend-username"
+                    type="text"
+                    placeholder="Username"
+                >
+
+                <button id="send-friend-button">
+                    Enviar solicitud
+                </button>
+
+                <button
+                    id="close-friend-modal"
+                    class="secondary-button"
+                >
+                    Cancelar
+                </button>
+
+                <p id="friend-message"></p>
+
+            </div>
+
+        </div>
+
+
+        <!-- GROUP MODAL -->
+
+        <div
+            id="group-modal"
+            class="modal hidden"
+        >
+
+            <div class="modal-card">
+
+                <h2>Crear grupo</h2>
+
+                <input
+                    id="group-name"
+                    type="text"
+                    placeholder="Nombre del grupo"
+                >
+
+                <input
+                    id="group-members"
+                    type="text"
+                    placeholder="Usernames separados por comas"
+                >
+
+                <button id="create-group-submit">
+                    Crear grupo
+                </button>
+
+                <button
+                    id="close-group-modal"
+                    class="secondary-button"
+                >
+                    Cancelar
+                </button>
+
+                <p id="group-message"></p>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="app.js"></script>
+
+</body>
+
+</html>
