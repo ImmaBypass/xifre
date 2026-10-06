@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
 
@@ -9,168 +8,486 @@
         content="width=device-width, initial-scale=1.0"
     >
 
+    <meta
+        name="theme-color"
+        content="#2013a5"
+    >
+
     <title>Xifre</title>
 
-    <link rel="stylesheet" href="style.css">
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
+
+    <!-- Supabase -->
+    <script
+        src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
+    ></script>
 </head>
 
 <body>
 
-    <div id="app">
+    <!-- =====================================================
+         BACKGROUND
+         ===================================================== -->
 
-        <!-- AUTH -->
+    <div class="background-effects">
 
-        <section id="auth-screen" class="screen">
+        <div class="background-glow glow-one"></div>
+        <div class="background-glow glow-two"></div>
+        <div class="background-glow glow-three"></div>
 
-            <div class="auth-card">
+    </div>
 
-                <div class="logo">
-                    Xifre
-                </div>
 
-                <p class="subtitle">
-                    Mensajería simple.
+    <!-- =====================================================
+         APP
+         ===================================================== -->
+
+    <main id="app">
+
+
+        <!-- =================================================
+             LANDING
+             ================================================= -->
+
+        <section
+            id="landing-screen"
+            class="screen active"
+        >
+
+            <div class="landing-content">
+
+                <h1 class="xifre-logo">
+                    XIFRE
+                </h1>
+
+                <p class="landing-description">
+                    xifre es un servicio web de mensajeria
+                    <br>
+                    jaumico basado en xifre
                 </p>
 
-
-                <!-- LOGIN -->
-
-                <div id="login-form">
-
-                    <h1>Iniciar sesión</h1>
-
-                    <input
-                        id="login-email"
-                        type="email"
-                        placeholder="Correo electrónico"
-                    >
-
-                    <input
-                        id="login-password"
-                        type="password"
-                        placeholder="Contraseña"
-                    >
-
-                    <button id="login-button">
-                        Iniciar sesión
-                    </button>
-
-                    <button
-                        id="show-register"
-                        class="secondary-button"
-                    >
-                        Crear cuenta
-                    </button>
-
-                </div>
-
-
-                <!-- REGISTER -->
-
-                <div
-                    id="register-form"
-                    class="hidden"
+                <button
+                    id="enter-button"
+                    class="primary-button"
+                    type="button"
                 >
+                    Entrar
+                </button>
 
-                    <h1>Crear cuenta</h1>
-
-                    <input
-                        id="register-username"
-                        type="text"
-                        placeholder="Username"
-                        maxlength="20"
-                    >
-
-                    <input
-                        id="register-email"
-                        type="email"
-                        placeholder="Correo electrónico"
-                    >
-
-                    <input
-                        id="register-password"
-                        type="password"
-                        placeholder="Contraseña"
-                    >
-
-                    <button id="register-button">
-                        Crear cuenta
-                    </button>
-
-                    <button
-                        id="show-login"
-                        class="secondary-button"
-                    >
-                        Ya tengo una cuenta
-                    </button>
-
-                </div>
-
-
-                <p id="auth-message"></p>
+                <p class="landing-note">
+                    (cuando le das a entrar si no tienes cuenta registrate gilipollas)
+                </p>
 
             </div>
 
         </section>
 
 
-        <!-- MAIN APP -->
+        <!-- =================================================
+             LOGIN
+             ================================================= -->
+
+        <section
+            id="login-screen"
+            class="screen"
+        >
+
+            <div class="auth-container">
+
+                <div class="auth-logo">
+                    XIFRE
+                </div>
+
+                <div class="auth-card">
+
+                    <h2>
+                        Iniciar sesión
+                    </h2>
+
+                    <p class="auth-description">
+                        Entra en tu cuenta de Xifre
+                    </p>
+
+
+                    <form
+                        id="login-form"
+                        autocomplete="on"
+                    >
+
+                        <div class="input-group">
+
+                            <label for="login-email">
+                                Correo electrónico
+                            </label>
+
+                            <input
+                                id="login-email"
+                                type="email"
+                                placeholder="tu@email.com"
+                                autocomplete="email"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="input-group">
+
+                            <label for="login-password">
+                                Contraseña
+                            </label>
+
+                            <input
+                                id="login-password"
+                                type="password"
+                                placeholder="Tu contraseña"
+                                autocomplete="current-password"
+                                required
+                            >
+
+                        </div>
+
+
+                        <button
+                            id="login-button"
+                            class="auth-button"
+                            type="submit"
+                        >
+                            <span class="button-text">
+                                Iniciar sesión
+                            </span>
+
+                            <span class="button-loader"></span>
+                        </button>
+
+                    </form>
+
+
+                    <div
+                        id="login-message"
+                        class="auth-message"
+                    ></div>
+
+
+                    <div class="auth-switch">
+
+                        <span>
+                            ¿No tienes cuenta?
+                        </span>
+
+                        <button
+                            id="go-register"
+                            class="text-button"
+                            type="button"
+                        >
+                            Regístrate
+                        </button>
+
+                    </div>
+
+
+                    <button
+                        id="back-from-login"
+                        class="back-button"
+                        type="button"
+                    >
+                        ← Volver
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             REGISTER
+             ================================================= -->
+
+        <section
+            id="register-screen"
+            class="screen"
+        >
+
+            <div class="auth-container">
+
+                <div class="auth-logo">
+                    XIFRE
+                </div>
+
+                <div class="auth-card">
+
+                    <h2>
+                        Crear cuenta
+                    </h2>
+
+                    <p class="auth-description">
+                        Crea tu cuenta de Xifre
+                    </p>
+
+
+                    <form
+                        id="register-form"
+                        autocomplete="on"
+                    >
+
+                        <div class="input-group">
+
+                            <label for="register-username">
+                                Username
+                            </label>
+
+                            <input
+                                id="register-username"
+                                type="text"
+                                placeholder="tu_username"
+                                autocomplete="username"
+                                maxlength="20"
+                                required
+                            >
+
+                            <span class="input-help">
+                                Será tu nombre único en Xifre.
+                            </span>
+
+                        </div>
+
+
+                        <div class="input-group">
+
+                            <label for="register-email">
+                                Correo electrónico
+                            </label>
+
+                            <input
+                                id="register-email"
+                                type="email"
+                                placeholder="tu@email.com"
+                                autocomplete="email"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="input-group">
+
+                            <label for="register-password">
+                                Contraseña
+                            </label>
+
+                            <input
+                                id="register-password"
+                                type="password"
+                                placeholder="Mínimo 6 caracteres"
+                                autocomplete="new-password"
+                                minlength="6"
+                                required
+                            >
+
+                        </div>
+
+
+                        <button
+                            id="register-button"
+                            class="auth-button"
+                            type="submit"
+                        >
+                            <span class="button-text">
+                                Crear cuenta
+                            </span>
+
+                            <span class="button-loader"></span>
+                        </button>
+
+                    </form>
+
+
+                    <div
+                        id="register-message"
+                        class="auth-message"
+                    ></div>
+
+
+                    <div class="auth-switch">
+
+                        <span>
+                            ¿Ya tienes cuenta?
+                        </span>
+
+                        <button
+                            id="go-login"
+                            class="text-button"
+                            type="button"
+                        >
+                            Inicia sesión
+                        </button>
+
+                    </div>
+
+
+                    <button
+                        id="back-from-register"
+                        class="back-button"
+                        type="button"
+                    >
+                        ← Volver
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             EMAIL SENT
+             ================================================= -->
+
+        <section
+            id="email-screen"
+            class="screen"
+        >
+
+            <div class="auth-container">
+
+                <div class="auth-logo">
+                    XIFRE
+                </div>
+
+                <div class="auth-card email-card">
+
+                    <div class="email-icon">
+                        @
+                    </div>
+
+                    <h2>
+                        Revisa tu correo
+                    </h2>
+
+                    <p class="auth-description">
+                        Te hemos enviado un correo para confirmar tu cuenta.
+                    </p>
+
+                    <p
+                        id="confirmation-email"
+                        class="confirmation-email"
+                    >
+                    </p>
+
+                    <p class="email-small">
+                        Después de confirmar tu correo podrás iniciar sesión con tu email y contraseña.
+                    </p>
+
+                    <button
+                        id="back-to-login-from-email"
+                        class="auth-button"
+                        type="button"
+                    >
+                        Volver al inicio de sesión
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             MAIN APP
+             ================================================= -->
 
         <section
             id="main-screen"
-            class="screen hidden"
+            class="main-screen"
         >
+
+            <!-- SIDEBAR -->
 
             <aside class="sidebar">
 
-                <div class="sidebar-header">
-                    <strong>Xifre</strong>
-                </div>
+                <div class="sidebar-top">
+
+                    <div class="sidebar-logo">
+                        XIFRE
+                    </div>
+
+                    <div class="profile-mini">
+
+                        <div
+                            id="profile-avatar"
+                            class="profile-avatar"
+                        >
+                            ?
+                        </div>
+
+                        <div class="profile-info">
+
+                            <div
+                                id="profile-name"
+                                class="profile-name"
+                            >
+                                Usuario
+                            </div>
+
+                            <div
+                                id="profile-username"
+                                class="profile-username"
+                            >
+                                @usuario
+                            </div>
+
+                        </div>
+
+                    </div>
 
 
-                <div class="user-card">
+                    <div class="sidebar-actions">
+
+                        <button
+                            id="add-friend-button"
+                            class="sidebar-button"
+                            type="button"
+                        >
+                            <span>＋</span>
+                            Añadir amigo
+                        </button>
+
+                        <button
+                            id="create-group-button"
+                            class="sidebar-button"
+                            type="button"
+                        >
+                            <span>◈</span>
+                            Crear grupo
+                        </button>
+
+                    </div>
+
+
+                    <div class="sidebar-section-title">
+                        Conversaciones
+                    </div>
 
                     <div
-                        id="my-avatar"
-                        class="avatar"
+                        id="conversation-list"
+                        class="conversation-list"
                     >
-                        ?
-                    </div>
-
-                    <div>
-
-                        <strong id="my-username">
-                            Usuario
-                        </strong>
-
-                        <small>
-                            Cuenta
-                        </small>
-
                     </div>
 
                 </div>
-
-
-                <button id="add-friend-button">
-                    + Añadir amigo
-                </button>
-
-                <button id="create-group-button">
-                    + Crear grupo
-                </button>
-
-
-                <div class="section-title">
-                    Conversaciones
-                </div>
-
-                <div id="conversation-list"></div>
 
 
                 <button
                     id="logout-button"
                     class="logout-button"
+                    type="button"
                 >
                     Cerrar sesión
                 </button>
@@ -178,24 +495,49 @@
             </aside>
 
 
-            <main class="chat">
+            <!-- CHAT -->
+
+            <section class="chat-area">
 
                 <header class="chat-header">
 
                     <div>
 
-                        <strong id="chat-title">
-                            Selecciona una conversación
-                        </strong>
+                        <h2 id="chat-title">
+                            Xifre
+                        </h2>
 
-                        <small id="chat-subtitle"></small>
+                        <p id="chat-subtitle">
+                            Selecciona una conversación
+                        </p>
 
                     </div>
 
                 </header>
 
 
-                <div id="messages"></div>
+                <div
+                    id="messages"
+                    class="messages"
+                >
+
+                    <div class="empty-chat">
+
+                        <div class="empty-chat-logo">
+                            X
+                        </div>
+
+                        <h3>
+                            Bienvenido a Xifre
+                        </h3>
+
+                        <p>
+                            Selecciona una conversación para empezar a hablar.
+                        </p>
+
+                    </div>
+
+                </div>
 
 
                 <form
@@ -206,22 +548,29 @@
                     <input
                         id="message-input"
                         type="text"
-                        autocomplete="off"
                         placeholder="Escribe un mensaje..."
+                        autocomplete="off"
+                        maxlength="2000"
                     >
 
-                    <button type="submit">
-                        Enviar
+                    <button
+                        type="submit"
+                        class="send-button"
+                        aria-label="Enviar mensaje"
+                    >
+                        →
                     </button>
 
                 </form>
 
-            </main>
+            </section>
 
         </section>
 
 
-        <!-- ADD FRIEND MODAL -->
+        <!-- =================================================
+             FRIEND MODAL
+             ================================================= -->
 
         <div
             id="friend-modal"
@@ -230,33 +579,50 @@
 
             <div class="modal-card">
 
-                <h2>Añadir amigo</h2>
+                <button
+                    id="close-friend-modal"
+                    class="modal-close"
+                    type="button"
+                >
+                    ×
+                </button>
+
+                <h2>
+                    Añadir amigo
+                </h2>
+
+                <p>
+                    Busca a alguien por su username.
+                </p>
 
                 <input
                     id="friend-username"
                     type="text"
-                    placeholder="Username"
+                    placeholder="username"
+                    maxlength="20"
                 >
 
-                <button id="send-friend-button">
-                    Enviar solicitud
-                </button>
+                <div
+                    id="friend-message"
+                    class="modal-message"
+                ></div>
 
                 <button
-                    id="close-friend-modal"
-                    class="secondary-button"
+                    id="send-friend-button"
+                    class="auth-button"
+                    type="button"
                 >
-                    Cancelar
+                    Enviar solicitud
                 </button>
-
-                <p id="friend-message"></p>
 
             </div>
 
         </div>
 
 
-        <!-- GROUP MODAL -->
+        <!-- =================================================
+             GROUP MODAL
+             ================================================= -->
 
         <div
             id="group-modal"
@@ -265,44 +631,57 @@
 
             <div class="modal-card">
 
-                <h2>Crear grupo</h2>
+                <button
+                    id="close-group-modal"
+                    class="modal-close"
+                    type="button"
+                >
+                    ×
+                </button>
+
+                <h2>
+                    Crear grupo
+                </h2>
+
+                <p>
+                    Crea un grupo y añade amigos mediante su username.
+                </p>
 
                 <input
                     id="group-name"
                     type="text"
                     placeholder="Nombre del grupo"
+                    maxlength="50"
                 >
 
                 <input
                     id="group-members"
                     type="text"
-                    placeholder="Usernames separados por comas"
+                    placeholder="usuario1, usuario2, usuario3"
                 >
 
-                <button id="create-group-submit">
-                    Crear grupo
-                </button>
+                <div
+                    id="group-message"
+                    class="modal-message"
+                ></div>
 
                 <button
-                    id="close-group-modal"
-                    class="secondary-button"
+                    id="create-group-submit"
+                    class="auth-button"
+                    type="button"
                 >
-                    Cancelar
+                    Crear grupo
                 </button>
-
-                <p id="group-message"></p>
 
             </div>
 
         </div>
 
-    </div>
 
+    </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <script src="app.js"></script>
 
 </body>
-
 </html>
