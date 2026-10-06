@@ -19,10 +19,10 @@
 */
 
 const SUPABASE_URL =
-    "TU_SUPABASE_URL";
+    "https://doppekualeyvrlbtumze.supabase.co";
 
 const SUPABASE_KEY =
-    "TU_SUPABASE_PUBLISHABLE_KEY";
+    "sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE";
 
 
 const supabase =
