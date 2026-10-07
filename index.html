@@ -17,7 +17,7 @@
 
     <link
         rel="stylesheet"
-        href="style.css?v=20261007"
+        href="style.css?v=20261007-final"
     >
 
     <!-- Supabase -->
@@ -70,7 +70,7 @@
                 </p>
 
                 <button
-                    id="enter-button"
+                    id="enter-button" data-go="login"
                     class="primary-button"
                     type="button"
                 >
@@ -179,7 +179,7 @@
                         </span>
 
                         <button
-                            id="go-register"
+                            id="go-register" data-go="register"
                             class="text-button"
                             type="button"
                         >
@@ -190,7 +190,7 @@
 
 
                     <button
-                        id="back-from-login"
+                        id="back-from-login" data-go="landing"
                         class="back-button"
                         type="button"
                     >
@@ -320,7 +320,7 @@
                         </span>
 
                         <button
-                            id="go-login"
+                            id="go-login" data-go="login"
                             class="text-button"
                             type="button"
                         >
@@ -331,7 +331,7 @@
 
 
                     <button
-                        id="back-from-register"
+                        id="back-from-register" data-go="landing"
                         class="back-button"
                         type="button"
                     >
@@ -385,7 +385,16 @@
                     </p>
 
                     <button
-                        id="back-to-login-from-email"
+                        id="resend-confirmation"
+                        class="secondary-button"
+                        type="button"
+                        data-action="resend"
+                    >
+                        Reenviar correo
+                    </button>
+
+                    <button
+                        id="back-to-login-from-email" data-go="login"
                         class="auth-button"
                         type="button"
                     >
@@ -451,7 +460,7 @@
                     <div class="sidebar-actions">
 
                         <button
-                            id="add-friend-button"
+                            id="add-friend-button" data-action="open-friend"
                             class="sidebar-button"
                             type="button"
                         >
@@ -460,7 +469,7 @@
                         </button>
 
                         <button
-                            id="create-group-button"
+                            id="create-group-button" data-action="open-group"
                             class="sidebar-button"
                             type="button"
                         >
@@ -485,7 +494,7 @@
 
 
                 <button
-                    id="logout-button"
+                    id="logout-button" data-action="logout"
                     class="logout-button"
                     type="button"
                 >
@@ -580,7 +589,7 @@
             <div class="modal-card">
 
                 <button
-                    id="close-friend-modal"
+                    id="close-friend-modal" data-action="close-modal" data-modal="friend-modal"
                     class="modal-close"
                     type="button"
                 >
@@ -608,7 +617,7 @@
                 ></div>
 
                 <button
-                    id="send-friend-button"
+                    id="send-friend-button" data-action="send-friend"
                     class="auth-button"
                     type="button"
                 >
@@ -632,7 +641,7 @@
             <div class="modal-card">
 
                 <button
-                    id="close-group-modal"
+                    id="close-group-modal" data-action="close-modal" data-modal="group-modal"
                     class="modal-close"
                     type="button"
                 >
@@ -666,7 +675,7 @@
                 ></div>
 
                 <button
-                    id="create-group-submit"
+                    id="create-group-submit" data-action="create-group"
                     class="auth-button"
                     type="button"
                 >
@@ -681,7 +690,30 @@
     </main>
 
 
-    <script src="app.js?v=20261007"></script>
+    <script>
+        /* Navegación de emergencia: funciona incluso si app.js o Supabase fallan. */
+        (() => {
+            const show = (name) => {
+                document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+                const target = document.getElementById(name + '-screen');
+                if (!target) return;
+                target.classList.add('active');
+                target.classList.remove('screen-entering');
+                void target.offsetWidth;
+                requestAnimationFrame(() => target.classList.add('screen-entering'));
+                if (name === 'login') setTimeout(() => document.getElementById('login-email')?.focus(), 350);
+                if (name === 'register') setTimeout(() => document.getElementById('register-username')?.focus(), 350);
+            };
+            document.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-go]');
+                if (!button) return;
+                event.preventDefault();
+                show(button.dataset.go);
+            });
+        })();
+    </script>
+
+    <script src="app.js?v=20261007-final"></script>
 
 </body>
 </html>
