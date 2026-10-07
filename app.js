@@ -25,11 +25,43 @@ const SUPABASE_KEY =
     "sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE";
 
 
-const supabase =
-    window.supabase.createClient(
-        SUPABASE_URL,
-        SUPABASE_KEY
+let supabase = null;
+let supabaseReady = false;
+
+/* Supabase NO debe poder romper la navegación de la interfaz. */
+try {
+    if (
+        window.supabase &&
+        typeof window.supabase.createClient === "function"
+    ) {
+        supabase = window.supabase.createClient(
+            SUPABASE_URL,
+            SUPABASE_KEY,
+            {
+                auth: {
+                    persistSession: true,
+                    autoRefreshToken: true,
+                    detectSessionInUrl: true
+                }
+            }
+        );
+
+        supabaseReady = true;
+    } else {
+        console.error(
+            "XIFRE: no se pudo cargar la librería de Supabase."
+        );
+    }
+} catch (error) {
+    console.error(
+        "XIFRE: error creando Supabase:",
+        error
     );
+}
+
+function isSupabaseReady() {
+    return supabaseReady && !!supabase;
+}
 
 
 /* =========================================================
@@ -88,24 +120,24 @@ const mainScreen =
 
 function showScreen(name) {
 
+    if (!screens[name]) return;
+
+    /* Cerrar siempre la app principal al volver a una pantalla de auth. */
+    if (mainScreen) {
+        mainScreen.classList.remove("active");
+    }
+
     Object.values(screens)
         .forEach(screen => {
-
-            screen.classList.remove(
-                "active"
-            );
-
+            screen.classList.remove("active");
         });
 
+    /* Forzamos un nuevo frame para que la transición se reproduzca siempre. */
+    void screens[name].offsetWidth;
 
-    if (screens[name]) {
-
-        screens[name]
-            .classList.add(
-                "active"
-            );
-
-    }
+    requestAnimationFrame(() => {
+        screens[name].classList.add("active");
+    });
 
 
     if (name === "login") {
@@ -410,6 +442,15 @@ document
 
 
 async function register() {
+
+    if (!isSupabaseReady()) {
+        setAuthMessage(
+            "register-message",
+            "XIFRE no ha podido conectar con Supabase. Recarga la página e inténtalo de nuevo.",
+            "error"
+        );
+        return;
+    }
 
     const usernameInput =
         document.getElementById(
@@ -753,6 +794,15 @@ document
 
 async function login() {
 
+    if (!isSupabaseReady()) {
+        setAuthMessage(
+            "login-message",
+            "XIFRE no ha podido conectar con Supabase. Recarga la página e inténtalo de nuevo.",
+            "error"
+        );
+        return;
+    }
+
     const email =
         document
             .getElementById(
@@ -954,43 +1004,33 @@ function getFriendlyAuthError(
    AUTH STATE
    ========================================================= */
 
-supabase.auth.onAuthStateChange(
-    async (
-        event,
-        session
-    ) => {
+if (isSupabaseReady()) {
 
-        console.log(
-            "Xifre auth:",
-            event
-        );
+    supabase.auth.onAuthStateChange(
+        (event, session) => {
 
+            console.log(
+                "Xifre auth:",
+                event
+            );
 
-        if (
-            event ===
-            "SIGNED_IN"
-        ) {
+            /* No hacemos operaciones async directamente dentro del callback. */
+            setTimeout(async () => {
 
-            if (session) {
+                if (event === "SIGNED_IN" && session) {
+                    await startApplication();
+                }
 
-                await startApplication();
+                if (event === "SIGNED_OUT") {
+                    closeApplication();
+                }
 
-            }
-
-        }
-
-
-        if (
-            event ===
-            "SIGNED_OUT"
-        ) {
-
-            closeApplication();
+            }, 0);
 
         }
+    );
 
-    }
-);
+}
 
 
 /* =========================================================
@@ -1002,6 +1042,21 @@ async function initialize() {
     console.log(
         "Xifre starting..."
     );
+
+    /*
+       MUY IMPORTANTE: la interfaz puede funcionar aunque
+       Supabase no haya cargado. Así Entrar/Registrarse nunca
+       se quedan muertos por un error externo.
+    */
+    if (!isSupabaseReady()) {
+        console.warn(
+            "XIFRE: Supabase no está disponible. La navegación seguirá funcionando."
+        );
+        showMainApp();
+        hideMainApp();
+        showScreen("landing");
+        return;
+    }
 
 
     /*
@@ -2864,6 +2919,42 @@ function scrollMessages() {
 
 }
 
+
+/* =========================================================
+   FINAL UI SAFETY NET
+   ========================================================= */
+
+/*
+   Estos listeners son una segunda capa de seguridad.
+   Incluso si una parte de Supabase falla, la navegación visual
+   sigue funcionando.
+*/
+
+const safeEnterButton = document.getElementById("enter-button");
+const safeGoRegister = document.getElementById("go-register");
+const safeGoLogin = document.getElementById("go-login");
+const safeBackLogin = document.getElementById("back-from-login");
+const safeBackRegister = document.getElementById("back-from-register");
+
+if (safeEnterButton) {
+    safeEnterButton.onclick = () => showScreen("login");
+}
+
+if (safeGoRegister) {
+    safeGoRegister.onclick = () => showScreen("register");
+}
+
+if (safeGoLogin) {
+    safeGoLogin.onclick = () => showScreen("login");
+}
+
+if (safeBackLogin) {
+    safeBackLogin.onclick = () => showScreen("landing");
+}
+
+if (safeBackRegister) {
+    safeBackRegister.onclick = () => showScreen("landing");
+}
 
 /* =========================================================
    START
