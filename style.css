@@ -2696,3 +2696,208 @@ body {
         scroll-behavior: auto !important;
     }
 }
+
+/* =========================================================
+   XIFRE FINAL NAVIGATION / MOTION PATCH
+   ========================================================= */
+
+.screen.screen-entering .auth-container,
+.screen.screen-entering .landing-content {
+    animation: xifreScreenContentIn .62s cubic-bezier(.16,1,.3,1) both;
+}
+
+.screen.screen-entering .auth-logo,
+.screen.screen-entering .xifre-logo {
+    animation: xifreLogoIn .72s cubic-bezier(.16,1,.3,1) both;
+}
+
+.screen.screen-entering .auth-card {
+    animation: xifreCardIn .68s .06s cubic-bezier(.16,1,.3,1) both;
+}
+
+.main-screen.main-entering .sidebar,
+.main-screen.main-entering .chat-area {
+    animation: xifreScreenContentIn .68s cubic-bezier(.16,1,.3,1) both;
+}
+
+.primary-button,
+.auth-button,
+.secondary-button,
+.text-button,
+.back-button,
+.sidebar-button,
+.logout-button,
+.send-button,
+.modal-close,
+.conversation {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.primary-button:focus-visible,
+.auth-button:focus-visible,
+.secondary-button:focus-visible,
+.text-button:focus-visible,
+.back-button:focus-visible,
+.sidebar-button:focus-visible,
+.logout-button:focus-visible,
+.send-button:focus-visible,
+.modal-close:focus-visible,
+.conversation:focus-visible,
+input:focus-visible {
+    outline: 2px solid rgba(255,255,255,.92);
+    outline-offset: 3px;
+}
+
+.secondary-button {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: 42px;
+    margin-top: 10px;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 999px;
+    background: rgba(255,255,255,.07);
+    color: rgba(255,255,255,.86);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    transition: transform .25s cubic-bezier(.16,1,.3,1), background .25s ease, border-color .25s ease, box-shadow .25s ease;
+}
+
+.secondary-button:hover {
+    transform: translateY(-2px);
+    background: rgba(255,255,255,.13);
+    border-color: rgba(255,255,255,.25);
+    box-shadow: 0 10px 30px rgba(0,0,0,.13);
+}
+
+.secondary-button:active {
+    transform: scale(.975);
+}
+
+.auth-button,
+.primary-button,
+.secondary-button,
+.sidebar-button,
+.logout-button,
+.send-button,
+.modal-close,
+.conversation {
+    will-change: transform;
+}
+
+.auth-button.loading,
+.primary-button:disabled,
+.secondary-button:disabled {
+    cursor: wait;
+}
+
+.auth-button.loading .button-loader {
+    display: block;
+}
+
+#toast-container {
+    position: fixed;
+    z-index: 9999;
+    right: 20px;
+    bottom: 20px;
+    width: min(360px, calc(100vw - 40px));
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    pointer-events: none;
+}
+
+.toast {
+    padding: 13px 16px;
+    border: 1px solid rgba(255,255,255,.13);
+    border-radius: 14px;
+    background: rgba(17,13,55,.78);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 15px 45px rgba(0,0,0,.25);
+    color: rgba(255,255,255,.9);
+    font-size: 13px;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translateY(12px) scale(.97);
+    transition: opacity .3s ease, transform .42s cubic-bezier(.16,1,.3,1);
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.toast-success { border-color: rgba(145,239,187,.25); }
+.toast-error { border-color: rgba(255,119,119,.3); }
+
+.empty-sidebar {
+    padding: 12px;
+    color: rgba(255,255,255,.3);
+    font-size: 11px;
+    text-align: center;
+}
+
+.friend-item {
+    width: 100%;
+    border: 0;
+    text-align: left;
+}
+
+@keyframes xifreScreenContentIn {
+    from {
+        opacity: 0;
+        transform: translateY(18px) scale(.985);
+        filter: blur(7px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes xifreLogoIn {
+    from {
+        opacity: 0;
+        transform: translateY(24px) scale(.92);
+        filter: blur(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes xifreCardIn {
+    from {
+        opacity: 0;
+        transform: translateY(24px) scale(.96);
+        filter: blur(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .screen,
+    .screen.screen-entering .auth-container,
+    .screen.screen-entering .landing-content,
+    .screen.screen-entering .auth-logo,
+    .screen.screen-entering .xifre-logo,
+    .screen.screen-entering .auth-card,
+    .main-screen.main-entering .sidebar,
+    .main-screen.main-entering .chat-area,
+    .toast {
+        animation: none !important;
+        transition: opacity .15s ease !important;
+        filter: none !important;
+        transform: none !important;
+    }
+}
