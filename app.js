@@ -1,2963 +1,674 @@
-/* =========================================================
-   XIFRE
-   APPLICATION
-   ========================================================= */
+/* XIFRE - robust client */
+(() => {
+  'use strict';
 
+  const CONFIG = {
+    url: 'https://doppekualeyvrlbtumze.supabase.co',
+    key: 'sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE'
+  };
 
-/* =========================================================
-   SUPABASE
-   ========================================================= */
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-/*
-   PON AQUÍ TUS DATOS DE SUPABASE.
+  let supabase = null;
+  let currentUser = null;
+  let currentProfile = null;
+  let currentConversation = null;
+  let messageChannel = null;
+  let requestChannel = null;
+  let appStarted = false;
+  let pendingEmail = sessionStorage.getItem('xifre_pending_email') || '';
 
-   Project URL:
-   https://xxxxxxxx.supabase.co
+  const screens = ['landing', 'login', 'register', 'email'];
 
-   Publishable key:
-   sb_publishable_xxxxxxxxx
-*/
+  function screenElement(name) {
+    return document.getElementById(`${name}-screen`);
+  }
 
-const SUPABASE_URL =
-    "https://doppekualeyvrlbtumze.supabase.co";
+  function animateScreen(screen) {
+    if (!screen) return;
+    screen.classList.remove('screen-entering');
+    void screen.offsetWidth;
+    requestAnimationFrame(() => screen.classList.add('screen-entering'));
+  }
 
-const SUPABASE_KEY =
-    "sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE";
+  function showScreen(name) {
+    if (!screens.includes(name)) name = 'landing';
 
+    const target = screenElement(name);
+    if (!target) return;
 
-let supabase = null;
-let supabaseReady = false;
+    const main = document.getElementById('main-screen');
+    if (main) main.classList.remove('active');
 
-/* Supabase NO debe poder romper la navegación de la interfaz. */
-try {
-    if (
-        window.supabase &&
-        typeof window.supabase.createClient === "function"
-    ) {
-        supabase = window.supabase.createClient(
-            SUPABASE_URL,
-            SUPABASE_KEY,
-            {
-                auth: {
-                    persistSession: true,
-                    autoRefreshToken: true,
-                    detectSessionInUrl: true
-                }
-            }
-        );
-
-        supabaseReady = true;
-    } else {
-        console.error(
-            "XIFRE: no se pudo cargar la librería de Supabase."
-        );
-    }
-} catch (error) {
-    console.error(
-        "XIFRE: error creando Supabase:",
-        error
-    );
-}
-
-function isSupabaseReady() {
-    return supabaseReady && !!supabase;
-}
-
-
-/* =========================================================
-   STATE
-   ========================================================= */
-
-let currentUser = null;
-
-let currentProfile = null;
-
-let currentConversation = null;
-
-let messageChannel = null;
-
-let requestChannel = null;
-
-
-/* =========================================================
-   DOM
-   ========================================================= */
-
-const screens = {
-
-    landing:
-        document.getElementById(
-            "landing-screen"
-        ),
-
-    login:
-        document.getElementById(
-            "login-screen"
-        ),
-
-    register:
-        document.getElementById(
-            "register-screen"
-        ),
-
-    email:
-        document.getElementById(
-            "email-screen"
-        )
-
-};
-
-
-const mainScreen =
-    document.getElementById(
-        "main-screen"
-    );
-
-
-/* =========================================================
-   SCREEN NAVIGATION
-   ========================================================= */
-
-function showScreen(name) {
-
-    if (!screens[name]) return;
-
-    /* Cerrar siempre la app principal al volver a una pantalla de auth. */
-    if (mainScreen) {
-        mainScreen.classList.remove("active");
-    }
-
-    Object.values(screens)
-        .forEach(screen => {
-            screen.classList.remove("active");
-        });
-
-    /* Forzamos un nuevo frame para que la transición se reproduzca siempre. */
-    void screens[name].offsetWidth;
-
-    requestAnimationFrame(() => {
-        screens[name].classList.add("active");
+    screens.forEach(key => {
+      const el = screenElement(key);
+      if (el) el.classList.toggle('active', key === name);
     });
 
+    animateScreen(target);
 
-    if (name === "login") {
-
-        setTimeout(() => {
-
-            document
-                .getElementById(
-                    "login-email"
-                )
-                .focus();
-
-        }, 350);
-
+    if (name === 'login') {
+      setTimeout(() => $('#login-email')?.focus(), 420);
     }
-
-
-    if (name === "register") {
-
-        setTimeout(() => {
-
-            document
-                .getElementById(
-                    "register-username"
-                )
-                .focus();
-
-        }, 350);
-
+    if (name === 'register') {
+      setTimeout(() => $('#register-username')?.focus(), 420);
     }
+  }
 
-}
+  function showMainApp() {
+    screens.forEach(key => screenElement(key)?.classList.remove('active'));
+    const main = document.getElementById('main-screen');
+    if (!main) return;
+    main.classList.add('active');
+    main.classList.remove('main-entering');
+    void main.offsetWidth;
+    requestAnimationFrame(() => main.classList.add('main-entering'));
+  }
 
+  function normalizeUsername(value) {
+    return String(value || '').trim().toLowerCase();
+  }
 
-/* =========================================================
-   MAIN APP VISIBILITY
-   ========================================================= */
-
-function showMainApp() {
-
-    Object.values(screens)
-        .forEach(screen => {
-
-            screen.classList.remove(
-                "active"
-            );
-
-        });
-
-
-    mainScreen.classList.add(
-        "active"
-    );
-
-}
-
-
-function hideMainApp() {
-
-    mainScreen.classList.remove(
-        "active"
-    );
-
-}
-
-
-/* =========================================================
-   HELPERS
-   ========================================================= */
-
-function normalizeUsername(
-    username
-) {
-
-    return username
-        .trim()
-        .toLowerCase();
-
-}
-
-
-function setAuthMessage(
-    elementId,
-    message,
-    type = ""
-) {
-
-    const element =
-        document.getElementById(
-            elementId
-        );
-
-
-    if (!element) return;
-
-
-    element.textContent =
-        message;
-
-
-    element.className =
-        "auth-message";
-
-
-    if (type) {
-
-        element.classList.add(
-            type
-        );
-
-    }
-
-}
-
-
-function setButtonLoading(
-    button,
-    loading
-) {
-
-    if (!button) return;
-
-
-    if (loading) {
-
-        button.classList.add(
-            "loading"
-        );
-
-        button.disabled =
-            true;
-
-    } else {
-
-        button.classList.remove(
-            "loading"
-        );
-
-        button.disabled =
-            false;
-
-    }
-
-}
-
-
-function getRedirectURL() {
-
-    return (
-        window.location.origin +
-        window.location.pathname
-    );
-
-}
-
-
-function escapeHTML(value) {
-
-    const div =
-        document.createElement(
-            "div"
-        );
-
-    div.textContent =
-        value ?? "";
-
+  function escapeHTML(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
     return div.innerHTML;
+  }
 
-}
+  function setMessage(id, text = '', type = '') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `auth-message${type ? ` ${type}` : ''}`;
+  }
 
+  function setModalMessage(id, text = '', type = '') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `modal-message${type ? ` ${type}` : ''}`;
+  }
 
-/* =========================================================
-   LANDING
-   ========================================================= */
+  function setLoading(button, loading) {
+    if (!button) return;
+    button.disabled = loading;
+    button.classList.toggle('loading', loading);
+    button.setAttribute('aria-busy', loading ? 'true' : 'false');
+  }
 
-document
-    .getElementById(
-        "enter-button"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            showScreen("login");
-
-        }
-    );
-
-
-/* =========================================================
-   LOGIN / REGISTER NAVIGATION
-   ========================================================= */
-
-document
-    .getElementById(
-        "go-register"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            setAuthMessage(
-                "login-message",
-                ""
-            );
-
-            showScreen(
-                "register"
-            );
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "go-login"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            setAuthMessage(
-                "register-message",
-                ""
-            );
-
-            showScreen(
-                "login"
-            );
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "back-from-login"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            showScreen(
-                "landing"
-            );
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "back-from-register"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            showScreen(
-                "landing"
-            );
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "back-to-login-from-email"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            showScreen(
-                "login"
-            );
-
-        }
-    );
-
-
-/* =========================================================
-   REGISTER
-   ========================================================= */
-
-document
-    .getElementById(
-        "register-form"
-    )
-    .addEventListener(
-        "submit",
-        async event => {
-
-            event.preventDefault();
-
-            await register();
-
-        }
-    );
-
-
-async function register() {
-
-    if (!isSupabaseReady()) {
-        setAuthMessage(
-            "register-message",
-            "XIFRE no ha podido conectar con Supabase. Recarga la página e inténtalo de nuevo.",
-            "error"
-        );
-        return;
+  function toast(text, type = 'info') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      document.body.appendChild(container);
     }
+    const item = document.createElement('div');
+    item.className = `toast toast-${type}`;
+    item.textContent = text;
+    container.appendChild(item);
+    requestAnimationFrame(() => item.classList.add('show'));
+    setTimeout(() => {
+      item.classList.remove('show');
+      setTimeout(() => item.remove(), 350);
+    }, 3500);
+  }
 
-    const usernameInput =
-        document.getElementById(
-            "register-username"
-        );
+  function supabaseReady() {
+    return !!supabase;
+  }
 
-    const emailInput =
-        document.getElementById(
-            "register-email"
-        );
+  function redirectURL() {
+    return window.location.origin + window.location.pathname;
+  }
 
-    const passwordInput =
-        document.getElementById(
-            "register-password"
-        );
+  function friendlyAuthError(error) {
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('email not confirmed')) return 'Primero tienes que confirmar tu correo electrónico.';
+    if (message.includes('invalid login credentials')) return 'El correo o la contraseña no son correctos.';
+    if (message.includes('user already registered')) return 'Ese correo ya está registrado.';
+    if (message.includes('password should be at least')) return 'La contraseña es demasiado corta.';
+    if (message.includes('rate limit')) return 'Demasiados intentos. Espera un poco y vuelve a intentarlo.';
+    if (message.includes('redirect')) return 'La URL de redirección no está permitida en Supabase.';
+    return error?.message || 'Ha ocurrido un error. Inténtalo de nuevo.';
+  }
 
+  async function checkUsername(username) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('username', username)
+      .limit(1);
+    if (error) throw error;
+    return !data?.length;
+  }
 
-    const username =
-        normalizeUsername(
-            usernameInput.value
-        );
+  async function register() {
+    const form = $('#register-form');
+    const button = $('#register-button');
+    const username = normalizeUsername($('#register-username')?.value);
+    const email = String($('#register-email')?.value || '').trim();
+    const password = String($('#register-password')?.value || '');
 
-    const email =
-        emailInput.value.trim();
+    setMessage('register-message', '');
 
-    const password =
-        passwordInput.value;
-
-
-    /* -----------------------------------------
-       VALIDATION
-       ----------------------------------------- */
-
-    setAuthMessage(
-        "register-message",
-        ""
-    );
-
-
-    if (!username) {
-
-        setAuthMessage(
-            "register-message",
-            "Escribe un username.",
-            "error"
-        );
-
-        usernameInput.focus();
-
-        return;
+    if (!supabaseReady()) {
+      setMessage('register-message', 'La interfaz funciona, pero Supabase no se ha cargado. Comprueba tu conexión y recarga.', 'error');
+      return;
     }
-
-
-    if (
-        !/^[a-z0-9_]+$/.test(
-            username
-        )
-    ) {
-
-        setAuthMessage(
-            "register-message",
-            "El username solo puede contener letras, números y _.",
-            "error"
-        );
-
-        usernameInput.focus();
-
-        return;
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+      setMessage('register-message', 'El username debe tener 3–20 caracteres y solo puede usar letras, números y _.', 'error');
+      return;
     }
-
-
-    if (username.length < 3) {
-
-        setAuthMessage(
-            "register-message",
-            "El username debe tener al menos 3 caracteres.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    if (username.length > 20) {
-
-        setAuthMessage(
-            "register-message",
-            "El username puede tener como máximo 20 caracteres.",
-            "error"
-        );
-
-        return;
-    }
-
-
     if (!email) {
-
-        setAuthMessage(
-            "register-message",
-            "Introduce tu correo electrónico.",
-            "error"
-        );
-
-        emailInput.focus();
-
-        return;
+      setMessage('register-message', 'Escribe tu correo electrónico.', 'error');
+      return;
     }
-
-
     if (password.length < 6) {
-
-        setAuthMessage(
-            "register-message",
-            "La contraseña debe tener al menos 6 caracteres.",
-            "error"
-        );
-
-        passwordInput.focus();
-
-        return;
+      setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
+      return;
     }
 
+    setLoading(button, true);
+    setMessage('register-message', 'Comprobando username...', 'success');
 
-    const button =
-        document.getElementById(
-            "register-button"
-        );
-
-
-    setButtonLoading(
-        button,
-        true
-    );
-
-
-    setAuthMessage(
-        "register-message",
-        "Comprobando username...",
-        "success"
-    );
-
-
-    /* -----------------------------------------
-       CHECK USERNAME
-       ----------------------------------------- */
-
-    const {
-        data: existingProfile,
-        error: usernameError
-    } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq(
-            "username",
-            username
-        )
-        .maybeSingle();
-
-
-    if (usernameError) {
-
-        console.error(
-            usernameError
-        );
-
-
-        setButtonLoading(
-            button,
-            false
-        );
-
-
-        setAuthMessage(
-            "register-message",
-            "No se pudo comprobar el username. Revisa la configuración de Supabase.",
-            "error"
-        );
-
+    try {
+      if (!(await checkUsername(username))) {
+        setMessage('register-message', 'Ese username ya está ocupado.', 'error');
         return;
-    }
+      }
 
+      setMessage('register-message', 'Creando cuenta...', 'success');
 
-    if (existingProfile) {
-
-        setButtonLoading(
-            button,
-            false
-        );
-
-
-        setAuthMessage(
-            "register-message",
-            "Ese username ya está ocupado.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    /* -----------------------------------------
-       SUPABASE SIGN UP
-       ----------------------------------------- */
-
-    setAuthMessage(
-        "register-message",
-        "Creando cuenta...",
-        "success"
-    );
-
-
-    const {
-        data,
-        error
-    } = await supabase.auth.signUp({
-
-        email:
-            email,
-
-        password:
-            password,
-
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
         options: {
-
-            emailRedirectTo:
-                getRedirectURL(),
-
-            data: {
-
-                username:
-                    username
-
-            }
-
+          data: { username },
+          emailRedirectTo: redirectURL()
         }
+      });
 
-    });
+      if (error) throw error;
 
+      pendingEmail = email;
+      sessionStorage.setItem('xifre_pending_email', email);
 
-    if (error) {
-
-        console.error(
-            "SIGNUP ERROR:",
-            error
-        );
-
-
-        setButtonLoading(
-            button,
-            false
-        );
-
-
-        setAuthMessage(
-            "register-message",
-            getFriendlyAuthError(
-                error
-            ),
-            "error"
-        );
-
-        return;
-    }
-
-
-    /*
-       Confirm Email is enabled.
-
-       Therefore Supabase normally gives us:
-       user = existing/new user
-       session = null
-    */
-
-    if (!data.session) {
-
-        document
-            .getElementById(
-                "confirmation-email"
-            )
-            .textContent =
-                email;
-
-
-        usernameInput.value = "";
-
-        emailInput.value = "";
-
-        passwordInput.value = "";
-
-
-        setButtonLoading(
-            button,
-            false
-        );
-
-
-        showScreen(
-            "email"
-        );
-
-
-        return;
-    }
-
-
-    /*
-       Fallback in case Confirm Email
-       has been disabled.
-    */
-
-    setButtonLoading(
-        button,
-        false
-    );
-
-
-    await startApplication();
-
-}
-
-
-/* =========================================================
-   LOGIN
-   ========================================================= */
-
-document
-    .getElementById(
-        "login-form"
-    )
-    .addEventListener(
-        "submit",
-        async event => {
-
-            event.preventDefault();
-
-            await login();
-
-        }
-    );
-
-
-async function login() {
-
-    if (!isSupabaseReady()) {
-        setAuthMessage(
-            "login-message",
-            "XIFRE no ha podido conectar con Supabase. Recarga la página e inténtalo de nuevo.",
-            "error"
-        );
-        return;
-    }
-
-    const email =
-        document
-            .getElementById(
-                "login-email"
-            )
-            .value
-            .trim();
-
-    const password =
-        document
-            .getElementById(
-                "login-password"
-            )
-            .value;
-
-
-    const button =
-        document.getElementById(
-            "login-button"
-        );
-
-
-    setAuthMessage(
-        "login-message",
-        ""
-    );
-
-
-    if (!email || !password) {
-
-        setAuthMessage(
-            "login-message",
-            "Introduce el correo y la contraseña.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    setButtonLoading(
-        button,
-        true
-    );
-
-
-    setAuthMessage(
-        "login-message",
-        "Iniciando sesión...",
-        "success"
-    );
-
-
-    const {
-        data,
-        error
-    } = await supabase.auth.signInWithPassword({
-
-        email:
-            email,
-
-        password:
-            password
-
-    });
-
-
-    if (error) {
-
-        console.error(
-            "LOGIN ERROR:",
-            error
-        );
-
-
-        setButtonLoading(
-            button,
-            false
-        );
-
-
-        setAuthMessage(
-            "login-message",
-            getFriendlyAuthError(
-                error
-            ),
-            "error"
-        );
-
-        return;
-    }
-
-
-    if (!data.session) {
-
-        setButtonLoading(
-            button,
-            false
-        );
-
-
-        setAuthMessage(
-            "login-message",
-            "No se pudo iniciar la sesión.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    setButtonLoading(
-        button,
-        false
-    );
-
-
-    await startApplication();
-
-}
-
-
-/* =========================================================
-   AUTH ERROR MESSAGES
-   ========================================================= */
-
-function getFriendlyAuthError(
-    error
-) {
-
-    const message =
-        (
-            error?.message ||
-            ""
-        ).toLowerCase();
-
-
-    if (
-        message.includes(
-            "email not confirmed"
-        )
-    ) {
-
-        return (
-            "Primero tienes que confirmar tu correo electrónico."
-        );
-
-    }
-
-
-    if (
-        message.includes(
-            "invalid login credentials"
-        )
-    ) {
-
-        return (
-            "El correo o la contraseña no son correctos."
-        );
-
-    }
-
-
-    if (
-        message.includes(
-            "password should be at least"
-        )
-    ) {
-
-        return (
-            "La contraseña es demasiado corta."
-        );
-
-    }
-
-
-    if (
-        message.includes(
-            "rate limit"
-        )
-    ) {
-
-        return (
-            "Demasiados intentos. Espera un poco y vuelve a intentarlo."
-        );
-
-    }
-
-
-    return (
-        error?.message ||
-        "Ha ocurrido un error. Inténtalo de nuevo."
-    );
-
-}
-
-
-/* =========================================================
-   AUTH STATE
-   ========================================================= */
-
-if (isSupabaseReady()) {
-
-    supabase.auth.onAuthStateChange(
-        (event, session) => {
-
-            console.log(
-                "Xifre auth:",
-                event
-            );
-
-            /* No hacemos operaciones async directamente dentro del callback. */
-            setTimeout(async () => {
-
-                if (event === "SIGNED_IN" && session) {
-                    await startApplication();
-                }
-
-                if (event === "SIGNED_OUT") {
-                    closeApplication();
-                }
-
-            }, 0);
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   INITIALIZATION
-   ========================================================= */
-
-async function initialize() {
-
-    console.log(
-        "Xifre starting..."
-    );
-
-    /*
-       MUY IMPORTANTE: la interfaz puede funcionar aunque
-       Supabase no haya cargado. Así Entrar/Registrarse nunca
-       se quedan muertos por un error externo.
-    */
-    if (!isSupabaseReady()) {
-        console.warn(
-            "XIFRE: Supabase no está disponible. La navegación seguirá funcionando."
-        );
-        showMainApp();
-        hideMainApp();
-        showScreen("landing");
-        return;
-    }
-
-
-    /*
-       Detect errors returned by
-       Supabase after email confirmation.
-    */
-
-    handleAuthURL();
-
-
-    const {
-        data,
-        error
-    } =
-        await supabase.auth.getSession();
-
-
-    if (error) {
-
-        console.error(
-            "SESSION ERROR:",
-            error
-        );
-
-        showScreen(
-            "landing"
-        );
-
-        return;
-    }
-
-
-    if (
-        data.session
-    ) {
-
+      if (data?.session) {
         await startApplication();
+      } else {
+        const confirmation = $('#confirmation-email');
+        if (confirmation) confirmation.textContent = email;
+        showScreen('email');
+      }
+    } catch (error) {
+      console.error('XIFRE REGISTER:', error);
+      setMessage('register-message', friendlyAuthError(error), 'error');
+    } finally {
+      setLoading(button, false);
+    }
+  }
 
-        return;
+  async function resendConfirmation() {
+    if (!supabaseReady()) return;
+    if (!pendingEmail) {
+      showScreen('register');
+      setMessage('register-message', 'Escribe tu correo otra vez para poder reenviar la confirmación.', 'error');
+      return;
     }
 
+    const button = $('#resend-confirmation');
+    setLoading(button, true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: pendingEmail,
+        options: { emailRedirectTo: redirectURL() }
+      });
+      if (error) throw error;
+      toast('Correo de confirmación reenviado.', 'success');
+    } catch (error) {
+      console.error('XIFRE RESEND:', error);
+      toast(friendlyAuthError(error), 'error');
+    } finally {
+      setLoading(button, false);
+    }
+  }
 
-    showMainApp();
+  async function login() {
+    const button = $('#login-button');
+    const email = String($('#login-email')?.value || '').trim();
+    const password = String($('#login-password')?.value || '');
 
-    hideMainApp();
+    setMessage('login-message', '');
 
-    showScreen(
-        "landing"
-    );
-
-}
-
-
-/* =========================================================
-   EMAIL CONFIRMATION URL
-   ========================================================= */
-
-function handleAuthURL() {
-
-    const hash =
-        window.location.hash;
-
-
-    if (!hash) return;
-
-
-    const params =
-        new URLSearchParams(
-            hash.substring(1)
-        );
-
-
-    const errorDescription =
-        params.get(
-            "error_description"
-        );
-
-
-    if (
-        errorDescription
-    ) {
-
-        console.error(
-            "AUTH REDIRECT ERROR:",
-            errorDescription
-        );
-
-
-        showScreen(
-            "login"
-        );
-
-
-        setAuthMessage(
-            "login-message",
-            decodeURIComponent(
-                errorDescription
-                    .replace(
-                        /\+/g,
-                        " "
-                    )
-            ),
-            "error"
-        );
-
+    if (!supabaseReady()) {
+      setMessage('login-message', 'La interfaz funciona, pero Supabase no se ha cargado. Comprueba tu conexión y recarga.', 'error');
+      return;
+    }
+    if (!email || !password) {
+      setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
+      return;
     }
 
+    setLoading(button, true);
+    setMessage('login-message', 'Iniciando sesión...', 'success');
 
-    /*
-       The Supabase client processes
-       the auth session itself.
-
-       We remove the tokens from the
-       visible URL after that.
-    */
-
-    if (
-        hash.includes(
-            "access_token"
-        ) ||
-        hash.includes(
-            "refresh_token"
-        )
-    ) {
-
-        window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname +
-            window.location.search
-        );
-
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      if (!data?.session) throw new Error('No se recibió una sesión válida.');
+      sessionStorage.removeItem('xifre_pending_email');
+      pendingEmail = '';
+      await startApplication();
+    } catch (error) {
+      console.error('XIFRE LOGIN:', error);
+      const friendly = friendlyAuthError(error);
+      setMessage('login-message', friendly, 'error');
+      if (String(error?.message || '').toLowerCase().includes('email not confirmed')) {
+        pendingEmail = email;
+        sessionStorage.setItem('xifre_pending_email', email);
+        setTimeout(() => {
+          const confirmation = $('#confirmation-email');
+          if (confirmation) confirmation.textContent = email;
+          showScreen('email');
+        }, 350);
+      }
+    } finally {
+      setLoading(button, false);
     }
+  }
 
-}
-
-
-/* =========================================================
-   START APPLICATION
-   ========================================================= */
-
-async function startApplication() {
-
-    const {
-        data,
-        error
-    } =
-        await supabase.auth.getUser();
-
-
-    if (
-        error ||
-        !data.user
-    ) {
-
-        console.error(
-            "USER ERROR:",
-            error
-        );
-
-        return;
-    }
-
-
-    currentUser =
-        data.user;
-
-
-    await loadProfile();
-
-    showMainApp();
-
-    await loadFriends();
-
-    await loadConversations();
-
-    setupRequestRealtime();
-
-}
-
-
-/* =========================================================
-   LOAD PROFILE
-   ========================================================= */
-
-async function loadProfile() {
-
+  async function loadProfile() {
     if (!currentUser) return;
-
-
-    const {
-        data,
-        error
-    } =
-        await supabase
-            .from("profiles")
-            .select(
-                "*"
-            )
-            .eq(
-                "id",
-                currentUser.id
-            )
-            .single();
-
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', currentUser.id)
+      .maybeSingle();
 
     if (error) {
-
-        console.error(
-            "PROFILE ERROR:",
-            error
-        );
-
-        return;
+      console.error('PROFILE:', error);
+      currentProfile = { username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario' };
+      return;
     }
 
+    currentProfile = data || { username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario' };
 
-    currentProfile =
-        data;
+    $('#profile-name').textContent = currentProfile.display_name || currentProfile.username || 'Usuario';
+    $('#profile-username').textContent = `@${currentProfile.username || 'usuario'}`;
+    $('#profile-avatar').textContent = (currentProfile.username || 'U').charAt(0).toUpperCase();
+  }
 
+  async function startApplication() {
+    if (!supabaseReady()) return;
+    if (appStarted && currentUser) {
+      showMainApp();
+      return;
+    }
 
-    const avatar =
-        document.getElementById(
-            "profile-avatar"
-        );
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data?.user) throw error || new Error('No hay usuario.');
+      currentUser = data.user;
+      appStarted = true;
+      await loadProfile();
+      showMainApp();
+      await Promise.allSettled([loadFriends(), loadConversations()]);
+      setupRequestRealtime();
+    } catch (error) {
+      console.error('XIFRE APP:', error);
+      currentUser = null;
+      appStarted = false;
+      showScreen('login');
+      setMessage('login-message', 'No se pudo cargar tu cuenta. Revisa la configuración de Supabase.', 'error');
+    }
+  }
 
+  async function logout() {
+    if (!supabaseReady()) {
+      showScreen('landing');
+      return;
+    }
+    await supabase.auth.signOut();
+  }
 
-    const name =
-        document.getElementById(
-            "profile-name"
-        );
+  function closeApplication() {
+    currentUser = null;
+    currentProfile = null;
+    currentConversation = null;
+    appStarted = false;
+    if (messageChannel) supabase.removeChannel(messageChannel);
+    if (requestChannel) supabase.removeChannel(requestChannel);
+    messageChannel = null;
+    requestChannel = null;
+    showScreen('landing');
+  }
 
-
-    const username =
-        document.getElementById(
-            "profile-username"
-        );
-
-
-    avatar.textContent =
-        (
-            data.display_name ||
-            data.username ||
-            "?"
-        )
-            .charAt(0)
-            .toUpperCase();
-
-
-    name.textContent =
-        data.display_name ||
-        data.username;
-
-
-    username.textContent =
-        "@" +
-        data.username;
-
-}
-
-
-/* =========================================================
-   FRIENDS
-   ========================================================= */
-
-async function loadFriends() {
-
+  async function loadFriends() {
     if (!currentUser) return;
-
-
-    const {
-        data,
-        error
-    } =
-        await supabase
-            .from("friendships")
-            .select(
-                "user1_id,user2_id"
-            )
-            .or(
-                "user1_id.eq." +
-                currentUser.id +
-                ",user2_id.eq." +
-                currentUser.id
-            );
-
-
-    if (error) {
-
-        console.error(
-            "FRIENDS ERROR:",
-            error
-        );
-
-        return;
-    }
-
-
-    const ids =
-        (data || [])
-            .map(
-                friendship => {
-
-                    if (
-                        friendship.user1_id ===
-                        currentUser.id
-                    ) {
-
-                        return friendship.user2_id;
-
-                    }
-
-                    return friendship.user1_id;
-
-                }
-            );
-
-
+    const { data: sent } = await supabase.from('friendships').select('user1_id,user2_id').or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`);
+    const ids = [];
+    (sent || []).forEach(row => {
+      const id = row.user1_id === currentUser.id ? row.user2_id : row.user1_id;
+      if (id && !ids.includes(id)) ids.push(id);
+    });
     if (!ids.length) {
-
-        renderFriends(
-            []
-        );
-
-        return;
+      renderFriends([]);
+      return;
     }
-
-
-    const {
-        data: profiles,
-        error: profileError
-    } =
-        await supabase
-            .from("profiles")
-            .select(
-                "id,username,display_name,avatar_url"
-            )
-            .in(
-                "id",
-                ids
-            );
-
-
-    if (profileError) {
-
-        console.error(
-            profileError
-        );
-
-        return;
+    const { data: profiles, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url').in('id', ids);
+    if (error) {
+      console.error('FRIENDS:', error);
+      return;
     }
+    renderFriends(profiles || []);
+  }
 
-
-    renderFriends(
-        profiles || []
-    );
-
-}
-
-
-/* =========================================================
-   RENDER FRIENDS
-   ========================================================= */
-
-function renderFriends(
-    profiles
-) {
-
-    let section =
-        document.getElementById(
-            "friends-section"
-        );
-
-
+  function renderFriends(profiles) {
+    let section = $('#friends-section');
     if (!section) {
-
-        section =
-            document.createElement(
-                "div"
-            );
-
-
-        section.id =
-            "friends-section";
-
-
-        section.innerHTML = `
-            <div class="sidebar-section-title">
-                Amigos
-            </div>
-
-            <div
-                id="friends-list"
-                class="conversation-list"
-            ></div>
-        `;
-
-
-        const list =
-            document.getElementById(
-                "conversation-list"
-            );
-
-
-        list.parentElement.insertBefore(
-            section,
-            list
-        );
-
+      section = document.createElement('div');
+      section.id = 'friends-section';
+      section.innerHTML = `<div class="sidebar-section-title">Amigos</div><div id="friends-list" class="conversation-list"></div>`;
+      const list = $('#conversation-list');
+      list?.parentElement?.insertBefore(section, list);
     }
-
-
-    const list =
-        document.getElementById(
-            "friends-list"
-        );
-
-
-    list.innerHTML = "";
-
-
-    profiles.forEach(
-        friend => {
-
-            const item =
-                document.createElement(
-                    "div"
-                );
-
-
-            item.className =
-                "conversation";
-
-
-            item.innerHTML = `
-                <div class="conversation-name">
-                    @${escapeHTML(
-                        friend.username
-                    )}
-                </div>
-
-                <div class="conversation-type">
-                    Abrir chat
-                </div>
-            `;
-
-
-            item.addEventListener(
-                "click",
-                async () => {
-
-                    await openPrivateChat(
-                        friend.id
-                    );
-
-                }
-            );
-
-
-            list.appendChild(
-                item
-            );
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   FRIEND MODAL
-   ========================================================= */
-
-document
-    .getElementById(
-        "add-friend-button"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            document
-                .getElementById(
-                    "friend-modal"
-                )
-                .classList.remove(
-                    "hidden"
-                );
-
-            document
-                .getElementById(
-                    "friend-username"
-                )
-                .focus();
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "close-friend-modal"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            closeModal(
-                "friend-modal"
-            );
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "send-friend-button"
-    )
-    .addEventListener(
-        "click",
-        sendFriendRequest
-    );
-
-
-async function sendFriendRequest() {
-
-    const input =
-        document.getElementById(
-            "friend-username"
-        );
-
-
-    const username =
-        normalizeUsername(
-            input.value
-        );
-
-
-    const message =
-        document.getElementById(
-            "friend-message"
-        );
-
-
-    if (!username) {
-
-        message.textContent =
-            "Escribe un username.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
+    const list = $('#friends-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!profiles.length) {
+      list.innerHTML = '<div class="empty-sidebar">Todavía no tienes amigos.</div>';
+      return;
     }
+    profiles.forEach(friend => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'conversation friend-item';
+      item.innerHTML = `<div class="conversation-name">@${escapeHTML(friend.username)}</div><div class="conversation-type">Abrir chat</div>`;
+      item.addEventListener('click', () => openPrivateChat(friend.id));
+      list.appendChild(item);
+    });
+  }
 
-
-    if (
-        currentProfile &&
-        username ===
-        currentProfile.username
-    ) {
-
-        message.textContent =
-            "No puedes añadirte a ti mismo.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
-    }
-
-
-    const {
-        data: profile,
-        error
-    } =
-        await supabase
-            .from("profiles")
-            .select(
-                "id,username"
-            )
-            .eq(
-                "username",
-                username
-            )
-            .maybeSingle();
-
-
-    if (error) {
-
-        console.error(
-            error
-        );
-
-        message.textContent =
-            "No se pudo buscar el usuario.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
-    }
-
-
-    if (!profile) {
-
-        message.textContent =
-            "No existe ese username.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
-    }
-
-
-    const {
-        data: friendship
-    } =
-        await supabase
-            .from("friendships")
-            .select("id")
-            .or(
-                `and(user1_id.eq.${currentUser.id},user2_id.eq.${profile.id}),and(user1_id.eq.${profile.id},user2_id.eq.${currentUser.id})`
-            )
-            .maybeSingle();
-
-
-    if (friendship) {
-
-        message.textContent =
-            "Ya sois amigos.";
-
-        message.style.color =
-            "#ffcf8c";
-
-        return;
-    }
-
-
-    const {
-        error: requestError
-    } =
-        await supabase
-            .from("friend_requests")
-            .insert({
-
-                sender_id:
-                    currentUser.id,
-
-                receiver_id:
-                    profile.id
-
-            });
-
-
-    if (requestError) {
-
-        console.error(
-            requestError
-        );
-
-        message.textContent =
-            "No se pudo enviar la solicitud.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
-    }
-
-
-    message.textContent =
-        "Solicitud enviada.";
-
-    message.style.color =
-        "#91efbb";
-
-
-    input.value = "";
-
-}
-
-
-/* =========================================================
-   CONVERSATIONS
-   ========================================================= */
-
-async function loadConversations() {
-
+  async function sendFriendRequest() {
     if (!currentUser) return;
+    const input = $('#friend-username');
+    const username = normalizeUsername(input?.value);
+    if (!username) {
+      setModalMessage('friend-message', 'Escribe un username.', 'error');
+      return;
+    }
+    if (currentProfile && username === currentProfile.username) {
+      setModalMessage('friend-message', 'No puedes añadirte a ti mismo.', 'error');
+      return;
+    }
+    const { data: profile, error } = await supabase.from('profiles').select('id,username').eq('username', username).maybeSingle();
+    if (error || !profile) {
+      setModalMessage('friend-message', error ? 'No se pudo buscar el usuario.' : 'No existe ese username.', 'error');
+      return;
+    }
+    const { data: friendship } = await supabase.from('friendships').select('id').or(`and(user1_id.eq.${currentUser.id},user2_id.eq.${profile.id}),and(user1_id.eq.${profile.id},user2_id.eq.${currentUser.id})`).maybeSingle();
+    if (friendship) {
+      setModalMessage('friend-message', 'Ya sois amigos.', 'success');
+      return;
+    }
+    const { error: requestError } = await supabase.from('friend_requests').insert({ sender_id: currentUser.id, receiver_id: profile.id });
+    if (requestError) {
+      console.error(requestError);
+      setModalMessage('friend-message', 'No se pudo enviar la solicitud.', 'error');
+      return;
+    }
+    setModalMessage('friend-message', 'Solicitud enviada.', 'success');
+    if (input) input.value = '';
+  }
 
-
-    const {
-        data,
-        error
-    } =
-        await supabase
-            .from("conversation_members")
-            .select(`
-                conversation_id,
-                conversations (
-                    id,
-                    type,
-                    name,
-                    owner_id,
-                    created_at
-                )
-            `)
-            .eq(
-                "user_id",
-                currentUser.id
-            );
-
-
+  async function loadConversations() {
+    if (!currentUser) return;
+    const { data, error } = await supabase.from('conversation_members').select('conversation_id, conversations(id,type,name,owner_id,created_at)').eq('user_id', currentUser.id);
     if (error) {
-
-        console.error(
-            "CONVERSATIONS ERROR:",
-            error
-        );
-
-        return;
+      console.error('CONVERSATIONS:', error);
+      return;
     }
+    const map = new Map();
+    (data || []).forEach(row => row.conversations && map.set(row.conversations.id, row.conversations));
+    renderConversations([...map.values()]);
+  }
 
-
-    const unique =
-        new Map();
-
-
-    (
-        data || []
-    ).forEach(
-        row => {
-
-            if (
-                row.conversations
-            ) {
-
-                unique.set(
-                    row.conversations.id,
-                    row.conversations
-                );
-
-            }
-
-        }
-    );
-
-
-    renderConversations(
-        Array.from(
-            unique.values()
-        )
-    );
-
-}
-
-
-/* =========================================================
-   RENDER CONVERSATIONS
-   ========================================================= */
-
-function renderConversations(
-    conversations
-) {
-
-    const list =
-        document.getElementById(
-            "conversation-list"
-        );
-
-
-    list.innerHTML = "";
-
-
-    if (
-        conversations.length === 0
-    ) {
-
-        list.innerHTML = `
-            <div style="
-                padding:12px;
-                color:rgba(255,255,255,.3);
-                font-size:11px;
-            ">
-                No tienes conversaciones.
-            </div>
-        `;
-
-        return;
+  function renderConversations(conversations) {
+    const list = $('#conversation-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!conversations.length) {
+      list.innerHTML = '<div class="empty-sidebar">No tienes conversaciones.</div>';
+      return;
     }
+    conversations.forEach(conversation => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `conversation${currentConversation === conversation.id ? ' active' : ''}`;
+      item.innerHTML = `<div class="conversation-name">${escapeHTML(conversation.name || (conversation.type === 'group' ? 'Grupo' : 'Chat privado'))}</div><div class="conversation-type">${conversation.type === 'group' ? 'Grupo' : 'Privado'}</div>`;
+      item.addEventListener('click', () => openConversation(conversation.id, conversation));
+      list.appendChild(item);
+    });
+  }
 
-
-    conversations.forEach(
-        conversation => {
-
-            const item =
-                document.createElement(
-                    "div"
-                );
-
-
-            item.className =
-                "conversation";
-
-
-            if (
-                currentConversation ===
-                conversation.id
-            ) {
-
-                item.classList.add(
-                    "active"
-                );
-
-            }
-
-
-            item.innerHTML = `
-                <div class="conversation-name">
-                    ${escapeHTML(
-                        conversation.name ||
-                        (
-                            conversation.type ===
-                            "group"
-                                ? "Grupo"
-                                : "Chat privado"
-                        )
-                    )}
-                </div>
-
-                <div class="conversation-type">
-                    ${
-                        conversation.type ===
-                        "group"
-                            ? "Grupo"
-                            : "Privado"
-                    }
-                </div>
-            `;
-
-
-            item.addEventListener(
-                "click",
-                async () => {
-
-                    await openConversation(
-                        conversation.id,
-                        conversation
-                    );
-
-                }
-            );
-
-
-            list.appendChild(
-                item
-            );
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   PRIVATE CHAT
-   ========================================================= */
-
-async function openPrivateChat(
-    friendId
-) {
-
-    const {
-        data,
-        error
-    } =
-        await supabase.rpc(
-            "create_private_chat",
-            {
-                other_user:
-                    friendId
-            }
-        );
-
-
+  async function openPrivateChat(friendId) {
+    const { data, error } = await supabase.rpc('create_private_chat', { other_user: friendId });
     if (error) {
-
-        console.error(
-            "PRIVATE CHAT ERROR:",
-            error
-        );
-
-        alert(
-            "No se pudo abrir el chat privado."
-        );
-
-        return;
+      console.error(error);
+      toast('No se pudo abrir el chat privado.', 'error');
+      return;
     }
-
-
     await loadConversations();
+    await openConversation(data);
+  }
 
+  async function openConversation(conversationId, object = null) {
+    currentConversation = conversationId;
+    const conversation = object || await getConversation(conversationId);
+    if (!conversation) return;
+    $('#chat-title').textContent = conversation.name || (conversation.type === 'group' ? 'Grupo' : 'Chat privado');
+    $('#chat-subtitle').textContent = conversation.type === 'group' ? 'Grupo' : 'Chat privado';
+    await loadMessages(conversationId);
+    subscribeMessages(conversationId);
+    $('#message-input')?.focus();
+    await loadConversations();
+  }
 
-    await openConversation(
-        data
-    );
+  async function getConversation(id) {
+    const { data, error } = await supabase.from('conversations').select('id,type,name,owner_id,created_at').eq('id', id).maybeSingle();
+    if (error) console.error(error);
+    return data || null;
+  }
 
-}
-
-
-/* =========================================================
-   OPEN CONVERSATION
-   ========================================================= */
-
-async function openConversation(
-    conversationId,
-    conversationObject = null
-) {
-
-    currentConversation =
-        conversationId;
-
-
-    const conversation =
-        conversationObject ||
-        await getConversation(
-            conversationId
-        );
-
-
-    if (!conversation) {
-
-        return;
-    }
-
-
-    document
-        .getElementById(
-            "chat-title"
-        )
-        .textContent =
-            conversation.name ||
-            (
-                conversation.type ===
-                "group"
-                    ? "Grupo"
-                    : "Chat privado"
-            );
-
-
-    document
-        .getElementById(
-            "chat-subtitle"
-        )
-        .textContent =
-            conversation.type ===
-            "group"
-                ? "Grupo"
-                : "Chat privado";
-
-
-    await loadMessages(
-        conversationId
-    );
-
-
-    subscribeMessages(
-        conversationId
-    );
-
-
-    document
-        .getElementById(
-            "message-input"
-        )
-        .focus();
-
-
-}
-
-
-/* =========================================================
-   GET CONVERSATION
-   ========================================================= */
-
-async function getConversation(
-    conversationId
-) {
-
-    const {
-        data,
-        error
-    } =
-        await supabase
-            .from("conversations")
-            .select(
-                "*"
-            )
-            .eq(
-                "id",
-                conversationId
-            )
-            .single();
-
-
+  async function loadMessages(conversationId) {
+    const box = $('#messages');
+    if (!box) return;
+    const { data, error } = await supabase.from('messages').select('id,conversation_id,sender_id,content,created_at').eq('conversation_id', conversationId).order('created_at', { ascending: true });
     if (error) {
-
-        console.error(
-            error
-        );
-
-        return null;
+      console.error(error);
+      box.innerHTML = '<div class="empty-chat"><div class="empty-chat-logo">!</div><h3>No se pudieron cargar los mensajes</h3><p>Revisa las políticas RLS de Supabase.</p></div>';
+      return;
     }
-
-
-    return data;
-
-}
-
-
-/* =========================================================
-   MESSAGES
-   ========================================================= */
-
-async function loadMessages(
-    conversationId
-) {
-
-    const container =
-        document.getElementById(
-            "messages"
-        );
-
-
-    container.innerHTML = "";
-
-
-    const {
-        data,
-        error
-    } =
-        await supabase
-            .from("messages")
-            .select(`
-                id,
-                conversation_id,
-                sender_id,
-                content,
-                created_at,
-                sender:profiles!messages_sender_id_fkey(
-                    username,
-                    display_name
-                )
-            `)
-            .eq(
-                "conversation_id",
-                conversationId
-            )
-            .order(
-                "created_at",
-                {
-                    ascending:
-                        true
-                }
-            );
-
-
-    if (error) {
-
-        console.error(
-            "MESSAGES ERROR:",
-            error
-        );
-
-        return;
-    }
-
-
-    if (
-        !data ||
-        data.length === 0
-    ) {
-
-        container.innerHTML = `
-            <div class="empty-chat">
-                <div class="empty-chat-logo">
-                    X
-                </div>
-
-                <h3>
-                    Empieza la conversación
-                </h3>
-
-                <p>
-                    Escribe el primer mensaje.
-                </p>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    data.forEach(
-        message => {
-
-            renderMessage(
-                message,
-                false
-            );
-
-        }
-    );
-
-
+    box.innerHTML = '';
+    for (const message of data || []) await renderMessage(message, true);
     scrollMessages();
+  }
 
-}
+  async function renderMessage(message, append = true) {
+    const box = $('#messages');
+    if (!box) return;
+    const mine = currentUser && message.sender_id === currentUser.id;
+    const bubble = document.createElement('div');
+    bubble.className = `message-row ${mine ? 'mine' : 'theirs'}`;
+    bubble.innerHTML = `<div class="message-bubble"><div class="message-content">${escapeHTML(message.content)}</div><div class="message-time">${formatTime(message.created_at)}</div></div>`;
+    if (append) box.appendChild(bubble); else box.prepend(bubble);
+  }
 
+  function subscribeMessages(conversationId) {
+    if (messageChannel) supabase.removeChannel(messageChannel);
+    messageChannel = supabase.channel(`xifre-messages-${conversationId}-${Date.now()}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async payload => {
+      if (payload.new.sender_id === currentUser?.id) return;
+      await renderMessage(payload.new);
+      scrollMessages();
+    }).subscribe();
+  }
 
-/* =========================================================
-   RENDER MESSAGE
-   ========================================================= */
-
-function renderMessage(
-    message,
-    scroll = true
-) {
-
-    const container =
-        document.getElementById(
-            "messages"
-        );
-
-
-    const empty =
-        container.querySelector(
-            ".empty-chat"
-        );
-
-
-    if (empty) {
-
-        empty.remove();
-
+  async function sendMessage() {
+    if (!currentUser || !currentConversation) return;
+    const input = $('#message-input');
+    const content = String(input?.value || '').trim();
+    if (!content) return;
+    input.value = '';
+    const { data, error } = await supabase.from('messages').insert({ conversation_id: currentConversation, sender_id: currentUser.id, content }).select().single();
+    if (error) {
+      console.error(error);
+      input.value = content;
+      toast('No se pudo enviar el mensaje.', 'error');
+      return;
     }
-
-
-    if (
-        container.querySelector(
-            `[data-message-id="${message.id}"]`
-        )
-    ) {
-
-        return;
-    }
-
-
-    const wrapper =
-        document.createElement(
-            "div"
-        );
-
-
-    wrapper.className =
-        "message";
-
-
-    wrapper.dataset.messageId =
-        message.id;
-
-
-    if (
-        message.sender_id ===
-        currentUser.id
-    ) {
-
-        wrapper.classList.add(
-            "mine"
-        );
-
-    }
-
-
-    const bubble =
-        document.createElement(
-            "div"
-        );
-
-
-    bubble.className =
-        "message-bubble";
-
-
-    /*
-       textContent is intentional.
-
-       It prevents a user from sending
-       HTML/JavaScript and having it
-       execute in another user's browser.
-    */
-
-    bubble.textContent =
-        message.content;
-
-
-    const meta =
-        document.createElement(
-            "div"
-        );
-
-
-    meta.className =
-        "message-meta";
-
-
-    const username =
-        message.sender?.username ||
-        "usuario";
-
-
-    meta.textContent =
-        "@" +
-        username +
-        " · " +
-        formatTime(
-            message.created_at
-        );
-
-
-    wrapper.appendChild(
-        bubble
-    );
-
-    wrapper.appendChild(
-        meta
-    );
-
-
-    container.appendChild(
-        wrapper
-    );
-
-
-    if (scroll) {
-
-        scrollMessages();
-
-    }
-
-}
-
-
-/* =========================================================
-   SEND MESSAGE
-   ========================================================= */
-
-document
-    .getElementById(
-        "message-form"
-    )
-    .addEventListener(
-        "submit",
-        async event => {
-
-            event.preventDefault();
-
-
-            if (
-                !currentUser ||
-                !currentConversation
-            ) {
-
-                return;
-            }
-
-
-            const input =
-                document.getElementById(
-                    "message-input"
-                );
-
-
-            const content =
-                input.value.trim();
-
-
-            if (!content) {
-
-                return;
-            }
-
-
-            input.value = "";
-
-
-            const {
-                error
-            } =
-                await supabase
-                    .from("messages")
-                    .insert({
-
-                        conversation_id:
-                            currentConversation,
-
-                        sender_id:
-                            currentUser.id,
-
-                        content:
-                            content
-
-                    });
-
-
-            if (error) {
-
-                console.error(
-                    "SEND MESSAGE ERROR:",
-                    error
-                );
-
-
-                input.value =
-                    content;
-
-            }
-
-        }
-    );
-
-
-/* =========================================================
-   MESSAGE REALTIME
-   ========================================================= */
-
-function subscribeMessages(
-    conversationId
-) {
-
-    if (messageChannel) {
-
-        supabase.removeChannel(
-            messageChannel
-        );
-
-        messageChannel =
-            null;
-
-    }
-
-
-    messageChannel =
-        supabase
-            .channel(
-                "xifre-messages-" +
-                conversationId +
-                "-" +
-                Date.now()
-            )
-            .on(
-                "postgres_changes",
-                {
-                    event:
-                        "INSERT",
-
-                    schema:
-                        "public",
-
-                    table:
-                        "messages",
-
-                    filter:
-                        "conversation_id=eq." +
-                        conversationId
-
-                },
-                async payload => {
-
-                    const {
-                        data: sender
-                    } =
-                        await supabase
-                            .from("profiles")
-                            .select(
-                                "username,display_name"
-                            )
-                            .eq(
-                                "id",
-                                payload.new.sender_id
-                            )
-                            .maybeSingle();
-
-
-                    renderMessage({
-
-                        ...payload.new,
-
-                        sender:
-                            sender ||
-                            null
-
-                    });
-
-                }
-            )
-            .subscribe(
-                status => {
-
-                    console.log(
-                        "Message realtime:",
-                        status
-                    );
-
-                }
-            );
-
-}
-
-
-/* =========================================================
-   CREATE GROUP
-   ========================================================= */
-
-document
-    .getElementById(
-        "create-group-button"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            document
-                .getElementById(
-                    "group-modal"
-                )
-                .classList.remove(
-                    "hidden"
-                );
-
-            document
-                .getElementById(
-                    "group-name"
-                )
-                .focus();
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "close-group-modal"
-    )
-    .addEventListener(
-        "click",
-        () => {
-
-            closeModal(
-                "group-modal"
-            );
-
-        }
-    );
-
-
-document
-    .getElementById(
-        "create-group-submit"
-    )
-    .addEventListener(
-        "click",
-        createGroup
-    );
-
-
-async function createGroup() {
-
-    const nameInput =
-        document.getElementById(
-            "group-name"
-        );
-
-
-    const membersInput =
-        document.getElementById(
-            "group-members"
-        );
-
-
-    const message =
-        document.getElementById(
-            "group-message"
-        );
-
-
-    const name =
-        nameInput.value.trim();
-
-
-    const usernames =
-        membersInput.value
-            .split(",")
-            .map(
-                value =>
-                    normalizeUsername(
-                        value
-                    )
-            )
-            .filter(Boolean);
-
-
-    if (!name) {
-
-        message.textContent =
-            "Escribe un nombre para el grupo.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
-    }
-
+    await renderMessage(data);
+    scrollMessages();
+  }
+
+  async function createGroup() {
+    const name = String($('#group-name')?.value || '').trim();
+    const raw = String($('#group-members')?.value || '');
+    const usernames = raw.split(',').map(normalizeUsername).filter(Boolean);
+    if (!name) return setModalMessage('group-message', 'Escribe un nombre para el grupo.', 'error');
 
     let memberIds = [];
-
-
-    if (
-        usernames.length
-    ) {
-
-        const {
-            data: profiles,
-            error
-        } =
-            await supabase
-                .from("profiles")
-                .select(
-                    "id,username"
-                )
-                .in(
-                    "username",
-                    usernames
-                );
-
-
-        if (error) {
-
-            console.error(
-                error
-            );
-
-            message.textContent =
-                "No se pudieron buscar los usuarios.";
-
-            message.style.color =
-                "#ff9b9b";
-
-            return;
-        }
-
-
-        const found =
-            new Set(
-                (
-                    profiles ||
-                    []
-                )
-                    .map(
-                        profile =>
-                            profile.username
-                    )
-            );
-
-
-        const missing =
-            usernames.filter(
-                username =>
-                    !found.has(
-                        username
-                    )
-            );
-
-
-        if (
-            missing.length
-        ) {
-
-            message.textContent =
-                "No existe: @" +
-                missing.join(
-                    ", @"
-                );
-
-            message.style.color =
-                "#ff9b9b";
-
-            return;
-        }
-
-
-        memberIds =
-            (
-                profiles ||
-                []
-            )
-                .map(
-                    profile =>
-                        profile.id
-                );
-
+    if (usernames.length) {
+      const { data: profiles, error } = await supabase.from('profiles').select('id,username').in('username', usernames);
+      if (error) return setModalMessage('group-message', 'No se pudieron buscar los usuarios.', 'error');
+      const found = new Set((profiles || []).map(p => p.username));
+      const missing = usernames.filter(u => !found.has(u));
+      if (missing.length) return setModalMessage('group-message', `No existe: @${missing.join(', @')}`, 'error');
+      memberIds = (profiles || []).map(p => p.id);
     }
 
-
-    const {
-        data: conversationId,
-        error
-    } =
-        await supabase.rpc(
-            "create_group",
-            {
-                group_name:
-                    name,
-
-                member_ids:
-                    memberIds
-
-            }
-        );
-
-
+    const { data: conversationId, error } = await supabase.rpc('create_group', { group_name: name, member_ids: memberIds });
     if (error) {
-
-        console.error(
-            "CREATE GROUP ERROR:",
-            error
-        );
-
-        message.textContent =
-            "No se pudo crear el grupo.";
-
-        message.style.color =
-            "#ff9b9b";
-
-        return;
+      console.error(error);
+      return setModalMessage('group-message', 'No se pudo crear el grupo.', 'error');
     }
-
-
-    closeModal(
-        "group-modal"
-    );
-
-
+    closeModal('group-modal');
     await loadConversations();
+    await openConversation(conversationId);
+  }
 
+  function closeModal(id) {
+    document.getElementById(id)?.classList.add('hidden');
+  }
 
-    await openConversation(
-        conversationId
-    );
+  function formatTime(timestamp) {
+    return new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  }
 
-}
+  function scrollMessages() {
+    const box = $('#messages');
+    if (box) box.scrollTop = box.scrollHeight;
+  }
 
+  function setupRealtime() {
+    if (!currentUser || !supabaseReady()) return;
+    if (requestChannel) supabase.removeChannel(requestChannel);
+    requestChannel = supabase.channel(`xifre-requests-${currentUser.id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${currentUser.id}` }, () => {
+      toast('Tienes una nueva solicitud de amistad.', 'info');
+    }).subscribe();
+  }
 
-/* =========================================================
-   REQUEST REALTIME
-   ========================================================= */
+  function bindEvents() {
+    /* Navegación: un único listener delegado. Un fallo de otra función no puede dejar muerto Entrar. */
+    document.addEventListener('click', event => {
+      const nav = event.target.closest('[data-go]');
+      if (nav) {
+        event.preventDefault();
+        const target = nav.dataset.go;
+        setMessage('login-message', '');
+        setMessage('register-message', '');
+        showScreen(target);
+        return;
+      }
 
-function setupRequestRealtime() {
+      const action = event.target.closest('[data-action]');
+      if (!action) return;
+      const type = action.dataset.action;
+      if (type === 'logout') logout();
+      if (type === 'resend') resendConfirmation();
+      if (type === 'close-modal') closeModal(action.dataset.modal);
+      if (type === 'open-friend') {
+        $('#friend-modal')?.classList.remove('hidden');
+        $('#friend-username')?.focus();
+      }
+      if (type === 'open-group') {
+        $('#group-modal')?.classList.remove('hidden');
+        $('#group-name')?.focus();
+      }
+      if (type === 'send-friend') sendFriendRequest();
+      if (type === 'create-group') createGroup();
+    });
 
-    if (
-        !currentUser
-    ) return;
+    $('#login-form')?.addEventListener('submit', event => { event.preventDefault(); login(); });
+    $('#register-form')?.addEventListener('submit', event => { event.preventDefault(); register(); });
+    $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); sendMessage(); });
 
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        $$('.modal:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
+      }
+      if (event.key === 'Enter' && event.target.matches('#friend-username')) {
+        event.preventDefault();
+        sendFriendRequest();
+      }
+    });
+  }
 
-    if (
-        requestChannel
-    ) {
-
-        supabase.removeChannel(
-            requestChannel
-        );
-
+  function initSupabase() {
+    try {
+      if (window.supabase && typeof window.supabase.createClient === 'function') {
+        supabase = window.supabase.createClient(CONFIG.url, CONFIG.key, {
+          auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+        });
+        supabase.auth.onAuthStateChange((event, session) => {
+          setTimeout(async () => {
+            if (event === 'SIGNED_IN' && session) await startApplication();
+            if (event === 'SIGNED_OUT') closeApplication();
+          }, 0);
+        });
+      } else {
+        console.error('XIFRE: Supabase CDN no cargado.');
+      }
+    } catch (error) {
+      console.error('XIFRE: Supabase init:', error);
+      supabase = null;
     }
+  }
 
+  async function bootAuth() {
+    showScreen('landing');
+    if (!supabaseReady()) return;
 
-    requestChannel =
-        supabase
-            .channel(
-                "xifre-requests-" +
-                currentUser.id
-            )
-            .on(
-                "postgres_changes",
-                {
-                    event:
-                        "*",
-
-                    schema:
-                        "public",
-
-                    table:
-                        "friend_requests",
-
-                    filter:
-                        "receiver_id=eq." +
-                        currentUser.id
-
-                },
-                payload => {
-
-                    console.log(
-                        "Friend request:",
-                        payload
-                    );
-
-                }
-            )
-            .subscribe();
-
-}
-
-
-/* =========================================================
-   LOGOUT
-   ========================================================= */
-
-document
-    .getElementById(
-        "logout-button"
-    )
-    .addEventListener(
-        "click",
-        async () => {
-
-            await supabase.auth.signOut();
-
-        }
-    );
-
-
-/* =========================================================
-   CLOSE APPLICATION
-   ========================================================= */
-
-function closeApplication() {
-
-    currentUser =
-        null;
-
-    currentProfile =
-        null;
-
-    currentConversation =
-        null;
-
-
-    if (
-        messageChannel
-    ) {
-
-        supabase.removeChannel(
-            messageChannel
-        );
-
-        messageChannel =
-            null;
-
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) await startApplication();
+    } catch (error) {
+      console.error('XIFRE SESSION:', error);
+      showScreen('landing');
     }
+  }
 
+  function start() {
+    bindEvents();
+    initSupabase();
+    bootAuth();
+  }
 
-    if (
-        requestChannel
-    ) {
-
-        supabase.removeChannel(
-            requestChannel
-        );
-
-        requestChannel =
-            null;
-
-    }
-
-
-    hideMainApp();
-
-    showScreen(
-        "landing"
-    );
-
-}
-
-
-/* =========================================================
-   MODALS
-   ========================================================= */
-
-function closeModal(
-    id
-) {
-
-    const modal =
-        document.getElementById(
-            id
-        );
-
-
-    if (modal) {
-
-        modal.classList.add(
-            "hidden"
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   TIME
-   ========================================================= */
-
-function formatTime(
-    timestamp
-) {
-
-    return new Date(
-        timestamp
-    ).toLocaleTimeString(
-        "es-ES",
-        {
-            hour:
-                "2-digit",
-
-            minute:
-                "2-digit"
-        }
-    );
-
-}
-
-
-/* =========================================================
-   SCROLL
-   ========================================================= */
-
-function scrollMessages() {
-
-    const container =
-        document.getElementById(
-            "messages"
-        );
-
-
-    container.scrollTop =
-        container.scrollHeight;
-
-}
-
-
-/* =========================================================
-   FINAL UI SAFETY NET
-   ========================================================= */
-
-/*
-   Estos listeners son una segunda capa de seguridad.
-   Incluso si una parte de Supabase falla, la navegación visual
-   sigue funcionando.
-*/
-
-const safeEnterButton = document.getElementById("enter-button");
-const safeGoRegister = document.getElementById("go-register");
-const safeGoLogin = document.getElementById("go-login");
-const safeBackLogin = document.getElementById("back-from-login");
-const safeBackRegister = document.getElementById("back-from-register");
-
-if (safeEnterButton) {
-    safeEnterButton.onclick = () => showScreen("login");
-}
-
-if (safeGoRegister) {
-    safeGoRegister.onclick = () => showScreen("register");
-}
-
-if (safeGoLogin) {
-    safeGoLogin.onclick = () => showScreen("login");
-}
-
-if (safeBackLogin) {
-    safeBackLogin.onclick = () => showScreen("landing");
-}
-
-if (safeBackRegister) {
-    safeBackRegister.onclick = () => showScreen("landing");
-}
-
-/* =========================================================
-   START
-   ========================================================= */
-
-initialize();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
