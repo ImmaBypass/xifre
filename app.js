@@ -256,32 +256,76 @@ async function loadProfile() {
 }
 
 async function startApplication(session = null) {
+  if (!supabase) throw new Error('Supabase no está inicializado.');
+
+  const sessionUser = session?.user || null;
   if (startPromise) return startPromise;
 
   startPromise = (async () => {
     try {
-      let user = session?.user || null;
+      let user = sessionUser;
+
       if (!user) {
-        const { data, error } = await supabase.auth.getUser();
+        const { data, error } = await supabase.auth.getSession();
         if (error) throw error;
-        user = data.user;
+        user = data?.session?.user || null;
       }
-      if (!user) throw new Error('No hay usuario autenticado.');
+
+      if (!user) throw new Error('No hay una sesión autenticada.');
 
       currentUser = user;
-      await loadProfile();
+
+      // La cuenta autenticada es suficiente para entrar a la aplicación.
+      // Un problema al cargar perfiles/chats NO debe devolver al usuario
+      // a la pantalla de login ni hacerle perder la sesión.
+      try {
+        await loadProfile();
+      } catch (profileError) {
+        console.warn('PROFILE STARTUP', profileError);
+      }
+
       appStarted = true;
       showMain();
       resetChatView();
 
-      const results = await Promise.allSettled([loadFriends(), loadConversations(), loadFriendRequests()]);
+      const results = await Promise.allSettled([
+        loadFriends(),
+        loadConversations(),
+        loadFriendRequests()
+      ]);
       results.forEach(result => {
         if (result.status === 'rejected') console.error('START LOAD', result.reason);
       });
-      setupRequestRealtime();
+
+      try {
+        setupRequestRealtime();
+      } catch (realtimeError) {
+        console.warn('REQUEST REALTIME', realtimeError);
+      }
+
       return true;
     } catch (error) {
       console.error('START', error);
+
+      // Solo volvemos al login si realmente no existe una sesión válida.
+      // Un fallo de perfiles, chats o Realtime no debe expulsar al usuario.
+      let validSession = null;
+      try {
+        const { data } = await supabase.auth.getSession();
+        validSession = data?.session || null;
+      } catch (sessionError) {
+        console.warn('SESSION CHECK AFTER START ERROR', sessionError);
+      }
+
+      if (validSession?.user) {
+        currentUser = validSession.user;
+        appStarted = true;
+        showMain();
+        resetChatView();
+        toast('Sesión iniciada. Algunas partes de Xifre todavía están cargando.', 'info');
+        return true;
+      }
+
       appStarted = false;
       currentUser = null;
       showScreen('login');
@@ -1128,515 +1172,65 @@ function bind() {
   });
 }
 
-function init() {
+async function init() {
   bind();
+
   try {
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+      throw new Error('La librería de Supabase no se ha cargado.');
+    }
+
     supabase = window.supabase.createClient(CONFIG.url, CONFIG.key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
+        storageKey: 'xifre-auth-v6'
       }
     });
 
+    // Primero escuchamos los cambios de autenticación y después consultamos
+    // la sesión actual. Así no se pierde un SIGNED_IN que llegue durante el arranque.
     supabase.auth.onAuthStateChange((event, session) => {
       setTimeout(() => {
-        if (event === 'SIGNED_IN' && session) startApplication(session);
-        if (event === 'SIGNED_OUT') closeApplication();
+        if (event === 'SIGNED_IN' && session) {
+          void startApplication(session);
+        } else if (event === 'TOKEN_REFRESHED' && session && !appStarted) {
+          void startApplication(session);
+        } else if (event === 'INITIAL_SESSION' && session && !appStarted) {
+          void startApplication(session);
+        } else if (event === 'SIGNED_OUT') {
+          closeApplication();
+        }
       }, 0);
     });
 
-    supabase.auth.getSession()
-      .then(({ data, error }) => {
-        if (error) throw error;
-        if (data?.session) startApplication(data.session);
-      })
-      .catch(error => console.error('SESSION', error));
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+
+    if (data?.session) {
+      await startApplication(data.session);
+    } else {
+      showScreen('landing');
+    }
   } catch (error) {
     console.error('SUPABASE INIT', error);
     supabase = null;
+    showScreen('login');
+    setMessage('login-message', `No se pudo iniciar Xifre: ${error?.message || 'error de inicialización'}`, 'error');
   }
 }
+
+// Exponemos solo las acciones necesarias para que el HTML pueda impedir
+// cualquier submit/navegación nativa y delegar siempre en Xifre.
+window.XIFRE = {
+  login,
+  register,
+  showScreen,
+  logout
+};
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
 else init();
 
 })();
-
-============================== XIFRE_V6_SUPABASE.sql ==============================
-
--- XIFRE V6 — CHAT ESTABLE
--- Ejecuta TODO este archivo en Supabase > SQL Editor > Run.
--- Está diseñado para que el navegador no tenga que resolver la lógica de
--- conversaciones mediante varias consultas RLS: el chat usa RPCs seguros.
-
-create schema if not exists private;
-
-alter table public.conversations enable row level security;
-alter table public.conversation_members enable row level security;
-alter table public.messages enable row level security;
-
-grant select on public.conversations to authenticated;
-grant select on public.conversation_members to authenticated;
-grant select, insert on public.messages to authenticated;
-
--- ---------------------------------------------------------------------------
--- Helper RLS: devuelve SOLO las conversaciones del usuario actual.
--- ---------------------------------------------------------------------------
-drop function if exists private.xifre_my_conversation_ids();
-create function private.xifre_my_conversation_ids()
-returns setof uuid
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select cm.conversation_id
-  from public.conversation_members cm
-  where cm.user_id = (select auth.uid())
-$$;
-
-revoke execute on function private.xifre_my_conversation_ids() from public, anon;
-grant usage on schema private to authenticated;
-grant execute on function private.xifre_my_conversation_ids() to authenticated;
-
--- ---------------------------------------------------------------------------
--- RLS de lectura para Realtime y para cualquier lectura directa restante.
--- ---------------------------------------------------------------------------
-drop policy if exists "xifre conversations select" on public.conversations;
-create policy "xifre conversations select"
-on public.conversations
-for select to authenticated
-using (id in (select private.xifre_my_conversation_ids()));
-
-drop policy if exists "xifre conversation_members select" on public.conversation_members;
-create policy "xifre conversation_members select"
-on public.conversation_members
-for select to authenticated
-using (conversation_id in (select private.xifre_my_conversation_ids()));
-
-drop policy if exists "xifre messages select" on public.messages;
-create policy "xifre messages select"
-on public.messages
-for select to authenticated
-using (conversation_id in (select private.xifre_my_conversation_ids()));
-
-drop policy if exists "xifre messages insert" on public.messages;
-create policy "xifre messages insert"
-on public.messages
-for insert to authenticated
-with check (
-  sender_id = (select auth.uid())
-  and conversation_id in (select private.xifre_my_conversation_ids())
-);
-
--- ---------------------------------------------------------------------------
--- Crear/abrir privado.
--- ---------------------------------------------------------------------------
-drop function if exists public.create_private_chat(uuid);
-create function public.create_private_chat(other_user uuid)
-returns uuid
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  me uuid := (select auth.uid());
-  conv_id uuid;
-  first_id uuid;
-  second_id uuid;
-begin
-  if me is null then raise exception 'No autenticado'; end if;
-  if other_user is null or other_user = me then raise exception 'Usuario no válido'; end if;
-
-  first_id := least(me, other_user);
-  second_id := greatest(me, other_user);
-
-  if not exists (
-    select 1
-    from public.friendships f
-    where f.user1_id = first_id
-      and f.user2_id = second_id
-  ) then
-    raise exception 'Solo puedes abrir chats con amigos';
-  end if;
-
-  select c.id
-  into conv_id
-  from public.conversations c
-  where c.type::text = 'private'
-    and exists (
-      select 1 from public.conversation_members cm
-      where cm.conversation_id = c.id and cm.user_id = me
-    )
-    and exists (
-      select 1 from public.conversation_members cm
-      where cm.conversation_id = c.id and cm.user_id = other_user
-    )
-    and (
-      select count(*)
-      from public.conversation_members cm
-      where cm.conversation_id = c.id
-    ) = 2
-  order by c.created_at asc
-  limit 1;
-
-  if conv_id is not null then
-    return conv_id;
-  end if;
-
-  insert into public.conversations(type, name, owner_id)
-  values ('private', null, me)
-  returning id into conv_id;
-
-  insert into public.conversation_members(conversation_id, user_id)
-  values (conv_id, me), (conv_id, other_user);
-
-  return conv_id;
-end;
-$$;
-
-revoke execute on function public.create_private_chat(uuid) from public, anon;
-grant execute on function public.create_private_chat(uuid) to authenticated;
-
--- ---------------------------------------------------------------------------
--- Crear grupo.
--- ---------------------------------------------------------------------------
-drop function if exists public.create_group(text, uuid[]);
-create function public.create_group(group_name text, member_ids uuid[])
-returns uuid
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  me uuid := (select auth.uid());
-  conv_id uuid;
-  ids uuid[];
-  member uuid;
-begin
-  if me is null then raise exception 'No autenticado'; end if;
-  if nullif(trim(group_name), '') is null then
-    raise exception 'El nombre del grupo es obligatorio';
-  end if;
-
-  ids := array(
-    select distinct x
-    from unnest(coalesce(member_ids, '{}'::uuid[])) x
-    where x is not null and x <> me
-  );
-
-  if coalesce(array_length(ids, 1), 0) = 0 then
-    raise exception 'Añade al menos un amigo';
-  end if;
-
-  foreach member in array ids loop
-    if not exists (
-      select 1
-      from public.friendships f
-      where f.user1_id = least(me, member)
-        and f.user2_id = greatest(me, member)
-    ) then
-      raise exception 'Todos los miembros deben ser amigos contigo';
-    end if;
-  end loop;
-
-  insert into public.conversations(type, name, owner_id)
-  values ('group', left(trim(group_name), 50), me)
-  returning id into conv_id;
-
-  insert into public.conversation_members(conversation_id, user_id)
-  values (conv_id, me);
-
-  foreach member in array ids loop
-    insert into public.conversation_members(conversation_id, user_id)
-    values (conv_id, member);
-  end loop;
-
-  return conv_id;
-end;
-$$;
-
-revoke execute on function public.create_group(text, uuid[]) from public, anon;
-grant execute on function public.create_group(text, uuid[]) to authenticated;
-
--- ---------------------------------------------------------------------------
--- Lista completa de chats del usuario.
--- Devuelve nombre/foto/último mensaje en UNA llamada.
--- ---------------------------------------------------------------------------
-drop function if exists public.xifre_get_my_conversations();
-create function public.xifre_get_my_conversations()
-returns table (
-  id uuid,
-  type text,
-  name text,
-  owner_id uuid,
-  created_at timestamptz,
-  display_name text,
-  username text,
-  avatar_url text,
-  member_count bigint,
-  last_message text,
-  last_message_at timestamptz
-)
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select
-    c.id,
-    c.type::text,
-    c.name,
-    c.owner_id,
-    c.created_at,
-    case
-      when c.type::text = 'private'
-        then coalesce(other_profile.display_name, other_profile.username, 'Usuario')
-      else coalesce(c.name, 'Grupo')
-    end as display_name,
-    case
-      when c.type::text = 'private' then other_profile.username
-      else null
-    end as username,
-    case
-      when c.type::text = 'private' then other_profile.avatar_url
-      else null
-    end as avatar_url,
-    (
-      select count(*)
-      from public.conversation_members cm_count
-      where cm_count.conversation_id = c.id
-    ) as member_count,
-    last_msg.content as last_message,
-    last_msg.created_at as last_message_at
-  from public.conversations c
-  join public.conversation_members mine
-    on mine.conversation_id = c.id
-   and mine.user_id = (select auth.uid())
-  left join lateral (
-    select
-      p.display_name,
-      p.username,
-      p.avatar_url
-    from public.conversation_members cm_other
-    join public.profiles p on p.id = cm_other.user_id
-    where cm_other.conversation_id = c.id
-      and cm_other.user_id <> (select auth.uid())
-    order by cm_other.user_id
-    limit 1
-  ) other_profile on true
-  left join lateral (
-    select m.content, m.created_at
-    from public.messages m
-    where m.conversation_id = c.id
-    order by m.created_at desc
-    limit 1
-  ) last_msg on true
-  order by coalesce(last_msg.created_at, c.created_at) desc;
-$$;
-
-revoke execute on function public.xifre_get_my_conversations() from public, anon;
-grant execute on function public.xifre_get_my_conversations() to authenticated;
-
--- ---------------------------------------------------------------------------
--- Miembros de un chat.
--- ---------------------------------------------------------------------------
-drop function if exists public.xifre_get_conversation_members(uuid);
-create function public.xifre_get_conversation_members(p_conversation_id uuid)
-returns table (
-  user_id uuid,
-  username text,
-  display_name text,
-  avatar_url text,
-  is_owner boolean
-)
-language plpgsql
-stable
-security definer
-set search_path = ''
-as $$
-begin
-  if not exists (
-    select 1
-    from public.conversation_members cm
-    where cm.conversation_id = p_conversation_id
-      and cm.user_id = (select auth.uid())
-  ) then
-    raise exception 'No tienes acceso a esta conversación';
-  end if;
-
-  return query
-  select
-    cm.user_id,
-    p.username,
-    p.display_name,
-    p.avatar_url,
-    c.owner_id = cm.user_id as is_owner
-  from public.conversation_members cm
-  join public.conversations c on c.id = cm.conversation_id
-  join public.profiles p on p.id = cm.user_id
-  where cm.conversation_id = p_conversation_id
-  order by c.owner_id = cm.user_id desc, lower(coalesce(p.display_name, p.username, ''));
-end;
-$$;
-
-revoke execute on function public.xifre_get_conversation_members(uuid) from public, anon;
-grant execute on function public.xifre_get_conversation_members(uuid) to authenticated;
-
--- ---------------------------------------------------------------------------
--- Mensajes de un chat.
--- ---------------------------------------------------------------------------
-drop function if exists public.xifre_get_messages(uuid, integer);
-create function public.xifre_get_messages(p_conversation_id uuid, p_limit integer default 200)
-returns table (
-  id uuid,
-  conversation_id uuid,
-  sender_id uuid,
-  content text,
-  created_at timestamptz,
-  sender_username text,
-  sender_display_name text,
-  sender_avatar_url text
-)
-language plpgsql
-stable
-security definer
-set search_path = ''
-as $$
-  begin
-    if not exists (
-      select 1
-      from public.conversation_members cm
-      where cm.conversation_id = p_conversation_id
-        and cm.user_id = (select auth.uid())
-    ) then
-      raise exception 'No tienes acceso a esta conversación';
-    end if;
-
-    return query
-    select
-      m.id,
-      m.conversation_id,
-      m.sender_id,
-      m.content,
-      m.created_at,
-      p.username,
-      p.display_name,
-      p.avatar_url
-    from public.messages m
-    left join public.profiles p on p.id = m.sender_id
-    where m.conversation_id = p_conversation_id
-    order by m.created_at asc
-    limit greatest(1, least(coalesce(p_limit, 200), 500));
-  end;
-$$;
-
-revoke execute on function public.xifre_get_messages(uuid, integer) from public, anon;
-grant execute on function public.xifre_get_messages(uuid, integer) to authenticated;
-
--- ---------------------------------------------------------------------------
--- Enviar mensaje desde una única operación segura.
--- ---------------------------------------------------------------------------
-drop function if exists public.xifre_send_message(uuid, text);
-create function public.xifre_send_message(p_conversation_id uuid, p_content text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  me uuid := (select auth.uid());
-  new_id uuid;
-  clean_content text := trim(coalesce(p_content, ''));
-  result jsonb;
-begin
-  if me is null then raise exception 'No autenticado'; end if;
-  if clean_content = '' then raise exception 'El mensaje está vacío'; end if;
-  if length(clean_content) > 2000 then raise exception 'El mensaje es demasiado largo'; end if;
-
-  if not exists (
-    select 1
-    from public.conversation_members cm
-    where cm.conversation_id = p_conversation_id
-      and cm.user_id = me
-  ) then
-    raise exception 'No tienes acceso a esta conversación';
-  end if;
-
-  insert into public.messages(conversation_id, sender_id, content)
-  values (p_conversation_id, me, clean_content)
-  returning id into new_id;
-
-  select jsonb_build_object(
-    'id', m.id,
-    'conversation_id', m.conversation_id,
-    'sender_id', m.sender_id,
-    'content', m.content,
-    'created_at', m.created_at,
-    'sender_username', p.username,
-    'sender_display_name', p.display_name,
-    'sender_avatar_url', p.avatar_url
-  )
-  into result
-  from public.messages m
-  left join public.profiles p on p.id = m.sender_id
-  where m.id = new_id;
-
-  return result;
-end;
-$$;
-
-revoke execute on function public.xifre_send_message(uuid, text) from public, anon;
-grant execute on function public.xifre_send_message(uuid, text) to authenticated;
-
--- ---------------------------------------------------------------------------
--- Realtime para mensajes y solicitudes.
--- ---------------------------------------------------------------------------
-do $$
-begin
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'messages'
-  ) then
-    alter publication supabase_realtime add table public.messages;
-  end if;
-
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'friend_requests'
-  ) then
-    alter publication supabase_realtime add table public.friend_requests;
-  end if;
-end $$;
-
-create index if not exists xifre_messages_conversation_created_idx
-  on public.messages(conversation_id, created_at);
-
-create index if not exists xifre_conversation_members_user_idx
-  on public.conversation_members(user_id, conversation_id);
-
--- Verificación final.
-select routine_name
-from information_schema.routines
-where routine_schema = 'public'
-  and routine_name in (
-    'create_private_chat',
-    'create_group',
-    'xifre_get_my_conversations',
-    'xifre_get_conversation_members',
-    'xifre_get_messages',
-    'xifre_send_message'
-  )
-order by routine_name;
-
-select tablename
-from pg_publication_tables
-where pubname = 'supabase_realtime'
-  and schemaname = 'public'
-  and tablename in ('messages', 'friend_requests')
-order by tablename;
