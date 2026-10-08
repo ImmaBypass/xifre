@@ -33,6 +33,13 @@
   let conversationCache = [];
   let friendCache = [];
   let memberCache = new Map();
+  let currentMentionIds = new Set();
+  let mentionEverywhere = false;
+  let mentionPickerIndex = 0;
+  let selectedMember = null;
+  let selectedConversationForMenu = null;
+  let conversationSearchTimer = null;
+  let conversationListPoll = null;
 
   const screens = ['landing', 'login', 'register', 'email'];
 
@@ -46,20 +53,23 @@
     return div.innerHTML;
   }
 
-  function avatarHTML(name, url, kind = 'private', className = '') {
+  function avatarHTML(name, url, kind = 'private', className = '', color = '') {
     const safeName = String(name || (kind === 'group' ? 'Grupo' : 'Usuario')).trim() || (kind === 'group' ? 'Grupo' : 'Usuario');
     const initial = kind === 'group' ? '#' : (safeName.charAt(0).toUpperCase() || 'X');
     const safeUrl = String(url || '').trim();
-    const fallbackClass = `avatar-fallback ${kind === 'group' ? 'group-fallback' : ''} ${esc(className)}`;
+    const palette = ['avatar-blue','avatar-yellow','avatar-red','avatar-green','avatar-orange'];
+    let hash = 0; for (const ch of safeName) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+    const colorClass = kind === 'group' ? 'avatar-group' : (color || palette[Math.abs(hash) % palette.length]);
+    const fallbackClass = `avatar-fallback ${kind === 'group' ? 'group-fallback' : ''} ${colorClass} ${esc(className)}`;
     if (safeUrl) {
       return `<span class="avatar-media ${esc(className)}"><img class="avatar-img" src="${esc(safeUrl)}" alt="" loading="lazy" onerror="this.style.display='none'"><span class="${fallbackClass} avatar-fallback-hidden">${esc(initial)}</span></span>`;
     }
     return `<span class="${fallbackClass}">${esc(initial)}</span>`;
   }
 
-  function avatarInto(element, name, url, kind = 'private') {
+  function avatarInto(element, name, url, kind = 'private', color = '') {
     if (!element) return;
-    element.innerHTML = avatarHTML(name, url, kind);
+    element.innerHTML = avatarHTML(name, url, kind, '', color);
   }
 
   function setText(id, value) {
@@ -261,13 +271,14 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url').eq('id', currentUser.id).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color').eq('id', currentUser.id).maybeSingle();
     if (error) console.warn('PROFILE LOAD', error);
     currentProfile = data || {
       id: currentUser.id,
       username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
       display_name: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
-      avatar_url: null
+      avatar_url: null,
+      avatar_color: 'avatar-blue'
     };
     currentProfile.display_name = currentProfile.username;
     syncProfileUI();
@@ -283,9 +294,9 @@
     setText('settings-nav-username', `@${username}`);
     setText('settings-preview-username', `@${username}`);
     avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url);
-    avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url);
-    avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url);
-    if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url);
+    avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
+    avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
+    if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
     const settingsUsername = $('#settings-username');
     if (settingsUsername && document.activeElement !== settingsUsername) settingsUsername.value = username;
   }
@@ -315,6 +326,9 @@
       results.forEach(result => {
         if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
       });
+
+      if (conversationListPoll) clearInterval(conversationListPoll);
+      conversationListPoll = setInterval(() => { if (document.visibilityState === 'visible' && currentUser) loadConversations().catch(() => {}); }, 4000);
 
       try {
         await restoreConversation();
@@ -351,6 +365,8 @@
       console.error('LOGOUT', error);
     } finally {
       stopChatRealtime();
+      if (conversationListPoll) clearInterval(conversationListPoll);
+      conversationListPoll = null;
       currentUser = null;
       currentProfile = null;
       currentConversation = null;
@@ -378,7 +394,7 @@
     if (error) { console.warn('FRIENDS', error); friendCache = []; return; }
     const ids = [...new Set((data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
     if (!ids.length) { friendCache = []; return; }
-    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url').in('id', ids);
+    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color').in('id', ids);
     if (!result.error) friendCache = result.data || [];
   }
 
@@ -419,7 +435,7 @@
       const row = document.createElement('div');
       row.className = 'search-result';
       row.innerHTML = `
-        <span class="search-avatar">${avatarHTML(person.username, person.avatar_url)}</span>
+        <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
         <div class="result-copy"><strong>${esc(person.username)}</strong><small>${relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Solicitud recibida' : 'No conectado'}</small></div>`;
       const action = document.createElement('button');
       action.type = 'button';
@@ -462,7 +478,7 @@
     friendCache.forEach(friend => {
       const row = document.createElement('div');
       row.className = 'friend-item';
-      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar')}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
+      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
       row.querySelector('button').addEventListener('click', async () => { closeModal('friends-modal'); await openPrivateChat(friend.id); });
       list.appendChild(row);
     });
@@ -475,7 +491,7 @@
     const ids = [...new Set((base.data || []).map(x => x.sender_id))];
     let profiles = [];
     if (ids.length) {
-      const result = await supabase.from('profiles').select('id,username,avatar_url').in('id', ids);
+      const result = await supabase.from('profiles').select('id,username,avatar_url,avatar_color').in('id', ids);
       if (!result.error) profiles = result.data || [];
     }
     const map = new Map(profiles.map(p => [p.id, p]));
@@ -537,34 +553,53 @@
   /* Conversations                                                            */
   /* ------------------------------------------------------------------------ */
   async function loadConversations() {
-    if (!currentUser) return;
+    if (!currentUser) return [];
     const { data, error } = await supabase.rpc('xifre_get_my_conversations');
-    if (error) { console.warn('CONVERSATIONS', error); return []; }
+    if (error) { console.warn('CONVERSATIONS', error); return conversationCache; }
     conversationCache = (data || []).map(row => ({ ...row, displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado') }));
+    conversationCache.sort((a,b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
     renderConversations();
     return conversationCache;
   }
 
-  function renderConversations() {
-    const list = $('#conversation-list');
-    if (!list) return;
+  function renderConversations(filter = '') {
+    const list = $('#conversation-list'); if (!list) return;
     list.innerHTML = '';
     setText('chat-count', conversationCache.length);
-    if (!conversationCache.length) {
-      list.innerHTML = '<div class="empty-sidebar">No tienes conversaciones todavía.</div>';
-      return;
-    }
-    conversationCache.forEach(conversation => {
+    const q = normalizeUsername(filter);
+    const visible = conversationCache.filter(c => !q || normalizeUsername(c.displayName || c.name).includes(q) || normalizeUsername(c.username).includes(q));
+    if (!visible.length) { list.innerHTML = `<div class="empty-sidebar">${q ? 'No se encontraron conversaciones.' : 'No tienes conversaciones todavía.'}</div>`; return; }
+    visible.forEach(conversation => {
       const isGroup = conversation.type === 'group';
       const label = conversation.displayName || conversation.name || (isGroup ? 'Grupo' : 'Chat privado');
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = `conversation${String(currentConversation) === String(conversation.id) ? ' active' : ''}`;
-      row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup ? 'group' : 'private', 'conversation-avatar-image')}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview">${esc(conversation.last_message || (isGroup ? `${conversation.member_count || 0} miembros` : 'Conversación'))}</span></span><span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span>`;
-      row.addEventListener('click', () => openConversation(conversation.id, conversation));
+      const row = document.createElement('button'); row.type='button';
+      const unread = Number(conversation.unread_count || 0);
+      const mentioned = !!conversation.has_mention;
+      row.className = `conversation${String(currentConversation)===String(conversation.id)?' active':''}${unread?' unread':''}`;
+      row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color)}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
+      row.addEventListener('click',()=>openConversation(conversation.id,conversation));
+      row.addEventListener('contextmenu',e=>{e.preventDefault(); openConversationMenu(conversation,e.clientX,e.clientY);});
       list.appendChild(row);
     });
   }
+
+  function openConversationSearch() {
+    openModal('conversation-search-modal');
+    const input=$('#conversation-search-input'); input.value=''; renderConversationSearch(''); setTimeout(()=>input.focus(),0);
+  }
+  function renderConversationSearch(query) {
+    const list=$('#conversation-search-results'); if(!list)return;
+    const q=normalizeUsername(query); const matches=conversationCache.filter(c=>!q||normalizeUsername(c.displayName||c.name).includes(q)||normalizeUsername(c.username).includes(q));
+    list.innerHTML='';
+    if(!matches.length){list.innerHTML='<div class="empty-sidebar">No se encontraron conversaciones.</div>';return;}
+    matches.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='friend-item';const group=c.type==='group';row.innerHTML=`${avatarHTML(c.displayName,c.avatar_url,group?'group':'private','friend-avatar')}<div class="friend-copy"><strong>${esc(c.displayName)}</strong><small>${group?'Grupo':'@'+esc(c.username||'')}</small></div><span class="open-chat">Abrir</span>`;row.addEventListener('click',()=>{closeModal('conversation-search-modal');openConversation(c.id,c);});list.appendChild(row);});
+  }
+
+  function openConversationMenu(conversation,x,y){
+    selectedConversationForMenu=conversation; const menu=$('#conversation-menu'); if(!menu)return; menu.classList.remove('hidden'); menu.style.left=`${Math.min(x,window.innerWidth-210)}px`; menu.style.top=`${Math.min(y,window.innerHeight-70)}px`;
+  }
+  function closeConversationMenu(){ $('#conversation-menu')?.classList.add('hidden'); selectedConversationForMenu=null; }
+  async function markConversationRead(id){ if(!id||!currentUser)return; const {error}=await supabase.rpc('xifre_mark_read',{p_conversation_id:id}); if(!error){const c=conversationCache.find(x=>String(x.id)===String(id));if(c){c.unread_count=0;c.has_mention=false;}renderConversations();} closeConversationMenu(); }
 
   async function openPrivateChat(friendId) {
     try {
@@ -601,6 +636,9 @@
       renderRightPane();
       renderConversations();
       await loadMessages(conversationId);
+      await supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId });
+      const readRow = conversationCache.find(c => String(c.id) === conversationId); if (readRow) { readRow.unread_count = 0; readRow.has_mention = false; }
+      renderConversations();
       setupTypingChannel(conversationId);
       setupMessageChannel(conversationId);
       $('#message-input').disabled = false;
@@ -637,7 +675,7 @@
     } else {
       subtitle = `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`;
     }
-    avatarInto($('#chat-avatar'), name, url, isGroup ? 'group' : 'private');
+    avatarInto($('#chat-avatar'), name, url, isGroup ? 'group' : 'private', isGroup ? '' : (currentMembers.find(m=>String(m.user_id)!==String(currentUser.id))?.avatar_color || ''));
     setText('chat-title', name);
     setText('chat-subtitle', subtitle);
     $('#chat-info-button')?.classList.remove('hidden');
@@ -651,64 +689,59 @@
   }
 
   async function loadMessages(conversationId) {
-    const { data, error } = await supabase.rpc('xifre_get_messages', { p_conversation_id: conversationId, p_limit: 300 });
+    const { data, error } = await supabase.rpc('xifre_get_messages', { p_conversation_id: conversationId, p_limit: 500 });
     if (error) throw error;
     renderMessages((data || []).map(messageObject), true);
   }
 
-  function renderMessages(messages, forceBottom = false) {
-    const box = $('#messages');
-    if (!box) return;
-    const wasNearBottom = forceBottom || box.scrollHeight - box.scrollTop - box.clientHeight < 140;
-    box.innerHTML = '';
-    if (!messages.length) {
-      box.innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
-      return;
-    }
-    const profiles = new Map(currentMembers.map(m => [String(m.user_id), m]));
-    messages.forEach(message => renderOneMessage(message, profiles));
-    if (wasNearBottom) box.scrollTop = box.scrollHeight;
+  function renderMessageContent(content, message) {
+    const members = currentMembers || [];
+    let html = esc(content || '');
+    html = html.replace(/@everyone\b/g, '<span class="mention-token everyone">@everyone</span>');
+    members.forEach(m => {
+      const u=String(m.username||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); if(!u)return;
+      const re=new RegExp(`@${u}\\b`,'gi');
+      html=html.replace(re, `<span class="mention-token ${String(m.user_id)===String(currentUser.id)?'self':''}">@${esc(m.username)}</span>`);
+    });
+    return html;
   }
 
-  function renderOneMessage(message, profiles = new Map()) {
-    const box = $('#messages');
-    if (!box || !message?.id) return;
-    if (box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`)) return;
-    $('.chat-welcome', box)?.remove();
-    const mine = String(message.sender_id) === String(currentUser.id);
-    const cachedSender = profiles.get(String(message.sender_id)) || {};
-    const sender = {
-      username: message.sender_username || cachedSender.username || 'Usuario',
-      avatar_url: message.sender_avatar_url || cachedSender.avatar_url || null
-    };
-    const row = document.createElement('article');
-    row.className = `message-row${mine ? ' mine' : ''}`;
-    row.dataset.messageId = String(message.id);
-    row.innerHTML = `
-      <span class="message-avatar">${avatarHTML(sender.username || 'Usuario', sender.avatar_url)}</span>
-      <div class="message-body">
-        ${message.reply_to ? `<div class="message-reply-preview"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url)}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(message.reply_content || '')}</span></div></div>` : ''}
-        <div class="message-meta"><span class="message-author">${esc(sender.username || 'Usuario')}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div>
-        <div class="message-content">${esc(message.content || '')}</div>
-      </div>
-      <div class="message-actions">
-        <button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button>
-        <button class="message-action more" type="button" data-message-action="more" title="Más">•••</button>
-      </div>`;
+  function messageMentionsMe(message){
+    return String(message.sender_id)!==String(currentUser.id) && (message.mention_everyone || (message.mentions||[]).some(id=>String(id)===String(currentUser.id)));
+  }
 
-    row.querySelector('[data-message-action="reply"]').addEventListener('click', e => {
-      e.stopPropagation();
-      setReplyTo(message);
-    });
-    row.querySelector('[data-message-action="more"]').addEventListener('click', e => {
-      e.stopPropagation();
-      openMessageMenu(message, e.currentTarget);
-    });
-    row.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      openMessageMenu(message, row);
-    });
+  function renderMessages(messages, forceBottom=false) {
+    const box=$('#messages'); if(!box)return;
+    const wasNearBottom=forceBottom || box.scrollHeight-box.scrollTop-box.clientHeight<140;
+    box.innerHTML='';
+    if(!messages.length){box.innerHTML='<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';return;}
+    const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m]));
+    messages.forEach(m=>renderOneMessage(m,profiles));
+    if(wasNearBottom) box.scrollTop=box.scrollHeight;
+  }
+
+  function renderOneMessage(message, profiles=new Map()) {
+    const box=$('#messages'); if(!box||!message?.id)return;
+    if(box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`))return;
+    $('.chat-welcome',box)?.remove();
+    if(message.message_type==='system'){
+      const row=document.createElement('div');row.className='system-message-row';row.dataset.messageId=String(message.id);row.innerHTML=`<span>${esc(message.content||'')}</span>`;box.appendChild(row);return;
+    }
+    const mine=String(message.sender_id)===String(currentUser.id); const cached=profiles.get(String(message.sender_id))||{};
+    const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null};
+    const mentioned=!mine && !!(message.mention_everyone || (message.mentions||[]).some(id=>String(id)===String(currentUser.id)));
+    const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);
+    row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
+    row.querySelector('[data-message-action="reply"]').addEventListener('click',e=>{e.stopPropagation();setReplyTo(message);highlightMessage(message.id);});
+    row.querySelector('[data-message-action="more"]').addEventListener('click',e=>{e.stopPropagation();openMessageMenu(message,e.currentTarget);});
+    row.querySelector('.message-reply-preview')?.addEventListener('click',()=>highlightMessage(message.reply_to));
+    row.addEventListener('contextmenu',e=>{e.preventDefault();openMessageMenu(message,row);});
     box.appendChild(row);
+  }
+
+  function highlightMessage(id){
+    $$('.message-row', $('#messages')).forEach(r=>r.classList.remove('reply-target'));
+    const row=$(`[data-message-id="${CSS.escape(String(id))}"]`,$('#messages')); if(!row)return; row.classList.add('reply-target'); row.scrollIntoView({behavior:'smooth',block:'center'}); setTimeout(()=>row.classList.remove('reply-target'),1600);
   }
 
   function setReplyTo(message) {
@@ -762,34 +795,36 @@
     toast('Mensaje eliminado.', 'success');
   }
 
+  function updateMentionPicker(){
+    const input=$('#message-input'); const picker=$('#mention-picker'); if(!input||!picker)return;
+    const value=input.value; const before=value.slice(0,input.selectionStart??value.length); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i);
+    if(!currentConversation||!match){picker.classList.add('hidden');return;}
+    const query=match[2].toLowerCase(); let people=currentMembers.filter(m=>String(m.user_id)!==String(currentUser.id)&&String(m.username||'').toLowerCase().startsWith(query));
+    const items=[];
+    if(currentConversationData?.type==='group' && ('everyone'.startsWith(query))) items.push({everyone:true,username:'everyone'});
+    people.slice(0,8).forEach(p=>items.push(p));
+    picker.innerHTML=''; if(!items.length){picker.classList.add('hidden');return;}
+    items.forEach((p,i)=>{const row=document.createElement('div');row.className=`mention-item${i===mentionPickerIndex?' active':''}`;row.innerHTML=p.everyone?`<span class="mention-avatar">@</span><span class="mention-item-copy"><strong class="mention-everyone">@everyone</strong><small>Mencionar a todos</small></span>`:`${avatarHTML(p.username,p.avatar_url,'private','mention-avatar')}<span class="mention-item-copy"><strong>${esc(p.username)}</strong><small>@${esc(p.username)}</small></span>`;row.addEventListener('mousedown',e=>{e.preventDefault();selectMention(p);});picker.appendChild(row);});
+    picker.classList.remove('hidden');
+  }
+  function selectMention(person){
+    const input=$('#message-input'); const value=input.value; const pos=input.selectionStart??value.length; const before=value.slice(0,pos); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i); if(!match)return;
+    const start=pos-match[2].length-1; const token=person.everyone?'@everyone ':'@'+person.username+' '; input.value=value.slice(0,start)+token+value.slice(pos); input.focus(); const newPos=start+token.length; input.setSelectionRange(newPos,newPos); $('#mention-picker').classList.add('hidden'); if(person.everyone) mentionEverywhere=true; else currentMentionIds.add(String(person.id)); updateSendState(); scheduleTyping();
+  }
+  function updateSendState(){const input=$('#message-input');$('#send-button').disabled=true; if(input){} }
+  function deriveMentions(content){
+    const ids=[]; for(const m of currentMembers){if(new RegExp(`@${String(m.username||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i').test(content))ids.push(m.user_id);}
+    return {ids:[...new Set(ids)],everyone:/@everyone\b/i.test(content)};
+  }
+
   async function sendMessage() {
-    if (!currentUser || !currentConversation) return;
-    const input = $('#message-input');
-    const button = $('#send-button');
-    const content = String(input.value || '').trim();
-    if (!content) return;
-    button.disabled = true;
-    try {
-      const { data, error } = await supabase.rpc('xifre_send_message', {
-        p_conversation_id: currentConversation,
-        p_content: content,
-        p_reply_to: replyTarget?.id || null
-      });
-      if (error) throw error;
-      const sent = Array.isArray(data) ? data[0] : data;
-      const profiles = new Map(currentMembers.map(m => [String(m.user_id), m]));
-      renderOneMessage(sent, profiles);
-      input.value = '';
-      clearReply();
-      stopTypingBroadcast();
-      $('#messages').scrollTop = $('#messages').scrollHeight;
-      await loadConversations();
-    } catch (error) {
-      toast(friendlyError(error), 'error');
-    } finally {
-      button.disabled = true;
-      input.focus();
-    }
+    if(!currentUser||!currentConversation)return; const input=$('#message-input'); const content=String(input.value||'').trim(); if(!content)return;
+    const button=$('#send-button'); button.disabled=true;
+    try{
+      const derived=deriveMentions(content); const mentions=[...new Set([...derived.ids,...currentMentionIds])];
+      const {data,error}=await supabase.rpc('xifre_send_message',{p_conversation_id:currentConversation,p_content:content,p_reply_to:replyTarget?.id||null,p_mentions:mentions,p_mention_everyone:derived.everyone||mentionEverywhere});
+      if(error)throw error; const sent=Array.isArray(data)?data[0]:data; const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m])); renderOneMessage(sent,profiles); input.value=''; clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker').classList.add('hidden'); stopTypingBroadcast(); $('#messages').scrollTop=$('#messages').scrollHeight; await loadConversations(); await supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation});
+    }catch(error){toast(friendlyError(error),'error');}finally{updateSendState();input.focus();}
   }
 
   /* ------------------------------------------------------------------------ */
@@ -814,10 +849,13 @@
         if (String(payload.new?.sender_id) === String(currentUser.id)) return;
         if (String(currentConversation) !== String(conversationId)) return;
         await loadMessages(conversationId).catch(() => {});
+        await loadConversations().catch(() => {});
+        const box=$('#messages'); if(box && box.scrollHeight-box.scrollTop-box.clientHeight<80) { await supabase.rpc('xifre_mark_read',{p_conversation_id:conversationId}).catch(()=>{}); const c=conversationCache.find(x=>String(x.id)===String(conversationId)); if(c){c.unread_count=0;c.has_mention=false;} renderConversations(); }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async () => {
         if (String(currentConversation) !== String(conversationId)) return;
         await loadMessages(conversationId).catch(() => {});
+        await loadConversations().catch(() => {});
       })
       .subscribe();
     if (messagePoll) clearInterval(messagePoll);
@@ -891,7 +929,7 @@
     if (!isGroup) {
       const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
       const name = other?.username || 'Usuario';
-      avatarInto($('#right-profile-avatar'), name, other?.avatar_url);
+      avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other?.avatar_color);
       setText('right-profile-name', name);
     } else {
       const name = currentConversationData?.name || 'Grupo';
@@ -903,10 +941,27 @@
       currentMembers.forEach(member => {
         const row = document.createElement('div');
         row.className = 'right-member';
-        row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar')}<span class="right-member-name">${esc(member.username || 'Usuario')}</span>`;
+        row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar', member.avatar_color)}<span class="right-member-name">${esc(member.username || 'Usuario')}</span>${member.is_owner?'<span class="member-role-crown crown-owner" title="Creador">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin" title="Administrador">♛</span>':''}`;
+        row.addEventListener('click',e=>{if(e.defaultPrevented)return;showMemberProfile(member,row);});
+        row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
         list.appendChild(row);
       });
     }
+  }
+
+  function showMemberProfile(member,anchor){
+    const pop=$('#member-profile-popover'); if(!pop)return; selectedMember=member; avatarInto($('#member-profile-avatar'),member.username,member.avatar_url,'private',member.avatar_color); setText('member-profile-name',member.username||'Usuario'); setText('member-profile-username','@'+(member.username||'usuario')); pop.classList.remove('hidden'); const r=anchor.getBoundingClientRect(); pop.style.left=`${Math.min(r.left,window.innerWidth-235)}px`; pop.style.top=`${Math.min(r.bottom+8,window.innerHeight-180)}px`;
+  }
+  function closeMemberProfile(){ $('#member-profile-popover')?.classList.add('hidden'); selectedMember=null; }
+  function openMemberMenu(member,x,y){
+    selectedMember=member; const menu=$('#member-menu'); if(!menu)return; const me=currentMembers.find(m=>String(m.user_id)===String(currentUser.id)); const creator=!!me?.is_owner, admin=!!me?.is_admin;
+    const canManage=creator||admin; const targetIsAdmin=!!member.is_admin||!!member.is_owner; $('#member-menu [data-member-menu="kick"]')?.classList.toggle('hidden',!canManage||member.is_owner||(!creator&&targetIsAdmin)); $('#member-menu [data-member-menu="grant"]')?.classList.toggle('hidden',!creator||member.is_owner||member.is_admin); $('#member-menu [data-member-menu="revoke"]')?.classList.toggle('hidden',!creator||!member.is_admin); menu.classList.remove('hidden'); menu.style.left=`${Math.min(x,window.innerWidth-205)}px`; menu.style.top=`${Math.min(y,window.innerHeight-150)}px`;
+  }
+  function closeMemberMenu(){ $('#member-menu')?.classList.add('hidden'); selectedMember=null; }
+  async function memberAction(action){
+    const member=selectedMember; closeMemberMenu(); if(!member||!currentConversation)return;
+    let fn='',args={p_conversation_id:currentConversation,p_user_id:member.user_id}; if(action==='kick')fn='xifre_remove_group_member'; if(action==='grant')fn='xifre_grant_group_admin'; if(action==='revoke')fn='xifre_revoke_group_admin'; if(!fn)return;
+    const {error}=await supabase.rpc(fn,args); if(error)return toast(friendlyError(error),'error'); memberCache.delete(currentConversation); const r=await supabase.rpc('xifre_get_conversation_members',{p_conversation_id:currentConversation}); if(r.error)return toast(friendlyError(r.error),'error'); currentMembers=r.data||[]; memberCache.set(currentConversation,currentMembers); renderRightPane(); await openChatInfo(); await loadMessages(currentConversation); await loadConversations(); toast(action==='kick'?'Persona expulsada.':action==='grant'?'Administrador añadido.':'Administrador retirado.','success');
   }
 
   /* ------------------------------------------------------------------------ */
@@ -919,7 +974,7 @@
     friendCache.forEach(friend => {
       const row = document.createElement('label');
       row.className = 'selection-item';
-      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
       list.appendChild(row);
     });
     updateGroupSelectedCount();
@@ -963,8 +1018,10 @@
       setText('info-title', currentConversationData?.name || 'Grupo');
       setText('info-subtitle', `${currentMembers.length} miembros`);
       renderInfoMembers(currentMembers);
-      const isOwner = String(currentConversationData?.owner_id || '') === String(currentUser.id);
-      $('#group-edit-section')?.classList.toggle('hidden', !isOwner);
+      const meMember=currentMembers.find(m=>String(m.user_id)===String(currentUser.id));
+      const canManage=!!(meMember?.is_owner||meMember?.is_admin);
+      $('#group-edit-section')?.classList.toggle('hidden', !canManage);
+      $('#delete-group-button')?.classList.toggle('hidden', !meMember?.is_owner);
       setModalMessage('group-settings-message', '');
       $('#group-edit-name').value = currentConversationData?.name || 'Grupo';
       if (!pendingGroupAvatarFile) avatarInto($('#group-edit-avatar-preview'), currentConversationData?.name || 'Grupo', currentConversationData?.avatar_url, 'group');
@@ -980,7 +1037,9 @@
     members.forEach(member => {
       const row = document.createElement('div');
       row.className = 'friend-item';
-      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar')}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>${member.is_owner ? 'Administrador' : ''}</small></div><span></span>`;
+      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>${member.is_owner ? 'Creador' : member.is_admin ? 'Administrador' : '@'+esc(member.username||'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
+      row.addEventListener('click',()=>showMemberProfile(member,row));
+      row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
       list.appendChild(row);
     });
   }
@@ -994,7 +1053,7 @@
     candidates.forEach(friend => {
       const row = document.createElement('label');
       row.className = 'selection-item';
-      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
       list.appendChild(row);
     });
     updateGroupAddCount();
@@ -1098,11 +1157,11 @@
 
   async function uploadAvatar(file, path) {
     validateImage(file);
-    const { error } = await supabase.storage.from('xifre-avatars').upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+    const { error } = await supabase.storage.from('xifre-avatars').upload(path, file, { upsert: false, contentType: file.type, cacheControl: '31536000' });
     if (error) throw error;
     const result = supabase.storage.from('xifre-avatars').getPublicUrl(path);
     if (result.error) throw result.error;
-    return result.data.publicUrl;
+    return `${result.data.publicUrl}?v=${Date.now()}`;
   }
 
   function previewFile(file, target, name, kind) {
@@ -1188,7 +1247,7 @@
     $('#message-input').disabled = true;
     $('#message-input').value = '';
     $('#send-button').disabled = true;
-    clearReply();
+    clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden');
     setTypingVisible(false);
     $('#messages').innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Bienvenido a XIFRE</h3><p>Selecciona un chat de la izquierda para empezar.</p></div>';
     $('.right-pane-empty')?.classList.remove('hidden');
@@ -1201,6 +1260,11 @@
     $('#retry-chat')?.addEventListener('click', () => openConversation(currentConversation));
     $('#message-input').disabled = true;
     $('#send-button').disabled = true;
+  }
+
+  function showPeopleTab(tab){
+    $$('.people-tab').forEach(b=>b.classList.toggle('active',b.dataset.peopleTab===tab));
+    $$('.people-panel').forEach(p=>p.classList.toggle('active',p.id===`people-${tab==='add'?'add':tab}-panel`));
   }
 
   /* ------------------------------------------------------------------------ */
@@ -1233,9 +1297,11 @@
         if (type === 'open-settings') openSettings();
         else if (type === 'close-settings') $('#settings-modal')?.classList.add('hidden');
         else if (type === 'logout') void logout();
-        else if (type === 'open-friend') { openModal('friend-modal'); $('#friend-search').value = ''; renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' }))); $('#friend-search').focus(); }
-        else if (type === 'open-friends') { openModal('friends-modal'); renderFriendsModal(); }
-        else if (type === 'open-requests') { openModal('requests-modal'); void loadFriendRequests(); }
+        else if (type === 'open-friend') { openModal('people-modal'); showPeopleTab('add'); $('#friend-search').value=''; searchPeople(''); $('#friend-search').focus(); }
+        else if (type === 'open-friends') { openModal('people-modal'); showPeopleTab('friends'); renderFriendsModal(); }
+        else if (type === 'open-requests') { openModal('people-modal'); showPeopleTab('requests'); void loadFriendRequests(); }
+        else if (type === 'open-people') { openModal('people-modal'); showPeopleTab('friends'); renderFriendsModal(); }
+        else if (type === 'open-conversation-search') openConversationSearch();
         else if (type === 'open-group') { openModal('group-modal'); renderGroupSelection(); $('#group-name').focus(); }
         else if (type === 'create-group') void createGroup();
         else if (type === 'open-chat-info') void openChatInfo();
@@ -1273,9 +1339,15 @@
 
     document.addEventListener('click', event => {
       if (!event.target.closest('#message-menu')) closeMessageMenu();
+      if (!event.target.closest('#conversation-menu')) closeConversationMenu();
     }, true);
 
     $('#friend-search')?.addEventListener('input', e => searchPeople(e.target.value));
+    $('#conversation-search-input')?.addEventListener('input',e=>{clearTimeout(conversationSearchTimer);conversationSearchTimer=setTimeout(()=>renderConversationSearch(e.target.value),120);});
+    document.addEventListener('click',event=>{const tab=event.target.closest('[data-people-tab]');if(tab)showPeopleTab(tab.dataset.peopleTab);});
+    document.addEventListener('click',event=>{const a=event.target.closest('[data-member-menu]');if(a)void memberAction(a.dataset.memberMenu);});
+    document.addEventListener('click',event=>{if(!event.target.closest('#member-menu'))closeMemberMenu();if(!event.target.closest('#member-profile-popover')&&!event.target.closest('.right-member')&&!event.target.closest('#info-members .friend-item'))closeMemberProfile();});
+    document.addEventListener('click',event=>{const a=event.target.closest('[data-conversation-menu]');if(a&&selectedConversationForMenu)void markConversationRead(selectedConversationForMenu.id);});
     $('#group-friends-list')?.addEventListener('change', updateGroupSelectedCount);
     $('#group-add-list')?.addEventListener('change', updateGroupAddCount);
 
@@ -1298,13 +1370,22 @@
     $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
     $('#message-input')?.addEventListener('input', () => {
       const value = String($('#message-input').value || '').trim();
-      $('#send-button').disabled = !value || !currentConversation;
+      updateMentionPicker();
       if (value) scheduleTyping(); else stopTypingBroadcast();
     });
     $('#message-input')?.addEventListener('keydown', event => {
+      const picker=$('#mention-picker');
+      if(!picker.classList.contains('hidden')){
+        const items=$$('.mention-item',picker);
+        if(event.key==='ArrowDown'){event.preventDefault();mentionPickerIndex=Math.min(mentionPickerIndex+1,items.length-1);items.forEach((x,i)=>x.classList.toggle('active',i===mentionPickerIndex));return;}
+        if(event.key==='ArrowUp'){event.preventDefault();mentionPickerIndex=Math.max(mentionPickerIndex-1,0);items.forEach((x,i)=>x.classList.toggle('active',i===mentionPickerIndex));return;}
+        if(event.key==='Enter'&&items.length){event.preventDefault();items[mentionPickerIndex]?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));return;}
+        if(event.key==='Escape'){picker.classList.add('hidden');return;}
+      }
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
     });
     $('#message-input')?.addEventListener('blur', () => stopTypingBroadcast());
+    $('#messages')?.addEventListener('scroll',()=>{const box=$('#messages');if(!currentConversation||!box)return;if(box.scrollHeight-box.scrollTop-box.clientHeight<12){const c=conversationCache.find(x=>String(x.id)===String(currentConversation));if(c&&(Number(c.unread_count)||c.has_mention)){void supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation}).then(()=>{c.unread_count=0;c.has_mention=false;renderConversations();});}}});
 
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
