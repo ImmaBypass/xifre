@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-v14r">
+<link rel="stylesheet" href="style.css?v=20261008-v11">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -63,15 +63,11 @@
       <aside class="left-pane">
         <div class="left-pane-head">
           <div class="brand-line"><span>XIFRE</span><i></i></div>
-          <div class="brand-version">pre-alpha 1.2</div>
+          <div class="brand-version">pre-alpha 1.1</div>
           <div class="nav-actions">
-            <div class="conversation-search-box">
-              <span class="conversation-search-icon">⌕</span>
-              <input id="conversation-search-input" type="text" autocomplete="off" placeholder="Buscar" aria-label="Buscar conversaciones">
-              <button id="conversation-search-clear" class="conversation-search-clear hidden" type="button" aria-label="Borrar búsqueda">×</button>
-            </div>
+            <button type="button" class="nav-action" data-action="open-conversation-search"><span class="nav-icon">⌕</span><span>Buscar conversaciones</span></button>
             <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
-            <button type="button" class="nav-action primary" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
+            <button type="button" class="nav-action" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
           </div>
         </div>
 
@@ -120,16 +116,14 @@
           <span id="typing-text">Alguien está escribiendo...</span>
         </div>
 
-        <div id="chat-drop-overlay" class="chat-drop-overlay hidden"><div>Soltar imagen aquí</div></div>
         <form id="message-form" class="composer-area">
-          <div id="attachment-preview" class="attachment-preview hidden"></div>
           <div id="reply-bar" class="reply-bar hidden">
             <div class="reply-bar-accent"></div>
             <div class="reply-bar-copy"><span class="reply-label">RESPONDIENDO A</span><strong id="replying-name">Usuario</strong><span id="replying-content"></span></div>
             <button id="cancel-reply" class="reply-close" type="button" aria-label="Cancelar respuesta">×</button>
           </div>
           <div class="composer-box">
-            <button id="composer-plus" class="composer-plus" type="button" data-action="open-chat-image-picker" aria-label="Añadir imagen">＋</button><input id="chat-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+            <button class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
             <input id="message-input" type="text" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled>
             <button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
           </div>
@@ -145,7 +139,7 @@
         <div id="right-dm-content" class="right-profile hidden">
           <div class="right-cover"></div>
           <div class="right-profile-avatar-wrap"><span id="right-profile-avatar" class="right-profile-avatar">X</span></div>
-          <div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3><p id="right-profile-handle">@usuario</p></div>
+          <div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3></div>
         </div>
         <div id="right-group-content" class="right-group hidden">
           <div class="right-group-head"><span id="right-group-avatar" class="right-group-avatar">#</span><div><h3 id="right-group-name">Grupo</h3><p id="right-group-count">0 miembros</p></div></div>
@@ -205,6 +199,7 @@
 
   <!-- MEMBER MENU -->
   <div id="member-menu" class="member-menu hidden">
+    <button type="button" data-member-menu="profile">◉ <span>Ver perfil</span></button>
     <button type="button" data-member-menu="kick">⌫ <span>Expulsar</span></button>
     <button type="button" data-member-menu="grant">♛ <span>Dar administrador</span></button>
     <button type="button" data-member-menu="revoke">♛ <span>Quitar administrador</span></button>
@@ -212,14 +207,10 @@
 
   <!-- MEMBER MINI PROFILE -->
   <div id="member-profile-popover" class="member-profile-popover hidden">
-    <button class="popover-close" type="button" data-action="close-member-profile" aria-label="Cerrar">×</button>
-    <div class="member-profile-banner"></div>
-    <div class="member-profile-avatar-wrap"><div id="member-profile-avatar" class="member-profile-avatar">X</div></div>
-    <div class="member-profile-copy">
-      <strong id="member-profile-name">Usuario</strong>
-      <small id="member-profile-username">@usuario</small>
-      <span id="member-profile-role" class="member-profile-role hidden"></span>
-    </div>
+    <button class="popover-close" type="button" data-action="close-member-profile">×</button>
+    <div id="member-profile-avatar" class="member-profile-avatar">X</div>
+    <strong id="member-profile-name">Usuario</strong>
+    <small id="member-profile-username">@usuario</small>
   </div>
 
   <!-- FRIENDS / REQUESTS / ADD FRIENDS -->
@@ -242,15 +233,26 @@
         <div id="friend-requests-list" class="friends-list"></div>
       </section>
       <section id="people-add-panel" class="people-panel">
-        <h2>Añadir amigo</h2><p>Busca a alguien por su username o @nombre.</p>
+        <h2>Añadir amigo</h2><p>Busca a alguien por su username.</p>
         <label class="modal-label" for="friend-search">Username</label>
-        <input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Username o @nombre...">
+        <input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Escribe un username...">
         <div id="friend-search-results" class="search-results"></div>
         <div id="friend-message" class="modal-message"></div>
       </section>
     </div>
   </div>
 
+  <!-- CONVERSATION SEARCH -->
+  <div id="conversation-search-modal" class="modal hidden">
+    <div class="modal-card wide-modal search-conversation-card">
+      <button class="modal-close" type="button" data-action="close-modal" data-modal="conversation-search-modal">×</button>
+      <div class="modal-kicker">CONVERSACIONES</div>
+      <h2>Buscar conversaciones</h2>
+      <p>Busca por nombre de usuario o nombre del grupo.</p>
+      <input id="conversation-search-input" class="modal-input" type="text" autocomplete="off" placeholder="Buscar conversaciones...">
+      <div id="conversation-search-results" class="friends-list"></div>
+    </div>
+  </div>
 
   <!-- MESSAGE MENU -->
   <div id="message-menu" class="message-menu hidden">
@@ -290,9 +292,7 @@
             <span id="settings-avatar-preview" class="settings-avatar-preview">X</span>
             <label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
           </div>
-          <div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong></div>
-          <div class="settings-preview-label">Vista previa</div>
-          <div class="settings-profile-preview-card"><div id="settings-preview-avatar" class="settings-profile-preview-avatar">X</div><div><strong id="settings-preview-name">Usuario</strong><small id="settings-preview-handle">@usuario</small></div></div>
+          <div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong><span>Tu username es el que usarán para encontrarte y añadirse como amigo.</span></div>
           <div class="settings-field-block">
             <label for="settings-username">Username</label>
             <input id="settings-username" class="settings-field-input" type="text" maxlength="20" placeholder="username">
@@ -314,13 +314,9 @@
       </section>
     </div>
   </div>
-<div id="image-lightbox" class="image-lightbox hidden">
-  <button id="image-lightbox-close" class="image-lightbox-close" type="button" aria-label="Cerrar">×</button>
-  <img id="image-lightbox-image" src="" alt="">
-</div>
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261008-v14r"></script>
+<script src="app.js?v=20261008-v11"></script>
 </body>
 </html>
