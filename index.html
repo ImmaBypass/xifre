@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-chat-v6">
+<link rel="stylesheet" href="style.css?v=20261008-auth-v62">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -23,7 +23,7 @@
 <section id="login-screen" class="screen">
   <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
     <h2>Iniciar sesión</h2><p class="auth-description">Entra en tu cuenta de Xifre</p>
-    <form id="login-form" autocomplete="on">
+    <form id="login-form" autocomplete="on" onsubmit="event.preventDefault(); window.XIFRE && window.XIFRE.login(); return false;">
       <div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
       <div class="input-group"><label for="login-password">Contraseña</label><input id="login-password" type="password" placeholder="Tu contraseña" autocomplete="current-password" required></div>
       <button id="login-button" class="auth-button" type="submit"><span class="button-text">Iniciar sesión</span><span class="button-loader"></span></button>
@@ -37,7 +37,7 @@
 <section id="register-screen" class="screen">
   <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
     <h2>Crear cuenta</h2><p class="auth-description">Elige tu username y crea tu cuenta</p>
-    <form id="register-form" autocomplete="on">
+    <form id="register-form" autocomplete="on" onsubmit="event.preventDefault(); window.XIFRE && window.XIFRE.register(); return false;">
       <div class="input-group"><label for="register-username">Username</label><input id="register-username" type="text" placeholder="sam" maxlength="20" autocomplete="username" required><small class="input-help">3–20 caracteres: letras, números y _</small></div>
       <div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
       <div class="input-group"><label for="register-password">Contraseña</label><input id="register-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" minlength="6" required></div>
@@ -141,8 +141,20 @@
 <div id="toast-container" aria-live="polite"></div>
 </main>
 <script>
-(() => { document.addEventListener('click', e => { const b=e.target.closest('[data-go]'); if(!b)return; document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(b.dataset.go+'-screen')?.classList.add('active'); }); })();
+(() => {
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-go]');
+    if (!b) return;
+    e.preventDefault();
+    const name = b.dataset.go;
+    if (window.XIFRE?.showScreen) window.XIFRE.showScreen(name);
+    else {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(name + '-screen')?.classList.add('active');
+    }
+  });
+})();
 </script>
-<script src="app.js?v=20261008-chat-v6"></script>
+<script src="app.js?v=20261008-auth-v62"></script>
 </body>
 </html>
