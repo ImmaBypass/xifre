@@ -1,1872 +1,1323 @@
 (() => {
-'use strict';
+  'use strict';
 
-const CONFIG = {
-  url: 'https://doppekualeyvrlbtumze.supabase.co',
-  key: 'sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE'
-};
+  const CONFIG = {
+    url: 'https://doppekualeyvrlbtumze.supabase.co',
+    key: 'sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE'
+  };
 
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-let supabase = null;
-let currentUser = null;
-let currentProfile = null;
-let currentConversation = null;
-let currentConversationData = null;
-let messageChannel = null;
-let requestChannel = null;
-let messagePoll = null;
-let appStarted = false;
-let startPromise = null;
-let pendingEmail = sessionStorage.getItem('xifre_pending_email') || '';
-let conversationCache = [];
-let friendCache = [];
-let memberCache = new Map();
-let lastRenderedMessageId = null;
-let replyingTo = null;
-let peopleSearchTimer = null;
-let peopleSearchSeq = 0;
-let authActionInFlight = false;
+  let supabase = null;
+  let currentUser = null;
+  let currentProfile = null;
+  let currentConversation = null;
+  let currentConversationData = null;
+  let currentMembers = [];
+  let messageChannel = null;
+  let typingChannel = null;
+  let messagePoll = null;
+  let typingStopTimer = null;
+  let peopleSearchTimer = null;
+  let confirmResolver = null;
+  let menuMessage = null;
+  let replyTarget = null;
+  let pendingProfileAvatarFile = null;
+  let pendingGroupAvatarFile = null;
+  let pendingProfileAvatarURL = null;
+  let pendingGroupAvatarURL = null;
+  let authActionInFlight = false;
+  let startPromise = null;
+  let appStarted = false;
+  let conversationCache = [];
+  let friendCache = [];
+  let memberCache = new Map();
 
-const screens = ['landing', 'login', 'register', 'email'];
+  const screens = ['landing', 'login', 'register', 'email'];
 
-function showScreen(name) {
-  if (!screens.includes(name)) name = 'landing';
-  screens.forEach(k => document.getElementById(`${k}-screen`)?.classList.toggle('active', k === name));
-  if (name === 'login') setTimeout(() => $('#login-email')?.focus(), 250);
-  if (name === 'register') setTimeout(() => $('#register-username')?.focus(), 250);
-}
-
-function showMain() {
-  screens.forEach(k => document.getElementById(`${k}-screen`)?.classList.remove('active'));
-  $('#main-screen')?.classList.add('active');
-}
-
-function normalizeUsername(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function escapeHTML(value) {
-  const div = document.createElement('div');
-  div.textContent = value ?? '';
-  return div.innerHTML;
-}
-
-function avatarMarkup(name, url, className = '') {
-  const safeName = String(name || 'Usuario').trim() || 'Usuario';
-  const initial = escapeHTML(safeName.charAt(0).toUpperCase() || 'X');
-  const safeUrl = escapeHTML(String(url || '').trim());
-  return `<div class="avatar ${escapeHTML(className)}">${safeUrl ? `<img src="${safeUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">` : ''}<span>${initial}</span></div>`;
-}
-
-function avatarText(name) {
-  return String(name || 'X').trim().charAt(0).toUpperCase() || 'X';
-}
-
-function setMessage(id, text = '', type = '') {
-  const element = $(`#${id}`);
-  if (element) {
-    element.textContent = text;
-    element.className = `auth-message${type ? ` ${type}` : ''}`;
+  function normalizeUsername(value) {
+    return String(value || '').trim().toLowerCase();
   }
-}
 
-function setModalMessage(id, text = '', type = '') {
-  const element = $(`#${id}`);
-  if (element) {
-    element.textContent = text;
-    element.className = `modal-message${type ? ` ${type}` : ''}`;
+  function esc(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
+    return div.innerHTML;
   }
-}
 
-function setLoading(button, value) {
-  if (!button) return;
-  button.disabled = value;
-  button.classList.toggle('loading', value);
-  button.setAttribute('aria-busy', value ? 'true' : 'false');
-}
-
-function toast(text, type = 'info') {
-  const container = $('#toast-container');
-  if (!container) return;
-  const toastElement = document.createElement('div');
-  toastElement.className = `toast toast-${type}`;
-  toastElement.textContent = text;
-  container.appendChild(toastElement);
-  requestAnimationFrame(() => toastElement.classList.add('show'));
-  setTimeout(() => {
-    toastElement.classList.remove('show');
-    setTimeout(() => toastElement.remove(), 300);
-  }, 3300);
-}
-
-function friendlyAuthError(error) {
-  const message = String(error?.message || '').toLowerCase();
-  const code = String(error?.code || '').toLowerCase();
-  const status = Number(error?.status || 0);
-  if (message.includes('email not confirmed')) return 'Primero tienes que confirmar tu correo electrónico.';
-  if (message.includes('invalid login credentials')) return 'El correo o la contraseña no son correctos.';
-  if (message.includes('user already registered')) return 'Ese correo ya está registrado.';
-  if (message.includes('password should be at least')) return 'La contraseña es demasiado corta.';
-  if (
-    code === 'over_request_rate_limit' ||
-    code === 'over_email_send_rate_limit' ||
-    status === 429 ||
-    message.includes('too many requests') ||
-    message.includes('rate limit')
-  ) {
-    return 'Supabase ha bloqueado temporalmente esta IP/cuenta por demasiadas peticiones. Xifre evita ahora las peticiones duplicadas; espera a que termine el límite y vuelve a intentarlo.';
+  function avatarHTML(name, url, kind = 'private', className = '') {
+    const safeName = String(name || (kind === 'group' ? 'Grupo' : 'Usuario')).trim() || (kind === 'group' ? 'Grupo' : 'Usuario');
+    const initial = kind === 'group' ? '#' : (safeName.charAt(0).toUpperCase() || 'X');
+    const safeUrl = String(url || '').trim();
+    const fallbackClass = `avatar-fallback ${kind === 'group' ? 'group-fallback' : ''} ${esc(className)}`;
+    if (safeUrl) {
+      return `<span class="avatar-media ${esc(className)}"><img class="avatar-img" src="${esc(safeUrl)}" alt="" loading="lazy" onerror="this.style.display='none'"><span class="${fallbackClass} avatar-fallback-hidden">${esc(initial)}</span></span>`;
+    }
+    return `<span class="${fallbackClass}">${esc(initial)}</span>`;
   }
-  return error?.message || 'Ha ocurrido un error.';
-}
 
-function redirectURL() {
-  return window.location.origin + window.location.pathname;
-}
+  function avatarInto(element, name, url, kind = 'private') {
+    if (!element) return;
+    element.innerHTML = avatarHTML(name, url, kind);
+  }
 
-function formatTime(timestamp) {
-  try {
+  function setText(id, value) {
+    const el = typeof id === 'string' ? $(`#${id}`) : id;
+    if (el) el.textContent = value ?? '';
+  }
+
+  function setMessage(id, value = '', type = '') {
+    const el = $(`#${id}`);
+    if (!el) return;
+    el.textContent = value;
+    el.className = type ? `inline-message ${type}` : 'inline-message';
+  }
+
+  function setModalMessage(id, value = '', type = '') {
+    const el = $(`#${id}`);
+    if (!el) return;
+    el.textContent = value;
+    el.className = type ? `modal-message ${type}` : 'modal-message';
+  }
+
+  function setLoading(button, loading) {
+    if (!button) return;
+    button.disabled = !!loading;
+    button.classList.toggle('loading', !!loading);
+    button.setAttribute('aria-busy', loading ? 'true' : 'false');
+  }
+
+  function toast(text, type = 'info') {
+    const container = $('#toast-container');
+    if (!container) return;
+    const node = document.createElement('div');
+    node.className = `toast toast-${type}`;
+    node.textContent = text;
+    container.appendChild(node);
+    requestAnimationFrame(() => node.classList.add('show'));
+    setTimeout(() => node.remove(), 3400);
+  }
+
+  function friendlyError(error) {
+    const message = String(error?.message || '');
+    const lower = message.toLowerCase();
+    if (lower.includes('invalid login credentials')) return 'El correo o la contraseña no son correctos.';
+    if (lower.includes('email not confirmed')) return 'Primero confirma tu correo electrónico.';
+    if (lower.includes('user already registered')) return 'Ese correo ya está registrado.';
+    if (lower.includes('rate limit') || lower.includes('too many requests') || Number(error?.status) === 429) return 'Se ha alcanzado temporalmente el límite de peticiones de Supabase. Espera un poco antes de volver a intentarlo.';
+    return message || 'No se pudo completar la operación.';
+  }
+
+  function formatTime(timestamp) {
+    if (!timestamp) return '';
     return new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
   }
-}
 
-function formatConversationDate(timestamp) {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  const today = new Date();
-  if (date.toDateString() === today.toDateString()) return formatTime(timestamp);
-  return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
-}
+  function formatListTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const now = new Date();
+    return date.toDateString() === now.toDateString()
+      ? formatTime(timestamp)
+      : date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+  }
 
-async function checkUsername(username) {
-  const { data, error } = await supabase.from('profiles').select('id').eq('username', username).limit(1);
-  if (error) throw error;
-  return !(data || []).length;
-}
+  function showScreen(name) {
+    if (!screens.includes(name)) name = 'landing';
+    screens.forEach(key => document.getElementById(`${key}-screen`)?.classList.toggle('active', key === name));
+  }
 
-async function register() {
-  if (authActionInFlight) return;
-  const button = $('#register-button');
-  const username = normalizeUsername($('#register-username')?.value);
-  const email = String($('#register-email')?.value || '').trim();
-  const password = String($('#register-password')?.value || '');
-  setMessage('register-message', '');
+  function showMain() {
+    screens.forEach(key => document.getElementById(`${key}-screen`)?.classList.remove('active'));
+    $('#main-screen')?.classList.add('active');
+  }
 
-  if (!supabase) return setMessage('register-message', 'Supabase no se ha cargado.', 'error');
-  if (!/^[a-z0-9_]{3,20}$/.test(username)) return setMessage('register-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
-  if (!email) return setMessage('register-message', 'Escribe tu correo.', 'error');
-  if (password.length < 6) return setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
+  function getRedirectURL() {
+    return window.location.origin + window.location.pathname;
+  }
 
-  authActionInFlight = true;
-  setLoading(button, true);
-  try {
-    if (!(await checkUsername(username))) {
-      setMessage('register-message', 'Ese username ya está ocupado.', 'error');
-      return;
-    }
+  /* ------------------------------------------------------------------------ */
+  /* Theme                                                                    */
+  /* ------------------------------------------------------------------------ */
+  function currentTheme() {
+    return localStorage.getItem('xifre-theme') || 'dark';
+  }
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { username },
-        emailRedirectTo: redirectURL()
-      }
-    });
+  function applyTheme(theme) {
+    const value = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = value;
+    localStorage.setItem('xifre-theme', value);
+    $$('.theme-card').forEach(card => card.classList.toggle('active', card.dataset.themeChoice === value));
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Auth                                                                     */
+  /* ------------------------------------------------------------------------ */
+  async function checkUsernameAvailable(username) {
+    const { data, error } = await supabase.from('profiles').select('id').eq('username', username).limit(1);
     if (error) throw error;
-
-    pendingEmail = email;
-    sessionStorage.setItem('xifre_pending_email', email);
-    if (data?.session) await startApplication(data.session);
-    else {
-      $('#confirmation-email').textContent = email;
-      showScreen('email');
-    }
-  } catch (error) {
-    console.error('REGISTER', error);
-    setMessage('register-message', friendlyAuthError(error), 'error');
-  } finally {
-    setLoading(button, false);
-    authActionInFlight = false;
+    return !(data || []).length;
   }
-}
 
-async function login() {
-  if (authActionInFlight) return;
+  async function register() {
+    if (authActionInFlight) return;
+    const button = $('#register-button');
+    const username = normalizeUsername($('#register-username')?.value);
+    const email = String($('#register-email')?.value || '').trim();
+    const password = String($('#register-password')?.value || '');
+    setMessage('register-message', '');
 
-  const button = $('#login-button');
-  const email = String($('#login-email')?.value || '').trim();
-  const password = String($('#login-password')?.value || '');
-  setMessage('login-message', '');
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) return setMessage('register-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+    if (password.length < 6) return setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
 
-  if (!supabase) return setMessage('login-message', 'Supabase no se ha cargado.', 'error');
-  if (!email || !password) return setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
-
-  authActionInFlight = true;
-  setLoading(button, true);
-  try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    if (!data?.session) throw new Error('No se recibió una sesión válida.');
-    sessionStorage.removeItem('xifre_pending_email');
-    pendingEmail = '';
-    await startApplication(data.session);
-  } catch (error) {
-    console.error('LOGIN', error);
-    setMessage('login-message', friendlyAuthError(error), 'error');
-    if (String(error?.message || '').toLowerCase().includes('email not confirmed')) {
-      $('#confirmation-email').textContent = email;
-      pendingEmail = email;
-      sessionStorage.setItem('xifre_pending_email', email);
-      showScreen('email');
-    }
-  } finally {
-    setLoading(button, false);
-    authActionInFlight = false;
-  }
-}
-
-async function resendConfirmation() {
-  if (!pendingEmail) {
-    showScreen('register');
-    return;
-  }
-  const button = $('#resend-confirmation');
-  setLoading(button, true);
-  try {
-    const { error } = await supabase.auth.resend({
-      type: 'signup',
-      email: pendingEmail,
-      options: { emailRedirectTo: redirectURL() }
-    });
-    if (error) throw error;
-    toast('Correo de confirmación reenviado.', 'success');
-  } catch (error) {
-    toast(friendlyAuthError(error), 'error');
-  } finally {
-    setLoading(button, false);
-  }
-}
-
-async function loadProfile() {
-  if (!currentUser) return;
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id,username,display_name,avatar_url')
-    .eq('id', currentUser.id)
-    .maybeSingle();
-
-  currentProfile = data || {
-    id: currentUser.id,
-    username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
-    display_name: currentUser.user_metadata?.username || 'Usuario',
-    avatar_url: null
-  };
-
-  if (error) console.warn('PROFILE', error);
-
-  const name = currentProfile.display_name || currentProfile.username || 'Usuario';
-  const username = currentProfile.username || 'usuario';
-  const profileAvatar = $('#profile-avatar');
-  if (profileAvatar) profileAvatar.innerHTML = avatarMarkup(name, currentProfile.avatar_url);
-  $('#profile-name').textContent = name;
-  $('#profile-username').textContent = `@${username}`;
-}
-
-async function startApplication(session = null) {
-  if (!supabase) throw new Error('Supabase no está inicializado.');
-
-  const sessionUser = session?.user || null;
-  if (startPromise) return startPromise;
-
-  startPromise = (async () => {
+    authActionInFlight = true;
+    setLoading(button, true);
     try {
-      let user = sessionUser;
-
-      if (!user) {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        user = data?.session?.user || null;
+      if (!(await checkUsernameAvailable(username))) {
+        setMessage('register-message', 'Ese username ya está ocupado.', 'error');
+        return;
       }
-
-      if (!user) throw new Error('No hay una sesión autenticada.');
-
-      currentUser = user;
-
-      // La cuenta autenticada es suficiente para entrar a la aplicación.
-      // Un problema al cargar perfiles/chats NO debe devolver al usuario
-      // a la pantalla de login ni hacerle perder la sesión.
-      try {
-        await loadProfile();
-      } catch (profileError) {
-        console.warn('PROFILE STARTUP', profileError);
-      }
-
-      appStarted = true;
-      showMain();
-      resetChatView();
-
-      const results = await Promise.allSettled([
-        loadFriends(),
-        loadConversations(),
-        loadFriendRequests()
-      ]);
-      results.forEach(result => {
-        if (result.status === 'rejected') console.error('START LOAD', result.reason);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { username }, emailRedirectTo: getRedirectURL() }
       });
-
-      try {
-        setupRequestRealtime();
-      } catch (realtimeError) {
-        console.warn('REQUEST REALTIME', realtimeError);
+      if (error) throw error;
+      if (data?.session) {
+        await startApplication(data.session);
+      } else {
+        sessionStorage.setItem('xifre_pending_email', email);
+        setText('confirmation-email', email);
+        showScreen('email');
       }
-
-      return true;
     } catch (error) {
-      console.error('START', error);
-
-      // Solo volvemos al login si realmente no existe una sesión válida.
-      // Un fallo de perfiles, chats o Realtime no debe expulsar al usuario.
-      let validSession = null;
-      try {
-        const { data } = await supabase.auth.getSession();
-        validSession = data?.session || null;
-      } catch (sessionError) {
-        console.warn('SESSION CHECK AFTER START ERROR', sessionError);
-      }
-
-      if (validSession?.user) {
-        currentUser = validSession.user;
-        appStarted = true;
-        showMain();
-        resetChatView();
-        toast('Sesión iniciada. Algunas partes de Xifre todavía están cargando.', 'info');
-        return true;
-      }
-
-      appStarted = false;
-      currentUser = null;
-      showScreen('login');
-      setMessage('login-message', `No se pudo cargar tu cuenta: ${error?.message || 'error'}`, 'error');
-      return false;
+      console.error('REGISTER', error);
+      setMessage('register-message', friendlyError(error), 'error');
     } finally {
-      startPromise = null;
+      setLoading(button, false);
+      authActionInFlight = false;
     }
-  })();
-
-  return startPromise;
-}
-
-async function logout() {
-  if (supabase) await supabase.auth.signOut();
-}
-
-function stopMessageSystems() {
-  if (messageChannel) supabase.removeChannel(messageChannel);
-  if (requestChannel) supabase.removeChannel(requestChannel);
-  messageChannel = null;
-  requestChannel = null;
-  if (messagePoll) clearInterval(messagePoll);
-  messagePoll = null;
-}
-
-function closeApplication() {
-  stopMessageSystems();
-  currentUser = null;
-  currentProfile = null;
-  currentConversation = null;
-  currentConversationData = null;
-  conversationCache = [];
-  friendCache = [];
-  memberCache.clear();
-  lastRenderedMessageId = null;
-  appStarted = false;
-  if ($('#message-input')) $('#message-input').disabled = true;
-  if ($('#send-button')) $('#send-button').disabled = true;
-  showScreen('landing');
-}
-
-function resetChatView() {
-  currentConversation = null;
-  currentConversationData = null;
-  lastRenderedMessageId = null;
-  memberCache.clear();
-  if (messageChannel) supabase.removeChannel(messageChannel);
-  messageChannel = null;
-  if (messagePoll) clearInterval(messagePoll);
-  messagePoll = null;
-  $('#chat-title').textContent = 'Xifre';
-  $('#chat-subtitle').textContent = 'Selecciona una conversación';
-  $('#chat-avatar').innerHTML = avatarMarkup('Xifre');
-  $('#chat-info-button')?.classList.add('hidden');
-  $('#message-input').disabled = true;
-  $('#send-button').disabled = true;
-  $('#messages').innerHTML = '<div class="empty-chat"><div class="empty-chat-logo">X</div><h3>Bienvenido a Xifre</h3><p>Abre un chat desde la izquierda para empezar a hablar.</p></div>';
-}
-
-// ---------------------------------------------------------------------------
-// Amigos / solicitudes
-// ---------------------------------------------------------------------------
-
-async function loadFriends() {
-  if (!currentUser) return;
-  const { data, error } = await supabase
-    .from('friendships')
-    .select('user1_id,user2_id')
-    .or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`);
-
-  if (error) {
-    console.error('FRIENDS', error);
-    friendCache = [];
-    renderFriendsModal();
-    return;
   }
 
-  const ids = [...new Set((data || [])
-    .map(row => row.user1_id === currentUser.id ? row.user2_id : row.user1_id)
-    .filter(Boolean))];
+  async function login() {
+    if (authActionInFlight) return;
+    const button = $('#login-button');
+    const email = String($('#login-email')?.value || '').trim();
+    const password = String($('#login-password')?.value || '');
+    setMessage('login-message', '');
+    if (!email || !password) return setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
 
-  if (!ids.length) {
-    friendCache = [];
-    renderFriendsModal();
-      renderGroupFriends();
-    return;
-  }
-
-  const profiles = await supabase
-    .from('profiles')
-    .select('id,username,display_name,avatar_url')
-    .in('id', ids);
-
-  if (profiles.error) {
-    console.error('FRIEND PROFILES', profiles.error);
-    return;
-  }
-
-  friendCache = profiles.data || [];
-  renderFriendsModal();
-  renderGroupFriends();
-}
-
-function renderFriendsModal() {
-  const list = $('#friends-modal-list');
-  if (!list) return;
-  list.innerHTML = '';
-
-  if (!friendCache.length) {
-    list.innerHTML = '<div class="requests-empty"><strong>Aún no tienes amigos</strong><span>Acepta una solicitud para poder abrir un chat privado.</span></div>';
-    return;
-  }
-
-  friendCache.forEach(friend => {
-    const row = document.createElement('div');
-    row.className = 'friend-modal-item';
-    const name = friend.display_name || friend.username || 'Usuario';
-    row.innerHTML = `
-      <div class="friend-modal-user">
-        ${avatarMarkup(name, friend.avatar_url, 'small-avatar')}
-        <div class="friend-modal-copy">
-          <div class="friend-modal-name">${escapeHTML(name)}</div>
-          <div class="friend-modal-username">@${escapeHTML(friend.username || 'usuario')}</div>
-        </div>
-      </div>
-      <button class="open-chat-button" type="button">Abrir chat</button>`;
-    row.querySelector('button').addEventListener('click', async () => {
-      closeModal('friends-modal');
-      await openPrivateChat(friend.id);
-    });
-    list.appendChild(row);
-  });
-}
-
-async function sendFriendRequest(targetId = null) {
-  if (!currentUser) return;
-
-  const input = $('#friend-search');
-  const typed = normalizeUsername(input?.value);
-  const target = targetId || typed;
-
-  if (!target) {
-    return setModalMessage('friend-message', 'Escribe un username para buscarlo.', 'error');
-  }
-
-  try {
-    let userId = target;
-    if (!/^[0-9a-f-]{36}$/i.test(target)) {
-      const lookup = await supabase.rpc('xifre_search_people', { p_query: target });
-      if (lookup.error) throw lookup.error;
-      const exact = (lookup.data || []).find(person => normalizeUsername(person.username) === target);
-      if (!exact) return setModalMessage('friend-message', 'No existe ese username.', 'error');
-      userId = exact.id;
-    }
-
-    const response = await supabase.rpc('xifre_send_friend_request', {
-      p_target_user: userId
-    });
-    if (response.error) throw response.error;
-
-    if (input) input.value = '';
-    setModalMessage('friend-message', 'Solicitud enviada.', 'success');
-    renderPeopleResults([], false);
-  } catch (error) {
-    console.error('FRIEND REQUEST', error);
-    setModalMessage('friend-message', friendlyDataError(error), 'error');
-  }
-}
-
-function friendlyDataError(error) {
-  const message = String(error?.message || '').trim();
-  if (/already friends/i.test(message)) return 'Ya sois amigos.';
-  if (/not found|no existe/i.test(message)) return 'No existe ese username.';
-  return message || 'No se pudo completar la operación.';
-}
-
-async function searchPeople(query) {
-  const list = $('#friend-search-results');
-  if (!list) return;
-
-  const clean = normalizeUsername(query);
-  if (peopleSearchTimer) clearTimeout(peopleSearchTimer);
-
-  if (!clean) {
-    renderPeopleResults(friendCache.map(friend => ({ ...friend, relationship: 'friend' })), true);
-    return;
-  }
-
-  if (clean.length < 2) {
-    list.innerHTML = '<div class="requests-empty compact-empty"><strong>Escribe al menos 2 caracteres</strong><span>Busca un username para encontrar a esa persona.</span></div>';
-    return;
-  }
-
-  const seq = ++peopleSearchSeq;
-  list.innerHTML = '<div class="people-search-loading">Buscando personas…</div>';
-
-  peopleSearchTimer = setTimeout(async () => {
+    authActionInFlight = true;
+    setLoading(button, true);
     try {
-      const response = await supabase.rpc('xifre_search_people', { p_query: clean });
-      if (seq !== peopleSearchSeq) return;
-      if (response.error) throw response.error;
-      renderPeopleResults(response.data || [], false);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      if (!data?.session) throw new Error('No se recibió una sesión válida.');
+      sessionStorage.removeItem('xifre_pending_email');
+      await startApplication(data.session);
     } catch (error) {
-      console.error('PEOPLE SEARCH', error);
-      if (seq !== peopleSearchSeq) return;
-      list.innerHTML = `<div class="requests-empty compact-empty"><strong>No se pudo buscar</strong><span>${escapeHTML(error?.message || 'Error de Supabase')}</span></div>`;
+      console.error('LOGIN', error);
+      setMessage('login-message', friendlyError(error), 'error');
+      if (String(error?.message || '').toLowerCase().includes('email not confirmed')) {
+        sessionStorage.setItem('xifre_pending_email', email);
+        setText('confirmation-email', email);
+        showScreen('email');
+      }
+    } finally {
+      setLoading(button, false);
+      authActionInFlight = false;
     }
-  }, 180);
-}
-
-function renderPeopleResults(results, localFriends = false) {
-  const list = $('#friend-search-results');
-  if (!list) return;
-  list.innerHTML = '';
-
-  if (!results.length) {
-    list.innerHTML = '<div class="requests-empty compact-empty"><strong>No hay resultados</strong><span>Comprueba el username e inténtalo de nuevo.</span></div>';
-    return;
   }
 
-  results.forEach(person => {
-    const name = person.display_name || person.username || 'Usuario';
-    const relationship = localFriends ? 'friend' : (person.relationship || 'none');
-    const row = document.createElement('div');
-    row.className = 'people-search-result';
-    row.innerHTML = `
-      ${avatarMarkup(name, person.avatar_url, 'small-avatar')}
-      <div class="people-result-copy">
-        <strong>${escapeHTML(name)}</strong>
-        <small>@${escapeHTML(person.username || 'usuario')}</small>
-      </div>
-    `;
+  async function resendConfirmation() {
+    const email = sessionStorage.getItem('xifre_pending_email') || '';
+    if (!email) return showScreen('register');
+    const button = $('#resend-confirmation');
+    setLoading(button, true);
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: getRedirectURL() } });
+      if (error) throw error;
+      toast('Correo de confirmación reenviado.', 'success');
+    } catch (error) {
+      toast(friendlyError(error), 'error');
+    } finally {
+      setLoading(button, false);
+    }
+  }
 
-    const action = document.createElement('button');
-    action.type = 'button';
-    action.className = `people-result-action ${relationship === 'friend' ? 'is-primary' : ''}`;
+  async function loadProfile() {
+    if (!currentUser) return;
+    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url').eq('id', currentUser.id).maybeSingle();
+    if (error) console.warn('PROFILE LOAD', error);
+    currentProfile = data || {
+      id: currentUser.id,
+      username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
+      display_name: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
+      avatar_url: null
+    };
+    currentProfile.display_name = currentProfile.username;
+    syncProfileUI();
+  }
 
-    if (relationship === 'friend') {
-      action.textContent = 'Abrir chat';
-      action.addEventListener('click', async () => {
-        closeModal('friend-modal');
-        await openPrivateChat(person.id);
-      });
-    } else if (relationship === 'outgoing_pending') {
-      action.textContent = 'Pendiente';
-      action.disabled = true;
-    } else if (relationship === 'incoming_pending') {
-      action.textContent = 'Solicitud recibida';
-      action.disabled = true;
-    } else {
-      action.textContent = 'Añadir';
-      action.addEventListener('click', async () => {
-        action.disabled = true;
-        action.textContent = 'Enviando…';
-        try {
-          const response = await supabase.rpc('xifre_send_friend_request', { p_target_user: person.id });
-          if (response.error) throw response.error;
-          action.textContent = 'Pendiente';
-          setModalMessage('friend-message', 'Solicitud enviada.', 'success');
-        } catch (error) {
-          console.error('SEND REQUEST', error);
-          action.disabled = false;
-          action.textContent = 'Añadir';
-          setModalMessage('friend-message', friendlyDataError(error), 'error');
+  function syncProfileUI() {
+    const username = currentProfile?.username || 'usuario';
+    setText('profile-name', username);
+    setText('profile-username', `@${username}`);
+    setText('bottom-profile-name', username);
+    setText('bottom-profile-username', `@${username}`);
+    setText('settings-nav-name', username);
+    setText('settings-nav-username', `@${username}`);
+    setText('settings-preview-username', `@${username}`);
+    avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url);
+    avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url);
+    avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url);
+    if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url);
+    const settingsUsername = $('#settings-username');
+    if (settingsUsername && document.activeElement !== settingsUsername) settingsUsername.value = username;
+  }
+
+  async function startApplication(session = null) {
+    if (!supabase) return false;
+    if (startPromise) return startPromise;
+    startPromise = (async () => {
+      try {
+        let sessionUser = session?.user || null;
+        if (!sessionUser) {
+          const result = await supabase.auth.getSession();
+          sessionUser = result.data?.session?.user || null;
         }
-      });
-    }
-
-    row.appendChild(action);
-    list.appendChild(row);
-  });
-}
-
-async function loadFriendRequests() {
-  if (!currentUser) return;
-  const base = await supabase
-    .from('friend_requests')
-    .select('id,sender_id,receiver_id,created_at')
-    .eq('receiver_id', currentUser.id)
-    .order('created_at', { ascending: false });
-
-  if (base.error) {
-    console.error('REQUESTS', base.error);
-    renderFriendRequests([]);
-    return;
+        if (!sessionUser) throw new Error('No hay una sesión autenticada.');
+        currentUser = sessionUser;
+        await loadProfile();
+        appStarted = true;
+        applyTheme(currentTheme());
+        showMain();
+        await Promise.allSettled([loadFriends(), loadConversations()]);
+        await restoreConversation();
+        return true;
+      } catch (error) {
+        console.error('START APPLICATION', error);
+        // La sesión sigue siendo válida aunque fallen cargas secundarias.
+        const { data } = await supabase.auth.getSession().catch(() => ({ data: {} }));
+        if (data?.session?.user) {
+          currentUser = data.session.user;
+          appStarted = true;
+          showMain();
+          return true;
+        }
+        appStarted = false;
+        currentUser = null;
+        showScreen('login');
+        setMessage('login-message', 'No se pudo cargar la sesión.', 'error');
+        return false;
+      } finally {
+        startPromise = null;
+      }
+    })();
+    return startPromise;
   }
 
-  const ids = [...new Set((base.data || []).map(request => request.sender_id))];
-  let profiles = [];
-  if (ids.length) {
-    const response = await supabase.from('profiles').select('id,username,display_name,avatar_url').in('id', ids);
-    if (!response.error) profiles = response.data || [];
-  }
-
-  const profileMap = new Map(profiles.map(profile => [profile.id, profile]));
-  renderFriendRequests((base.data || []).map(request => ({ ...request, sender: profileMap.get(request.sender_id) || {} })));
-}
-
-function renderFriendRequests(requests) {
-  const list = $('#friend-requests-list');
-  if (!list) return;
-  list.innerHTML = '';
-
-  if (!requests.length) {
-    list.innerHTML = '<div class="requests-empty"><strong>No tienes solicitudes pendientes</strong><span>Cuando alguien quiera ser tu amigo aparecerá aquí.</span></div>';
-    return;
-  }
-
-  requests.forEach(request => {
-    const sender = request.sender || {};
-    const row = document.createElement('div');
-    row.className = 'friend-request-item';
-    const name = sender.display_name || sender.username || 'Usuario';
-    row.innerHTML = `
-      <div class="request-user">
-        ${avatarMarkup(name, sender.avatar_url, 'small-avatar')}
-        <div class="request-copy"><div class="request-name">${escapeHTML(name)}</div><div class="request-username">@${escapeHTML(sender.username || 'usuario')}</div></div>
-      </div>
-      <div class="request-actions"><button class="request-action request-accept" type="button">Aceptar</button><button class="request-action request-reject" type="button">Rechazar</button></div>`;
-
-    const [acceptButton, rejectButton] = row.querySelectorAll('button');
-    acceptButton.addEventListener('click', () => acceptFriendRequest(request.id, request.sender_id, row, acceptButton));
-    rejectButton.addEventListener('click', () => rejectFriendRequest(request.id, row, rejectButton));
-    list.appendChild(row);
-  });
-}
-
-async function acceptFriendRequest(requestId, senderId, row, button) {
-  if (!currentUser) return;
-  const controls = $$('button', row);
-  controls.forEach(control => { control.disabled = true; });
-  button.textContent = 'Aceptando…';
-
-  try {
-    const first = String(currentUser.id) < String(senderId) ? currentUser.id : senderId;
-    const second = String(currentUser.id) < String(senderId) ? senderId : currentUser.id;
-    const existing = await supabase.from('friendships').select('id').eq('user1_id', first).eq('user2_id', second).maybeSingle();
-    if (existing.error) throw existing.error;
-
-    if (!existing.data) {
-      const insert = await supabase.from('friendships').insert({ user1_id: first, user2_id: second });
-      if (insert.error) throw insert.error;
-    }
-
-    const remove = await supabase.from('friend_requests').delete().eq('id', requestId).eq('receiver_id', currentUser.id);
-    if (remove.error) throw remove.error;
-
-    row.remove();
-    toast('Ahora sois amigos.', 'success');
-    await Promise.allSettled([loadFriends(), loadFriendRequests()]);
-  } catch (error) {
-    console.error('ACCEPT', error);
-    controls.forEach(control => { control.disabled = false; });
-    button.textContent = 'Aceptar';
-    setModalMessage('requests-message', `No se pudo aceptar: ${error?.message || 'error'}`, 'error');
-  }
-}
-
-async function rejectFriendRequest(requestId, row, button) {
-  button.disabled = true;
-  try {
-    const { error } = await supabase.from('friend_requests').delete().eq('id', requestId).eq('receiver_id', currentUser.id);
-    if (error) throw error;
-    row.remove();
-    toast('Solicitud rechazada.', 'info');
-  } catch (error) {
-    console.error('REJECT', error);
-    button.disabled = false;
-    toast(`No se pudo rechazar: ${error?.message || 'error'}`, 'error');
-  }
-}
-
-async function openFriendRequests() {
-  openModal('requests-modal');
-  await loadFriendRequests();
-}
-
-// ---------------------------------------------------------------------------
-// CHAT — toda la lógica sensible pasa por RPC.
-// ---------------------------------------------------------------------------
-
-async function loadConversations() {
-  if (!currentUser) return;
-
-  const response = await supabase.rpc('xifre_get_my_conversations');
-  if (response.error) {
-    console.error('CONVERSATIONS RPC', response.error);
-    renderConversations([]);
-    throw response.error;
-  }
-
-  conversationCache = (response.data || []).map(row => ({
-    ...row,
-    displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado')
-  }));
-  renderConversations(conversationCache);
-  return conversationCache;
-}
-
-function renderConversations(conversations) {
-  const list = $('#conversation-list');
-  if (!list) return;
-  list.innerHTML = '';
-  $('#chat-count').textContent = String(conversations.length);
-
-  if (!conversations.length) {
-    list.innerHTML = '<div class="empty-sidebar">Todavía no tienes chats.<br>Haz clic en «Nuevo chat» para empezar.</div>';
-    return;
-  }
-
-  conversations.forEach(conversation => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = `conversation${currentConversation === conversation.id ? ' active' : ''}`;
-    const label = conversation.displayName || conversation.name || (conversation.type === 'group' ? 'Grupo' : 'Chat privado');
-    const preview = conversation.last_message ? conversation.last_message : (conversation.type === 'group' ? `${conversation.member_count || 0} miembros` : 'Chat privado');
-    row.innerHTML = `
-      ${avatarMarkup(label, conversation.avatar_url, 'conversation-avatar-image')}
-      <span class="conversation-copy">
-        <span class="conversation-name">${escapeHTML(label)}</span>
-        <span class="conversation-preview">${escapeHTML(preview)}</span>
-      </span>
-      <span class="conversation-meta">${escapeHTML(formatConversationDate(conversation.last_message_at))}</span>`;
-    row.addEventListener('click', () => openConversation(conversation.id, conversation));
-    list.appendChild(row);
-  });
-}
-
-async function openPrivateChat(friendId) {
-  if (!currentUser || !friendId) return;
-
-  try {
-    const response = await supabase.rpc('create_private_chat', { other_user: friendId });
-    if (response.error) throw response.error;
-    const conversationId = String(response.data || '').trim();
-    if (!conversationId) throw new Error('Supabase no devolvió el ID del chat.');
-
-    await loadConversations();
-    await openConversation(conversationId);
-  } catch (error) {
-    console.error('PRIVATE CHAT', error);
-    toast(`No se pudo abrir el chat: ${error?.message || 'error de Supabase'}`, 'error');
-  }
-}
-
-async function openConversation(id, cached = null) {
-  if (!id || !currentUser) return;
-
-  const conversationId = String(id);
-  let conversation = cached || conversationCache.find(item => String(item.id) === conversationId);
-
-  if (!conversation) {
+  async function logout() {
     try {
-      await loadConversations();
-      conversation = conversationCache.find(item => String(item.id) === conversationId);
+      await supabase.auth.signOut();
     } catch (error) {
-      showChatError(`No se pudo cargar la lista de chats. ${error?.message || ''}`);
+      console.error('LOGOUT', error);
+    } finally {
+      stopChatRealtime();
+      currentUser = null;
+      currentProfile = null;
+      currentConversation = null;
+      currentConversationData = null;
+      currentMembers = [];
+      appStarted = false;
+      sessionStorage.removeItem('xifre_current_conversation');
+      closeAllModals();
+      $('#settings-modal')?.classList.add('hidden');
+      showScreen('landing');
+    }
+  }
+
+  function closeAllModals() {
+    $$('.modal').forEach(m => m.classList.add('hidden'));
+    $('#message-menu')?.classList.add('hidden');
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Friends                                                                  */
+  /* ------------------------------------------------------------------------ */
+  async function loadFriends() {
+    if (!currentUser) return;
+    const { data, error } = await supabase.from('friendships').select('user1_id,user2_id').or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`);
+    if (error) { console.warn('FRIENDS', error); friendCache = []; return; }
+    const ids = [...new Set((data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
+    if (!ids.length) { friendCache = []; return; }
+    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url').in('id', ids);
+    if (!result.error) friendCache = result.data || [];
+  }
+
+  async function searchPeople(query) {
+    const list = $('#friend-search-results');
+    if (!list) return;
+    if (peopleSearchTimer) clearTimeout(peopleSearchTimer);
+    const clean = normalizeUsername(query);
+    if (!clean) {
+      renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' })));
       return;
     }
-  }
-
-  if (!conversation) {
-    showChatError('Supabase creó el chat, pero no devolvió la conversación al usuario. Ejecuta el SQL V6 completo.');
-    return;
-  }
-
-  try {
-    currentConversation = conversationId;
-    const members = await loadConversationMembers(conversationId);
-    if (!members.length) throw new Error('La conversación no tiene miembros visibles para tu usuario.');
-
-    currentConversation = conversationId;
-    currentConversationData = conversation;
-    lastRenderedMessageId = null;
-
-    const other = members.find(member => String(member.user_id) !== String(currentUser.id));
-    const displayName = conversation.type === 'private'
-      ? (other?.display_name || other?.username || conversation.displayName || 'Chat privado')
-      : (conversation.name || conversation.displayName || 'Grupo');
-    const avatarURL = conversation.type === 'private' ? other?.avatar_url : null;
-
-    $('#chat-title').textContent = displayName;
-    $('#chat-subtitle').textContent = conversation.type === 'group'
-      ? `${members.length} miembros`
-      : `@${other?.username || conversation.username || 'usuario'}`;
-    $('#chat-avatar').innerHTML = avatarMarkup(displayName, avatarURL);
-    $('#chat-info-button')?.classList.remove('hidden');
-    $('#message-input').disabled = false;
-    $('#send-button').disabled = false;
-    $('#message-status').textContent = '';
-
-    renderConversations(conversationCache);
-    await loadMessages(conversationId, members);
-    subscribeMessages(conversationId);
-    $('#message-input').focus();
-  } catch (error) {
-    console.error('OPEN CONVERSATION', error);
-    showChatError(`No se pudo abrir esta conversación. ${error?.message || ''}`);
-  }
-}
-
-async function loadConversationMembers(conversationId) {
-  const cached = memberCache.get(conversationId);
-  if (cached?.length) return cached;
-
-  const response = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: conversationId });
-  if (response.error) throw response.error;
-
-  const members = response.data || [];
-  memberCache.set(conversationId, members);
-  return members;
-}
-
-function messageFromRPC(row) {
-  return {
-    id: row.id,
-    conversation_id: row.conversation_id,
-    sender_id: row.sender_id,
-    content: row.content,
-    created_at: row.created_at,
-    reply_to: row.reply_to || null,
-    sender_username: row.sender_username,
-    sender_display_name: row.sender_display_name,
-    sender_avatar_url: row.sender_avatar_url,
-    reply_sender_username: row.reply_sender_username,
-    reply_sender_display_name: row.reply_sender_display_name,
-    reply_sender_avatar_url: row.reply_sender_avatar_url,
-    reply_content: row.reply_content
-  };
-}
-
-function showMessageEmpty() {
-  $('#messages').innerHTML = '<div class="empty-chat"><div class="empty-chat-logo">✦</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
-}
-
-function setReplyTo(message) {
-  if (!message) return;
-  replyingTo = message;
-  $('#replying-name').textContent = message.sender_display_name || message.sender_username || 'Usuario';
-  $('#replying-content').textContent = message.content || '';
-  $('#reply-bar')?.classList.remove('hidden');
-  $('#message-input')?.focus();
-}
-
-function clearReplyTo() {
-  replyingTo = null;
-  $('#reply-bar')?.classList.add('hidden');
-  if ($('#replying-name')) $('#replying-name').textContent = '';
-  if ($('#replying-content')) $('#replying-content').textContent = '';
-}
-
-async function loadMessages(conversationId, members = []) {
-  const box = $('#messages');
-  if (!box) return;
-
-  box.innerHTML = '<div class="empty-chat loading-chat"><div class="loading-orb"></div><h3>Cargando mensajes</h3><p>Conectando con Xifre…</p></div>';
-
-  const response = await supabase.rpc('xifre_get_messages', {
-    p_conversation_id: conversationId,
-    p_limit: 300
-  });
-
-  if (response.error) {
-    console.error('MESSAGES RPC', response.error);
-    showChatError(`No se pudieron cargar los mensajes. ${response.error.message}`);
-    return;
-  }
-
-  const messages = (response.data || []).map(messageFromRPC);
-  renderFullMessageSet(messages, members, false);
-}
-
-function renderMessage(message, profileMap, isGroup) {
-  const box = $('#messages');
-  if (!box || !message?.id) return;
-
-  const existing = box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`);
-  if (existing) return;
-
-  $('.empty-chat', box)?.remove();
-
-  const mine = String(message.sender_id) === String(currentUser?.id);
-  const sender = profileMap?.get(message.sender_id) || {
-    username: message.sender_username,
-    display_name: message.sender_display_name,
-    avatar_url: message.sender_avatar_url
-  };
-  const senderName = sender.display_name || sender.username || 'Usuario';
-
-  const row = document.createElement('div');
-  row.className = `message-row${mine ? ' mine' : ''}`;
-  row.dataset.messageId = String(message.id);
-  row.dataset.messageContent = message.content || '';
-
-  const replyBlock = message.reply_to
-    ? `<div class="message-reply-preview">
-        ${avatarMarkup(message.reply_sender_display_name || message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'reply-preview-avatar')}
-        <div class="reply-preview-copy">
-          <strong>${escapeHTML(message.reply_sender_display_name || message.reply_sender_username || 'Usuario')}</strong>
-          <span>${escapeHTML(message.reply_content || '')}</span>
-        </div>
-      </div>`
-    : '';
-
-  row.innerHTML = `
-    ${avatarMarkup(senderName, sender.avatar_url, 'message-avatar')}
-    <div class="message-main">
-      <div class="message-meta-line">
-        <span class="message-sender">${escapeHTML(senderName)}</span>
-        <span class="message-username">@${escapeHTML(sender.username || 'usuario')}</span>
-        <span class="message-time">${escapeHTML(formatTime(message.created_at))}</span>
-      </div>
-      <div class="message-bubble">
-        ${replyBlock}
-        <div class="message-content">${escapeHTML(message.content)}</div>
-      </div>
-      <div class="message-actions">
-        <button type="button" class="message-action-button" data-message-action="reply" title="Responder">↩</button>
-        ${mine ? '<button type="button" class="message-action-button danger" data-message-action="delete" title="Eliminar">⌫</button>' : ''}
-      </div>
-    </div>`;
-
-  row.addEventListener('click', event => {
-    if (event.target.closest('[data-message-action]')) return;
-    row.classList.toggle('selected');
-  });
-
-  row.querySelector('[data-message-action="reply"]')?.addEventListener('click', event => {
-    event.stopPropagation();
-    setReplyTo(message);
-  });
-
-  row.querySelector('[data-message-action="delete"]')?.addEventListener('click', event => {
-    event.stopPropagation();
-    deleteMessage(message.id, row);
-  });
-
-  box.appendChild(row);
-  lastRenderedMessageId = message.id;
-}
-
-function renderFullMessageSet(messages, members, preserveBottom = true) {
-  const box = $('#messages');
-  if (!box) return;
-
-  const wasAtBottom = preserveBottom ? isMessagesNearBottom() : true;
-  box.innerHTML = '';
-
-  if (!messages.length) {
-    showMessageEmpty();
-    lastRenderedMessageId = null;
-    return;
-  }
-
-  const profileMap = new Map(members.map(member => [member.user_id, {
-    username: member.username,
-    display_name: member.display_name,
-    avatar_url: member.avatar_url
-  }]));
-
-  messages.forEach(message => renderMessage(message, profileMap, currentConversationData?.type === 'group'));
-  lastRenderedMessageId = messages[messages.length - 1].id;
-  if (wasAtBottom) scrollMessages();
-}
-
-function subscribeMessages(conversationId) {
-  if (messageChannel) supabase.removeChannel(messageChannel);
-  if (messagePoll) clearInterval(messagePoll);
-
-  // Realtime is used when available.
-  messageChannel = supabase
-    .channel(`xifre-messages-${conversationId}-${Date.now()}`)
-    .on('postgres_changes', {
-      event: 'INSERT',
-      schema: 'public',
-      table: 'messages',
-      filter: `conversation_id=eq.${conversationId}`
-    }, async payload => {
-      if (String(payload.new?.sender_id) === String(currentUser?.id)) return;
-      if (String(currentConversation) !== String(conversationId)) return;
-      await refreshMessagesSilently(conversationId);
-    })
-    .subscribe((status, error) => {
-      if (error) console.error('REALTIME', error);
-      $('#message-status').textContent = status === 'SUBSCRIBED' ? '● conectado' : '';
-    });
-
-  // Polling de respaldo. Así el chat sigue funcionando aunque Realtime esté
-  // mal configurado o tarde en suscribirse. No muestra ninguna notificación.
-  messagePoll = setInterval(() => {
-    if (currentConversation === conversationId && document.visibilityState !== 'hidden') {
-      refreshMessagesSilently(conversationId);
+    if (clean.length < 2) {
+      list.innerHTML = '<div class="empty-sidebar">Escribe al menos 2 caracteres.</div>';
+      return;
     }
-  }, 1800);
-}
-
-async function refreshMessagesSilently(conversationId) {
-  if (!currentUser || currentConversation !== conversationId) return;
-
-  const response = await supabase.rpc('xifre_get_messages', {
-    p_conversation_id: conversationId,
-    p_limit: 300
-  });
-  if (response.error) {
-    console.error('MESSAGE REFRESH', response.error);
-    return;
+    list.innerHTML = '<div class="empty-sidebar">Buscando...</div>';
+    peopleSearchTimer = setTimeout(async () => {
+      const { data, error } = await supabase.rpc('xifre_search_people', { p_query: clean });
+      if (error) {
+        list.innerHTML = `<div class="empty-sidebar">${esc(error.message)}</div>`;
+        return;
+      }
+      renderPeople(data || []);
+    }, 180);
   }
 
-  const messages = (response.data || []).map(messageFromRPC);
-  const currentIds = $$('.message-row', $('#messages')).map(row => row.dataset.messageId);
-  const nextIds = messages.map(message => String(message.id));
-
-  if (currentIds.length === nextIds.length && currentIds.every((id, index) => id === nextIds[index])) return;
-
-  const members = memberCache.get(conversationId) || [];
-  renderFullMessageSet(messages, members, true);
-}
-
-async function sendMessage() {
-  if (!currentUser || !currentConversation) return;
-
-  const input = $('#message-input');
-  const button = $('#send-button');
-  const content = String(input.value || '').trim();
-  if (!content) return;
-
-  button.disabled = true;
-  input.disabled = true;
-  $('#message-status').textContent = 'enviando…';
-
-  try {
-    const response = await supabase.rpc('xifre_send_message', {
-      p_conversation_id: currentConversation,
-      p_content: content,
-      p_reply_to: replyingTo?.id || null
-    });
-    if (response.error) throw response.error;
-
-    const data = Array.isArray(response.data) ? response.data[0] : response.data;
-    if (!data?.id) throw new Error('Supabase no devolvió el mensaje enviado.');
-
-    const members = memberCache.get(currentConversation) || [];
-    const profileMap = new Map(members.map(member => [member.user_id, {
-      username: member.username,
-      display_name: member.display_name,
-      avatar_url: member.avatar_url
-    }]));
-
-    renderMessage(messageFromRPC(data), profileMap, currentConversationData?.type === 'group');
-    input.value = '';
-    clearReplyTo();
-
-    $('#message-status').textContent = 'enviado';
-    setTimeout(() => {
-      if (currentConversation) $('#message-status').textContent = '';
-    }, 1200);
-
-    const conversation = conversationCache.find(item => String(item.id) === String(currentConversation));
-    if (conversation) {
-      conversation.last_message = content;
-      conversation.last_message_at = data.created_at;
-      conversationCache.sort((a, b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
-      renderConversations(conversationCache);
-    }
-
-    scrollMessages();
-  } catch (error) {
-    console.error('SEND MESSAGE', error);
-    $('#message-status').textContent = '';
-    toast(`No se pudo enviar: ${error?.message || 'error'}`, 'error');
-  } finally {
-    button.disabled = false;
-    input.disabled = false;
-    input.focus();
-  }
-}
-
-async function deleteMessage(messageId, row) {
-  if (!currentUser || !messageId) return;
-
-  const content = row?.dataset?.messageContent || 'este mensaje';
-  if (!window.confirm(`¿Eliminar "${content.slice(0, 80)}${content.length > 80 ? '…' : ''}"?`)) return;
-
-  const response = await supabase.rpc('xifre_delete_message', { p_message_id: messageId });
-  if (response.error) {
-    console.error('DELETE MESSAGE', response.error);
-    toast(`No se pudo eliminar: ${response.error.message}`, 'error');
-    return;
-  }
-
-  if (row?.isConnected) row.remove();
-  if (!$$('.message-row', $('#messages')).length) showMessageEmpty();
-  if (replyingTo?.id === messageId) clearReplyTo();
-  toast('Mensaje eliminado.', 'success');
-  await loadConversations();
-}
-
-// ---------------------------------------------------------------------------
-// Grupos
-// ---------------------------------------------------------------------------
-
-function renderGroupFriends() {
-  const list = $('#group-friends-list');
-  if (!list) return;
-  list.innerHTML = '';
-  $('#group-selected-count').textContent = '0 seleccionados';
-
-  if (!friendCache.length) {
-    list.innerHTML = '<div class="requests-empty"><strong>Necesitas amigos</strong><span>Acepta solicitudes antes de crear un grupo.</span></div>';
-    return;
-  }
-
-  friendCache.forEach(friend => {
-    const label = document.createElement('label');
-    label.className = 'group-friend-option';
-    const name = friend.display_name || friend.username || 'Usuario';
-    label.innerHTML = `
-      <input type="checkbox" value="${escapeHTML(friend.id)}" class="group-friend-check">
-      ${avatarMarkup(name, friend.avatar_url, 'small-avatar')}
-      <span class="group-friend-copy"><strong>${escapeHTML(name)}</strong><small>@${escapeHTML(friend.username || 'usuario')}</small></span>
-      <span class="custom-check">✓</span>`;
-    list.appendChild(label);
-  });
-
-  $$('.group-friend-check', list).forEach(check => check.addEventListener('change', updateGroupSelectedCount));
-}
-
-function updateGroupSelectedCount() {
-  const count = $$('.group-friend-check:checked', $('#group-friends-list')).length;
-  $('#group-selected-count').textContent = `${count} seleccionado${count === 1 ? '' : 's'}`;
-}
-
-async function createGroup() {
-  const button = $('#create-group-submit');
-  const name = String($('#group-name')?.value || '').trim();
-  const selected = $$('.group-friend-check:checked', $('#group-friends-list')).map(input => input.value).filter(Boolean);
-
-  setModalMessage('group-message', '');
-  if (!name) return setModalMessage('group-message', 'Escribe un nombre para el grupo.', 'error');
-  if (!selected.length) return setModalMessage('group-message', 'Selecciona al menos un amigo.', 'error');
-
-  setLoading(button, true);
-  try {
-    const response = await supabase.rpc('create_group', {
-      group_name: name,
-      member_ids: selected
-    });
-    if (response.error) throw response.error;
-
-    const conversationId = String(response.data || '').trim();
-    if (!conversationId) throw new Error('Supabase no devolvió el ID del grupo.');
-
-    $('#group-name').value = '';
-    closeModal('group-modal');
-    await loadConversations();
-    await openConversation(conversationId);
-  } catch (error) {
-    console.error('GROUP', error);
-    setModalMessage('group-message', error?.message || 'No se pudo crear el grupo.', 'error');
-  } finally {
-    setLoading(button, false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Info / UI
-// ---------------------------------------------------------------------------
-
-async function openChatInfo() {
-  if (!currentConversation || !currentConversationData) return;
-
-  try {
-    const members = await loadConversationMembers(currentConversation);
-    const isGroup = currentConversationData.type === 'group';
-    const isOwner = String(currentConversationData.owner_id || '') === String(currentUser.id);
-
-    const title = isGroup
-      ? (currentConversationData.name || 'Grupo')
-      : (members.find(member => String(member.user_id) !== String(currentUser.id))?.display_name || 'Chat privado');
-
-    $('#info-title').textContent = title;
-    $('#info-subtitle').textContent = isGroup ? `${members.length} miembros` : 'Conversación privada';
-
-    const list = $('#chat-members');
+  function renderPeople(results) {
+    const list = $('#friend-search-results');
+    if (!list) return;
     list.innerHTML = '';
-
-    members.forEach(member => {
+    if (!results.length) {
+      list.innerHTML = '<div class="empty-sidebar">No se ha encontrado a nadie.</div>';
+      return;
+    }
+    results.forEach(person => {
+      const relationship = person.relationship || 'none';
       const row = document.createElement('div');
-      row.className = 'chat-member';
-      const name = member.display_name || member.username || 'Usuario';
-      const role = member.is_owner ? 'Administrador' : (String(member.user_id) === String(currentUser.id) ? 'Tú' : 'Miembro');
+      row.className = 'search-result';
       row.innerHTML = `
-        ${avatarMarkup(name, member.avatar_url, 'small-avatar')}
-        <div class="chat-member-copy">
-          <div class="chat-member-name">${escapeHTML(name)}</div>
-          <div class="chat-member-role">@${escapeHTML(member.username || 'usuario')} · ${escapeHTML(role)}</div>
-        </div>`;
+        <span class="search-avatar">${avatarHTML(person.username, person.avatar_url)}</span>
+        <div class="result-copy"><strong>${esc(person.username)}</strong><small>${relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Solicitud recibida' : 'No conectado'}</small></div>`;
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = `result-action ${relationship === 'friend' ? '' : 'secondary'}`;
+      if (relationship === 'friend') {
+        action.textContent = 'Abrir';
+        action.addEventListener('click', async () => { closeModal('friend-modal'); await openPrivateChat(person.id); });
+      } else if (relationship === 'outgoing_pending' || relationship === 'incoming_pending') {
+        action.textContent = 'Pendiente';
+        action.disabled = true;
+      } else {
+        action.textContent = 'Añadir';
+        action.addEventListener('click', async () => {
+          action.disabled = true;
+          try {
+            const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: person.id });
+            if (error) throw error;
+            action.textContent = 'Pendiente';
+            toast('Solicitud enviada.', 'success');
+          } catch (error) {
+            action.disabled = false;
+            action.textContent = 'Añadir';
+            toast(friendlyError(error), 'error');
+          }
+        });
+      }
+      row.appendChild(action);
       list.appendChild(row);
     });
-
-    $('#group-management')?.classList.toggle('hidden', !isGroup);
-    $('#delete-group-button')?.classList.toggle('hidden', !isOwner);
-
-    if (isGroup) renderGroupAddMembers(members);
-
-    openModal('chat-info-modal');
-  } catch (error) {
-    console.error('CHAT INFO', error);
-    toast(`No se pudo cargar la información: ${error?.message || 'error'}`, 'error');
-  }
-}
-
-function renderGroupAddMembers(currentMembers) {
-  const list = $('#group-add-list');
-  if (!list) return;
-
-  const memberIds = new Set(currentMembers.map(member => String(member.user_id)));
-  const candidates = friendCache.filter(friend => !memberIds.has(String(friend.id)));
-
-  list.innerHTML = '';
-
-  if (!candidates.length) {
-    list.innerHTML = '<div class="requests-empty compact-empty"><strong>No hay más amigos para añadir</strong><span>Todos tus amigos ya están en este grupo.</span></div>';
-    $('#group-add-selected-count').textContent = '0 seleccionados';
-    return;
   }
 
-  candidates.forEach(friend => {
-    const name = friend.display_name || friend.username || 'Usuario';
-    const label = document.createElement('label');
-    label.className = 'group-friend-option';
-    label.innerHTML = `
-      <input type="checkbox" value="${escapeHTML(friend.id)}" class="group-add-check">
-      ${avatarMarkup(name, friend.avatar_url, 'small-avatar')}
-      <span class="group-friend-copy"><strong>${escapeHTML(name)}</strong><small>@${escapeHTML(friend.username || 'usuario')}</small></span>
-      <span class="custom-check">✓</span>`;
-    list.appendChild(label);
-  });
-
-  $('#group-add-selected-count').textContent = '0 seleccionados';
-  $$('.group-add-check', list).forEach(input => input.addEventListener('change', () => {
-    const count = $$('.group-add-check:checked', list).length;
-    $('#group-add-selected-count').textContent = `${count} seleccionado${count === 1 ? '' : 's'}`;
-  }));
-}
-
-async function addGroupMembers() {
-  if (!currentConversation || currentConversationData?.type !== 'group') return;
-
-  const selected = $$('.group-add-check:checked', $('#group-add-list')).map(input => input.value).filter(Boolean);
-  if (!selected.length) {
-    toast('Selecciona al menos una persona.', 'info');
-    return;
-  }
-
-  const button = $('#add-group-members-button');
-  setLoading(button, true);
-
-  try {
-    const response = await supabase.rpc('xifre_add_group_members', {
-      p_conversation_id: currentConversation,
-      p_member_ids: selected
+  function renderFriendsModal() {
+    const list = $('#friends-modal-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!friendCache.length) {
+      list.innerHTML = '<div class="empty-sidebar">Todavía no tienes amigos.</div>';
+      return;
+    }
+    friendCache.forEach(friend => {
+      const row = document.createElement('div');
+      row.className = 'friend-item';
+      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar')}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
+      row.querySelector('button').addEventListener('click', async () => { closeModal('friends-modal'); await openPrivateChat(friend.id); });
+      list.appendChild(row);
     });
-    if (response.error) throw response.error;
+  }
 
-    memberCache.delete(currentConversation);
-    await loadConversationMembers(currentConversation);
-    await openChatInfo();
+  async function loadFriendRequests() {
+    if (!currentUser) return;
+    const base = await supabase.from('friend_requests').select('id,sender_id,receiver_id,created_at').eq('receiver_id', currentUser.id).order('created_at', { ascending: false });
+    if (base.error) return renderRequests([]);
+    const ids = [...new Set((base.data || []).map(x => x.sender_id))];
+    let profiles = [];
+    if (ids.length) {
+      const result = await supabase.from('profiles').select('id,username,avatar_url').in('id', ids);
+      if (!result.error) profiles = result.data || [];
+    }
+    const map = new Map(profiles.map(p => [p.id, p]));
+    renderRequests((base.data || []).map(req => ({ ...req, sender: map.get(req.sender_id) || {} })));
+  }
+
+  function renderRequests(requests) {
+    const list = $('#friend-requests-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!requests.length) { list.innerHTML = '<div class="empty-sidebar">No tienes solicitudes pendientes.</div>'; return; }
+    requests.forEach(req => {
+      const row = document.createElement('div');
+      row.className = 'request-item';
+      row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar')}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
+      const [accept, reject] = $$('.request-actions button', row);
+      accept.addEventListener('click', () => acceptRequest(req, row));
+      reject.addEventListener('click', () => rejectRequest(req, row));
+      list.appendChild(row);
+    });
+  }
+
+  async function acceptRequest(req, row) {
+    $$('.request-actions button', row).forEach(b => b.disabled = true);
+    try {
+      const first = String(currentUser.id) < String(req.sender_id) ? currentUser.id : req.sender_id;
+      const second = String(currentUser.id) < String(req.sender_id) ? req.sender_id : currentUser.id;
+      const exists = await supabase.from('friendships').select('user1_id,user2_id').eq('user1_id', first).eq('user2_id', second).maybeSingle();
+      if (exists.error) throw exists.error;
+      if (!exists.data) {
+        const insert = await supabase.from('friendships').insert({ user1_id: first, user2_id: second });
+        if (insert.error) throw insert.error;
+      }
+      const remove = await supabase.from('friend_requests').delete().eq('id', req.id).eq('receiver_id', currentUser.id);
+      if (remove.error) throw remove.error;
+      row.remove();
+      await loadFriends();
+      toast('Ahora sois amigos.', 'success');
+    } catch (error) {
+      $$('.request-actions button', row).forEach(b => b.disabled = false);
+      toast(friendlyError(error), 'error');
+    }
+  }
+
+  async function rejectRequest(req, row) {
+    const button = $('.request-reject', row);
+    button.disabled = true;
+    try {
+      const { error } = await supabase.from('friend_requests').delete().eq('id', req.id).eq('receiver_id', currentUser.id);
+      if (error) throw error;
+      row.remove();
+    } catch (error) {
+      button.disabled = false;
+      toast(friendlyError(error), 'error');
+    }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Conversations                                                            */
+  /* ------------------------------------------------------------------------ */
+  async function loadConversations() {
+    if (!currentUser) return;
+    const { data, error } = await supabase.rpc('xifre_get_my_conversations');
+    if (error) { console.warn('CONVERSATIONS', error); return []; }
+    conversationCache = (data || []).map(row => ({ ...row, displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado') }));
+    renderConversations();
+    return conversationCache;
+  }
+
+  function renderConversations() {
+    const list = $('#conversation-list');
+    if (!list) return;
+    list.innerHTML = '';
+    setText('chat-count', conversationCache.length);
+    if (!conversationCache.length) {
+      list.innerHTML = '<div class="empty-sidebar">No tienes conversaciones todavía.</div>';
+      return;
+    }
+    conversationCache.forEach(conversation => {
+      const isGroup = conversation.type === 'group';
+      const label = conversation.displayName || conversation.name || (isGroup ? 'Grupo' : 'Chat privado');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `conversation${String(currentConversation) === String(conversation.id) ? ' active' : ''}`;
+      row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup ? 'group' : 'private', 'conversation-avatar-image')}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview">${esc(conversation.last_message || (isGroup ? `${conversation.member_count || 0} miembros` : 'Conversación'))}</span></span><span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span>`;
+      row.addEventListener('click', () => openConversation(conversation.id, conversation));
+      list.appendChild(row);
+    });
+  }
+
+  async function openPrivateChat(friendId) {
+    try {
+      const { data, error } = await supabase.rpc('create_private_chat', { other_user: friendId });
+      if (error) throw error;
+      const id = String(data || '');
+      await loadConversations();
+      await openConversation(id);
+    } catch (error) {
+      toast(friendlyError(error), 'error');
+    }
+  }
+
+  async function openConversation(id, cached = null) {
+    if (!id || !currentUser) return false;
+    const conversationId = String(id);
+    let conversation = cached || conversationCache.find(c => String(c.id) === conversationId);
+    if (!conversation) {
+      await loadConversations();
+      conversation = conversationCache.find(c => String(c.id) === conversationId);
+    }
+    if (!conversation) return false;
+
+    try {
+      currentConversation = conversationId;
+      currentConversationData = conversation;
+      sessionStorage.setItem('xifre_current_conversation', conversationId);
+      const { data: members, error } = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: conversationId });
+      if (error) throw error;
+      currentMembers = members || [];
+      memberCache.set(conversationId, currentMembers);
+
+      updateChatHeader();
+      renderRightPane();
+      renderConversations();
+      await loadMessages(conversationId);
+      setupTypingChannel(conversationId);
+      setupMessageChannel(conversationId);
+      $('#message-input').disabled = false;
+      $('#send-button').disabled = true;
+      $('#message-input').focus();
+      return true;
+    } catch (error) {
+      console.error('OPEN CONVERSATION', error);
+      currentConversation = conversationId;
+      currentConversationData = conversation;
+      showChatError(error?.message || 'No se pudo abrir esta conversación.');
+      return false;
+    }
+  }
+
+  async function restoreConversation() {
+    if (!currentUser) return;
+    const saved = sessionStorage.getItem('xifre_current_conversation');
+    if (!saved) return;
+    const conversation = conversationCache.find(c => String(c.id) === String(saved));
+    if (conversation) await openConversation(saved, conversation);
+  }
+
+  function updateChatHeader() {
+    const isGroup = currentConversationData?.type === 'group';
+    let name = currentConversationData?.displayName || currentConversationData?.name || (isGroup ? 'Grupo' : 'Conversación');
+    let url = currentConversationData?.avatar_url || null;
+    let subtitle = '';
+    if (!isGroup) {
+      const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
+      name = other?.username || name;
+      url = other?.avatar_url || null;
+      subtitle = 'Mensaje directo';
+    } else {
+      subtitle = `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`;
+    }
+    avatarInto($('#chat-avatar'), name, url, isGroup ? 'group' : 'private');
+    setText('chat-title', name);
+    setText('chat-subtitle', subtitle);
+    $('#chat-info-button')?.classList.remove('hidden');
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Messages                                                                 */
+  /* ------------------------------------------------------------------------ */
+  function messageObject(row) {
+    return { ...row };
+  }
+
+  async function loadMessages(conversationId) {
+    const { data, error } = await supabase.rpc('xifre_get_messages', { p_conversation_id: conversationId, p_limit: 300 });
+    if (error) throw error;
+    renderMessages((data || []).map(messageObject), true);
+  }
+
+  function renderMessages(messages, forceBottom = false) {
+    const box = $('#messages');
+    if (!box) return;
+    const wasNearBottom = forceBottom || box.scrollHeight - box.scrollTop - box.clientHeight < 140;
+    box.innerHTML = '';
+    if (!messages.length) {
+      box.innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
+      return;
+    }
+    const profiles = new Map(currentMembers.map(m => [String(m.user_id), m]));
+    messages.forEach(message => renderOneMessage(message, profiles));
+    if (wasNearBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function renderOneMessage(message, profiles = new Map()) {
+    const box = $('#messages');
+    if (!box || !message?.id) return;
+    if (box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`)) return;
+    $('.chat-welcome', box)?.remove();
+    const mine = String(message.sender_id) === String(currentUser.id);
+    const cachedSender = profiles.get(String(message.sender_id)) || {};
+    const sender = {
+      username: message.sender_username || cachedSender.username || 'Usuario',
+      avatar_url: message.sender_avatar_url || cachedSender.avatar_url || null
+    };
+    const row = document.createElement('article');
+    row.className = `message-row${mine ? ' mine' : ''}`;
+    row.dataset.messageId = String(message.id);
+    row.innerHTML = `
+      <span class="message-avatar">${avatarHTML(sender.username || 'Usuario', sender.avatar_url)}</span>
+      <div class="message-body">
+        ${message.reply_to ? `<div class="message-reply-preview"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url)}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(message.reply_content || '')}</span></div></div>` : ''}
+        <div class="message-meta"><span class="message-author">${esc(sender.username || 'Usuario')}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div>
+        <div class="message-content">${esc(message.content || '')}</div>
+      </div>
+      <div class="message-actions">
+        <button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button>
+        <button class="message-action more" type="button" data-message-action="more" title="Más">•••</button>
+      </div>`;
+
+    row.querySelector('[data-message-action="reply"]').addEventListener('click', e => {
+      e.stopPropagation();
+      setReplyTo(message);
+    });
+    row.querySelector('[data-message-action="more"]').addEventListener('click', e => {
+      e.stopPropagation();
+      openMessageMenu(message, e.currentTarget);
+    });
+    row.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      openMessageMenu(message, row);
+    });
+    box.appendChild(row);
+  }
+
+  function setReplyTo(message) {
+    replyTarget = message;
+    setText('replying-name', `@${message.sender_username || 'usuario'}`);
+    setText('replying-content', message.content || '');
+    $('#reply-bar')?.classList.remove('hidden');
+    $('#message-input')?.focus();
+  }
+
+  function clearReply() {
+    replyTarget = null;
+    $('#reply-bar')?.classList.add('hidden');
+    setText('replying-name', '');
+    setText('replying-content', '');
+  }
+
+  function openMessageMenu(message, anchor) {
+    const menu = $('#message-menu');
+    if (!menu) return;
+    menuMessage = message;
+    $('#delete-message-menu')?.classList.toggle('hidden', String(message.sender_id) !== String(currentUser.id));
+    menu.classList.remove('hidden');
+    const rect = anchor.getBoundingClientRect();
+    const width = 180;
+    let left = rect.right - width;
+    let top = rect.bottom + 5;
+    if (left < 8) left = 8;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    if (top + 80 > window.innerHeight) top = rect.top - 90;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  function closeMessageMenu() {
+    $('#message-menu')?.classList.add('hidden');
+    menuMessage = null;
+  }
+
+  async function deleteMessage(message) {
+    const ok = await askConfirm('Eliminar mensaje', 'Este mensaje se eliminará de la conversación.', 'Eliminar');
+    if (!ok) return;
+    const { error } = await supabase.rpc('xifre_delete_message', { p_message_id: message.id });
+    if (error) return toast(friendlyError(error), 'error');
+    closeMessageMenu();
+    const row = $(`[data-message-id="${CSS.escape(String(message.id))}"]`);
+    row?.remove();
+    if (!$$('.message-row', $('#messages')).length) $('#messages').innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
+    if (replyTarget?.id === message.id) clearReply();
     await loadConversations();
-    toast('Personas añadidas al grupo.', 'success');
-  } catch (error) {
-    console.error('ADD GROUP MEMBERS', error);
-    toast(`No se pudieron añadir: ${error?.message || 'error'}`, 'error');
-  } finally {
-    setLoading(button, false);
+    toast('Mensaje eliminado.', 'success');
   }
-}
 
-async function deleteGroup() {
-  if (!currentConversation || currentConversationData?.type !== 'group') return;
-  if (!window.confirm(`¿Eliminar definitivamente el grupo "${currentConversationData.name || 'Grupo'}"?`)) return;
+  async function sendMessage() {
+    if (!currentUser || !currentConversation) return;
+    const input = $('#message-input');
+    const button = $('#send-button');
+    const content = String(input.value || '').trim();
+    if (!content) return;
+    button.disabled = true;
+    try {
+      const { data, error } = await supabase.rpc('xifre_send_message', {
+        p_conversation_id: currentConversation,
+        p_content: content,
+        p_reply_to: replyTarget?.id || null
+      });
+      if (error) throw error;
+      const sent = Array.isArray(data) ? data[0] : data;
+      const profiles = new Map(currentMembers.map(m => [String(m.user_id), m]));
+      renderOneMessage(sent, profiles);
+      input.value = '';
+      clearReply();
+      stopTypingBroadcast();
+      $('#messages').scrollTop = $('#messages').scrollHeight;
+      await loadConversations();
+    } catch (error) {
+      toast(friendlyError(error), 'error');
+    } finally {
+      button.disabled = true;
+      input.focus();
+    }
+  }
 
-  try {
-    const response = await supabase.rpc('xifre_delete_group', {
-      p_conversation_id: currentConversation
+  /* ------------------------------------------------------------------------ */
+  /* Realtime typing + messages                                               */
+  /* ------------------------------------------------------------------------ */
+  function stopChatRealtime() {
+    if (messageChannel) supabase?.removeChannel(messageChannel);
+    if (typingChannel) supabase?.removeChannel(typingChannel);
+    messageChannel = null;
+    typingChannel = null;
+    if (messagePoll) clearInterval(messagePoll);
+    messagePoll = null;
+    if (typingStopTimer) clearTimeout(typingStopTimer);
+    typingStopTimer = null;
+    setTypingVisible(false);
+  }
+
+  function setupMessageChannel(conversationId) {
+    if (messageChannel) supabase.removeChannel(messageChannel);
+    messageChannel = supabase.channel(`xifre:messages:${conversationId}:${Date.now()}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async payload => {
+        if (String(payload.new?.sender_id) === String(currentUser.id)) return;
+        if (String(currentConversation) !== String(conversationId)) return;
+        await loadMessages(conversationId).catch(() => {});
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async () => {
+        if (String(currentConversation) !== String(conversationId)) return;
+        await loadMessages(conversationId).catch(() => {});
+      })
+      .subscribe();
+    if (messagePoll) clearInterval(messagePoll);
+    messagePoll = setInterval(() => {
+      if (document.visibilityState === 'visible' && String(currentConversation) === String(conversationId)) {
+        loadMessages(conversationId).catch(() => {});
+      }
+    }, 2500);
+  }
+
+  function setupTypingChannel(conversationId) {
+    if (typingChannel) supabase.removeChannel(typingChannel);
+    setTypingVisible(false);
+    typingChannel = supabase.channel(`xifre:typing:${conversationId}`, { config: { private: true, broadcast: { self: false } } })
+      .on('broadcast', { event: 'typing' }, payload => {
+        const senderId = String(payload.payload?.user_id || '');
+        if (!senderId || senderId === String(currentUser.id)) return;
+        if (payload.payload?.typing) {
+          const sender = currentMembers.find(m => String(m.user_id) === senderId);
+          setTypingVisible(true, sender?.username || payload.payload?.username || 'Alguien');
+          setTimeout(() => setTypingVisible(false, sender?.username || ''), 3500);
+        } else {
+          setTypingVisible(false);
+        }
+      })
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') stopTypingBroadcast();
+      });
+  }
+
+  async function broadcastTyping(isTyping) {
+    if (!typingChannel || !currentUser || !currentConversation) return;
+    try {
+      await typingChannel.send({ type: 'broadcast', event: 'typing', payload: { user_id: currentUser.id, username: currentProfile?.username || 'Usuario', typing: !!isTyping } });
+    } catch (error) {
+      console.debug('TYPING', error);
+    }
+  }
+
+  function scheduleTyping() {
+    if (!currentConversation) return;
+    void broadcastTyping(true);
+    if (typingStopTimer) clearTimeout(typingStopTimer);
+    typingStopTimer = setTimeout(() => void broadcastTyping(false), 1600);
+  }
+
+  function stopTypingBroadcast() {
+    if (typingStopTimer) clearTimeout(typingStopTimer);
+    typingStopTimer = null;
+    void broadcastTyping(false);
+  }
+
+  function setTypingVisible(visible, username = '') {
+    const el = $('#typing-indicator');
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+    if (visible) setText('typing-text', `${username} está escribiendo...`);
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Right panel                                                              */
+  /* ------------------------------------------------------------------------ */
+  function renderRightPane() {
+    const empty = $('.right-pane-empty');
+    const dm = $('#right-dm-content');
+    const group = $('#right-group-content');
+    const isGroup = currentConversationData?.type === 'group';
+    empty?.classList.add('hidden');
+    dm?.classList.toggle('hidden', isGroup);
+    group?.classList.toggle('hidden', !isGroup);
+    if (!isGroup) {
+      const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
+      const name = other?.username || 'Usuario';
+      avatarInto($('#right-profile-avatar'), name, other?.avatar_url);
+      setText('right-profile-name', name);
+    } else {
+      const name = currentConversationData?.name || 'Grupo';
+      avatarInto($('#right-group-avatar'), name, currentConversationData?.avatar_url, 'group');
+      setText('right-group-name', name);
+      setText('right-group-count', `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`);
+      const list = $('#right-group-members');
+      list.innerHTML = '';
+      currentMembers.forEach(member => {
+        const row = document.createElement('div');
+        row.className = 'right-member';
+        row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar')}<span class="right-member-name">${esc(member.username || 'Usuario')}</span>`;
+        list.appendChild(row);
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Groups                                                                   */
+  /* ------------------------------------------------------------------------ */
+  function renderGroupSelection() {
+    const list = $('#group-friends-list');
+    if (!list) return;
+    list.innerHTML = '';
+    friendCache.forEach(friend => {
+      const row = document.createElement('label');
+      row.className = 'selection-item';
+      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+      list.appendChild(row);
     });
-    if (response.error) throw response.error;
+    updateGroupSelectedCount();
+  }
 
-    const deletedId = currentConversation;
+  function updateGroupSelectedCount() {
+    setText('group-selected-count', `${$$('.group-friend-check:checked', $('#group-friends-list')).length} seleccionados`);
+  }
+
+  async function createGroup() {
+    const name = String($('#group-name')?.value || '').trim();
+    const ids = $$('.group-friend-check:checked', $('#group-friends-list')).map(i => i.value);
+    if (!name) return setModalMessage('group-message', 'Escribe un nombre para el grupo.', 'error');
+    if (!ids.length) return setModalMessage('group-message', 'Selecciona al menos un amigo.', 'error');
+    const button = $('#create-group-submit');
+    setLoading(button, true);
+    try {
+      const { data, error } = await supabase.rpc('create_group', { group_name: name, member_ids: ids });
+      if (error) throw error;
+      closeModal('group-modal');
+      $('#group-name').value = '';
+      await loadConversations();
+      await openConversation(String(data));
+    } catch (error) {
+      setModalMessage('group-message', friendlyError(error), 'error');
+    } finally {
+      setLoading(button, false);
+    }
+  }
+
+  async function openChatInfo() {
+    if (!currentConversation) return;
+    const isGroup = currentConversationData?.type === 'group';
+    if (!isGroup) {
+      const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
+      setText('info-title', other?.username || 'Usuario');
+      setText('info-subtitle', 'Mensaje directo');
+      $('#group-edit-section')?.classList.add('hidden');
+      renderInfoMembers(currentMembers);
+    } else {
+      setText('info-title', currentConversationData?.name || 'Grupo');
+      setText('info-subtitle', `${currentMembers.length} miembros`);
+      renderInfoMembers(currentMembers);
+      const isOwner = String(currentConversationData?.owner_id || '') === String(currentUser.id);
+      $('#group-edit-section')?.classList.toggle('hidden', !isOwner);
+      setModalMessage('group-settings-message', '');
+      $('#group-edit-name').value = currentConversationData?.name || 'Grupo';
+      if (!pendingGroupAvatarFile) avatarInto($('#group-edit-avatar-preview'), currentConversationData?.name || 'Grupo', currentConversationData?.avatar_url, 'group');
+      renderGroupAddSelection();
+    }
+    openModal('chat-info-modal');
+  }
+
+  function renderInfoMembers(members) {
+    const list = $('#info-members');
+    if (!list) return;
+    list.innerHTML = '';
+    members.forEach(member => {
+      const row = document.createElement('div');
+      row.className = 'friend-item';
+      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar')}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>${member.is_owner ? 'Administrador' : ''}</small></div><span></span>`;
+      list.appendChild(row);
+    });
+  }
+
+  function renderGroupAddSelection() {
+    const list = $('#group-add-list');
+    if (!list) return;
+    const currentIds = new Set(currentMembers.map(m => String(m.user_id)));
+    const candidates = friendCache.filter(f => !currentIds.has(String(f.id)));
+    list.innerHTML = '';
+    candidates.forEach(friend => {
+      const row = document.createElement('label');
+      row.className = 'selection-item';
+      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+      list.appendChild(row);
+    });
+    updateGroupAddCount();
+  }
+
+  function updateGroupAddCount() {
+    setText('group-add-selected-count', `${$$('.group-add-check:checked', $('#group-add-list')).length} seleccionados`);
+  }
+
+  async function addGroupMembers() {
+    if (!currentConversation) return;
+    const ids = $$('.group-add-check:checked', $('#group-add-list')).map(i => i.value);
+    if (!ids.length) return toast('Selecciona al menos una persona.', 'info');
+    const button = $('#add-group-members-button');
+    setLoading(button, true);
+    try {
+      const { error } = await supabase.rpc('xifre_add_group_members', { p_conversation_id: currentConversation, p_member_ids: ids });
+      if (error) throw error;
+      memberCache.delete(currentConversation);
+      const result = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: currentConversation });
+      if (result.error) throw result.error;
+      currentMembers = result.data || [];
+      memberCache.set(currentConversation, currentMembers);
+      updateChatHeader();
+      renderRightPane();
+      await openChatInfo();
+      toast('Personas añadidas.', 'success');
+    } catch (error) {
+      toast(friendlyError(error), 'error');
+    } finally {
+      setLoading(button, false);
+    }
+  }
+
+  async function saveGroupSettings() {
+    if (!currentConversation || currentConversationData?.type !== 'group') return;
+    const button = $('#save-group-settings');
+    const name = String($('#group-edit-name').value || '').trim();
+    if (!name) return setModalMessage('group-settings-message', 'El nombre es obligatorio.', 'error');
+    setLoading(button, true);
+    try {
+      let avatarUrl = null;
+      if (pendingGroupAvatarFile) {
+        const path = `${currentUser.id}/groups/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingGroupAvatarFile)}`;
+        avatarUrl = await uploadAvatar(pendingGroupAvatarFile, path);
+      }
+      const { data, error } = await supabase.rpc('xifre_update_group', { p_conversation_id: currentConversation, p_name: name, p_avatar_url: avatarUrl });
+      if (error) throw error;
+      const updated = Array.isArray(data) ? data[0] : data;
+      currentConversationData.name = updated?.name || name;
+      currentConversationData.displayName = currentConversationData.name;
+      if (updated?.avatar_url) currentConversationData.avatar_url = updated.avatar_url;
+      const local = conversationCache.find(c => String(c.id) === String(currentConversation));
+      if (local) { local.name = currentConversationData.name; local.displayName = currentConversationData.name; local.avatar_url = currentConversationData.avatar_url || null; }
+      pendingGroupAvatarFile = null;
+      pendingGroupAvatarURL = null;
+      updateChatHeader();
+      renderRightPane();
+      renderConversations();
+      avatarInto($('#group-edit-avatar-preview'), currentConversationData.name, currentConversationData.avatar_url, 'group');
+      setModalMessage('group-settings-message', 'Cambios guardados.', 'success');
+    } catch (error) {
+      setModalMessage('group-settings-message', friendlyError(error), 'error');
+    } finally {
+      setLoading(button, false);
+    }
+  }
+
+  async function deleteGroup() {
+    if (!currentConversation) return;
+    const ok = await askConfirm('Eliminar grupo', 'Se eliminarán el grupo, sus mensajes y sus miembros. Esta acción no se puede deshacer.', 'Eliminar grupo');
+    if (!ok) return;
+    const deletedConversation = currentConversation;
+    const { error } = await supabase.rpc('xifre_delete_group', { p_conversation_id: deletedConversation });
+    if (error) return toast(friendlyError(error), 'error');
     closeModal('chat-info-modal');
-    memberCache.delete(deletedId);
+    stopChatRealtime();
     currentConversation = null;
     currentConversationData = null;
+    currentMembers = [];
+    memberCache.delete(deletedConversation);
+    sessionStorage.removeItem('xifre_current_conversation');
     resetChatView();
     await loadConversations();
     toast('Grupo eliminado.', 'success');
-  } catch (error) {
-    console.error('DELETE GROUP', error);
-    toast(`No se pudo eliminar el grupo: ${error?.message || 'error'}`, 'error');
   }
-}
 
-function showChatError(message) {
-  $('#messages').innerHTML = `<div class="message-error"><strong>No se pudo abrir esta conversación</strong><div>${escapeHTML(message)}</div><button type="button" id="retry-current-chat">Reintentar</button></div>`;
-  $('#retry-current-chat')?.addEventListener('click', () => {
-    if (currentConversation) openConversation(currentConversation);
-  });
-  $('#message-input').disabled = true;
-  $('#send-button').disabled = true;
-}
+  /* ------------------------------------------------------------------------ */
+  /* Avatar upload / profile settings                                         */
+  /* ------------------------------------------------------------------------ */
+  function fileExt(file) {
+    const map = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+    return map[file?.type] || 'png';
+  }
 
-function openModal(id) {
-  $(`#${id}`)?.classList.remove('hidden');
-}
+  function validateImage(file) {
+    if (!file) throw new Error('No se ha seleccionado ninguna imagen.');
+    if (!/^image\/(png|jpeg|webp|gif)$/i.test(file.type)) throw new Error('Solo se permiten PNG, JPG, WEBP o GIF.');
+    if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB.');
+  }
 
-function closeModal(id) {
-  $(`#${id}`)?.classList.add('hidden');
-}
+  async function uploadAvatar(file, path) {
+    validateImage(file);
+    const { error } = await supabase.storage.from('xifre-avatars').upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+    if (error) throw error;
+    const result = supabase.storage.from('xifre-avatars').getPublicUrl(path);
+    if (result.error) throw result.error;
+    return result.data.publicUrl;
+  }
 
-function scrollMessages() {
-  const box = $('#messages');
-  if (box) box.scrollTop = box.scrollHeight;
-}
+  function previewFile(file, target, name, kind) {
+    try { validateImage(file); } catch (error) { toast(error.message, 'error'); return; }
+    const url = URL.createObjectURL(file);
+    target.innerHTML = avatarHTML(name, url, kind);
+    target.dataset.objectUrl = url;
+  }
 
-function isMessagesNearBottom() {
-  const box = $('#messages');
-  if (!box) return true;
-  return box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-}
+  function openSettings() {
+    syncProfileUI();
+    applyTheme(currentTheme());
+    $('#settings-modal')?.classList.remove('hidden');
+  }
 
-async function setupRequestRealtime() {
-  if (!currentUser) return;
-  if (requestChannel) supabase.removeChannel(requestChannel);
-
-  requestChannel = supabase
-    .channel(`xifre-request-events-${currentUser.id}`)
-    .on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'friend_requests',
-      filter: `receiver_id=eq.${currentUser.id}`
-    }, async () => {
-      await loadFriendRequests();
-    })
-    .subscribe();
-}
-
-function bind() {
-  document.addEventListener('click', event => {
-    const actionElement = event.target.closest('[data-action]');
-    if (!actionElement) return;
-    const action = actionElement.dataset.action;
-
-    if (action === 'logout') logout();
-    if (action === 'resend') resendConfirmation();
-    if (action === 'close-modal') closeModal(actionElement.dataset.modal);
-    if (action === 'open-friend') {
-      openModal('friend-modal');
-      if ($('#friend-search')) $('#friend-search').value = '';
-      renderPeopleResults(friendCache.map(friend => ({ ...friend, relationship: 'friend' })), true);
-      $('#friend-search')?.focus();
+  async function saveProfileSettings() {
+    if (!currentUser) return;
+    const button = $('#save-profile-settings');
+    const username = normalizeUsername($('#settings-username').value);
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+    setLoading(button, true);
+    try {
+      let avatarUrl = null;
+      if (pendingProfileAvatarFile) {
+        const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;
+        avatarUrl = await uploadAvatar(pendingProfileAvatarFile, path);
+      }
+      const { data, error } = await supabase.rpc('xifre_update_profile', { p_username: username, p_display_name: username, p_avatar_url: avatarUrl });
+      if (error) throw error;
+      currentProfile = Array.isArray(data) ? data[0] : data;
+      pendingProfileAvatarFile = null;
+      pendingProfileAvatarURL = null;
+      syncProfileUI();
+      memberCache.clear();
+      await loadFriends();
+      await loadConversations();
+      if (currentConversation) await openConversation(currentConversation);
+      setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
+    } catch (error) {
+      setModalMessage('profile-settings-message', friendlyError(error), 'error');
+    } finally {
+      setLoading(button, false);
     }
-    if (action === 'focus-friend-request') $('#friend-search')?.focus();
-    if (action === 'open-group') {
-      openModal('group-modal');
-      renderGroupFriends();
-      $('#group-name')?.focus();
-    }
-    if (action === 'send-friend') sendFriendRequest();
-    if (action === 'create-group') createGroup();
-    if (action === 'add-group-members') addGroupMembers();
-    if (action === 'delete-group') deleteGroup();
-    if (action === 'open-requests') openFriendRequests();
-    if (action === 'open-friends') {
-      openModal('friends-modal');
-      renderFriendsModal();
-      void loadFriends();
-    }
-    if (action === 'open-chat-info') openChatInfo();
-  });
+  }
 
-  $('#friend-search')?.addEventListener('input', event => searchPeople(event.target.value));
-  $('#login-form')?.addEventListener('submit', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    login();
-  });
-  $('#register-form')?.addEventListener('submit', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    register();
-  });
-  $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); sendMessage(); });
-  $('#message-input')?.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      sendMessage();
-    }
-  });
-  $('#cancel-reply')?.addEventListener('click', clearReplyTo);
+  /* ------------------------------------------------------------------------ */
+  /* Custom confirmation                                                      */
+  /* ------------------------------------------------------------------------ */
+  function askConfirm(title, text, okText = 'Confirmar') {
+    return new Promise(resolve => {
+      confirmResolver = resolve;
+      setText('confirm-title', title);
+      setText('confirm-text', text);
+      setText('confirm-ok', okText);
+      $('#confirm-modal')?.classList.remove('hidden');
+    });
+  }
 
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') $$('.modal:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
-    if (event.key === 'Enter' && event.target.matches('#friend-search')) {
-      event.preventDefault();
-      const value = normalizeUsername(event.target.value);
-      if (value) searchPeople(value);
-    }
-  });
-}
+  function finishConfirm(value) {
+    if (!confirmResolver) return;
+    const resolver = confirmResolver;
+    confirmResolver = null;
+    $('#confirm-modal')?.classList.add('hidden');
+    resolver(value);
+  }
 
-async function init() {
-  bind();
+  /* ------------------------------------------------------------------------ */
+  /* Modals / reset                                                           */
+  /* ------------------------------------------------------------------------ */
+  function openModal(id) {
+    $(`#${id}`)?.classList.remove('hidden');
+  }
+  function closeModal(id) {
+    $(`#${id}`)?.classList.add('hidden');
+  }
 
-  try {
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
-      throw new Error('La librería de Supabase no se ha cargado.');
-    }
+  function resetChatView() {
+    stopChatRealtime();
+    setText('chat-title', 'XIFRE');
+    setText('chat-subtitle', 'Selecciona una conversación');
+    avatarInto($('#chat-avatar'), 'XIFRE', null, 'private');
+    $('#chat-info-button')?.classList.add('hidden');
+    $('#message-input').disabled = true;
+    $('#message-input').value = '';
+    $('#send-button').disabled = true;
+    clearReply();
+    setTypingVisible(false);
+    $('#messages').innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Bienvenido a XIFRE</h3><p>Selecciona un chat de la izquierda para empezar.</p></div>';
+    $('.right-pane-empty')?.classList.remove('hidden');
+    $('#right-dm-content')?.classList.add('hidden');
+    $('#right-group-content')?.classList.add('hidden');
+  }
 
+  function showChatError(text) {
+    $('#messages').innerHTML = `<div class="chat-welcome"><div class="welcome-mark">!</div><h3>No se pudo abrir esta conversación</h3><p>${esc(text)}</p><button type="button" id="retry-chat" class="secondary-action" style="margin-top:12px">Reintentar</button></div>`;
+    $('#retry-chat')?.addEventListener('click', () => openConversation(currentConversation));
+    $('#message-input').disabled = true;
+    $('#send-button').disabled = true;
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Event wiring                                                             */
+  /* ------------------------------------------------------------------------ */
+  function bind() {
+    document.addEventListener('click', event => {
+      const action = event.target.closest('[data-action]');
+      if (action) {
+        const type = action.dataset.action;
+        if (type === 'open-settings') openSettings();
+        else if (type === 'close-settings') $('#settings-modal')?.classList.add('hidden');
+        else if (type === 'logout') void logout();
+        else if (type === 'open-friend') { openModal('friend-modal'); $('#friend-search').value = ''; renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' }))); $('#friend-search').focus(); }
+        else if (type === 'open-friends') { openModal('friends-modal'); renderFriendsModal(); }
+        else if (type === 'open-requests') { openModal('requests-modal'); void loadFriendRequests(); }
+        else if (type === 'open-group') { openModal('group-modal'); renderGroupSelection(); $('#group-name').focus(); }
+        else if (type === 'create-group') void createGroup();
+        else if (type === 'open-chat-info') void openChatInfo();
+        else if (type === 'save-group-settings') void saveGroupSettings();
+        else if (type === 'add-group-members') void addGroupMembers();
+        else if (type === 'request-delete-group') void deleteGroup();
+        else if (type === 'save-profile-settings') void saveProfileSettings();
+        else if (type === 'composer-placeholder') return;
+        else if (type === 'resend') void resendConfirmation();
+        else if (type === 'close-modal') closeModal(action.dataset.modal);
+      }
+
+      const tab = event.target.closest('[data-settings-tab]');
+      if (tab) {
+        const value = tab.dataset.settingsTab;
+        $$('.settings-tab-button').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === value));
+        $('#settings-profile-tab')?.classList.toggle('active', value === 'profile');
+        $('#settings-appearance-tab')?.classList.toggle('active', value === 'appearance');
+      }
+
+      const theme = event.target.closest('[data-theme-choice]');
+      if (theme) applyTheme(theme.dataset.themeChoice);
+
+      const messageAction = event.target.closest('[data-message-menu]');
+      if (messageAction) {
+        if (messageAction.dataset.messageMenu === 'reply' && menuMessage) setReplyTo(menuMessage);
+        if (messageAction.dataset.messageMenu === 'delete' && menuMessage) void deleteMessage(menuMessage);
+        closeMessageMenu();
+      }
+
+      if (event.target.closest('#confirm-ok')) finishConfirm(true);
+      if (event.target.closest('#confirm-cancel')) finishConfirm(false);
+      if (event.target.closest('#cancel-reply')) clearReply();
+    });
+
+    document.addEventListener('click', event => {
+      if (!event.target.closest('#message-menu')) closeMessageMenu();
+    }, true);
+
+    $('#friend-search')?.addEventListener('input', e => searchPeople(e.target.value));
+    $('#group-friends-list')?.addEventListener('change', updateGroupSelectedCount);
+    $('#group-add-list')?.addEventListener('change', updateGroupAddCount);
+
+    $('#profile-avatar-file')?.addEventListener('change', event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try { validateImage(file); } catch (error) { event.target.value = ''; toast(error.message, 'error'); return; }
+      pendingProfileAvatarFile = file;
+      previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private');
+    });
+
+    $('#group-avatar-file')?.addEventListener('change', event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try { validateImage(file); } catch (error) { event.target.value = ''; toast(error.message, 'error'); return; }
+      pendingGroupAvatarFile = file;
+      previewFile(file, $('#group-edit-avatar-preview'), currentConversationData?.name || 'Grupo', 'group');
+    });
+
+    $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
+    $('#message-input')?.addEventListener('input', () => {
+      const value = String($('#message-input').value || '').trim();
+      $('#send-button').disabled = !value || !currentConversation;
+      if (value) scheduleTyping(); else stopTypingBroadcast();
+    });
+    $('#message-input')?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
+    });
+    $('#message-input')?.addEventListener('blur', () => stopTypingBroadcast());
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        if (!$('#message-menu').classList.contains('hidden')) return closeMessageMenu();
+        if (!$('#confirm-modal').classList.contains('hidden')) return finishConfirm(false);
+        if (!$('#settings-modal').classList.contains('hidden')) return $('#settings-modal').classList.add('hidden');
+        $$('.modal:not(.hidden)').forEach(m => m.classList.add('hidden'));
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && currentUser) {
+        void loadConversations().then(() => {
+          if (currentConversation) return openConversation(currentConversation, conversationCache.find(c => String(c.id) === String(currentConversation)));
+          return restoreConversation();
+        }).catch(() => {});
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (currentConversation) sessionStorage.setItem('xifre_current_conversation', String(currentConversation));
+    });
+  }
+
+  async function init() {
+    bind();
+    applyTheme(currentTheme());
+    if (!window.supabase?.createClient) return showScreen('landing');
     supabase = window.supabase.createClient(CONFIG.url, CONFIG.key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storageKey: 'xifre-auth-v7'
+        storageKey: 'xifre-auth-v9'
       }
     });
 
-    // Primero escuchamos los cambios de autenticación y después consultamos
-    // la sesión actual. Así no se pierde un SIGNED_IN que llegue durante el arranque.
     supabase.auth.onAuthStateChange((event, session) => {
       setTimeout(() => {
-        if (event === 'SIGNED_IN' && session) {
-          void startApplication(session);
-        } else if (event === 'TOKEN_REFRESHED' && session && !appStarted) {
-          void startApplication(session);
-        } else if (event === 'INITIAL_SESSION' && session && !appStarted) {
-          void startApplication(session);
-        } else if (event === 'SIGNED_OUT') {
-          closeApplication();
-        }
+        if (event === 'SIGNED_IN' && session) void startApplication(session);
+        if (event === 'INITIAL_SESSION' && session && !appStarted) void startApplication(session);
+        if (event === 'TOKEN_REFRESHED' && session && !appStarted) void startApplication(session);
+        if (event === 'SIGNED_OUT') { currentUser = null; appStarted = false; resetChatView(); showScreen('landing'); }
       }, 0);
     });
 
-    const { data, error } = await supabase.auth.getSession();
-    if (error) throw error;
-
-    if (data?.session) {
-      await startApplication(data.session);
-    } else {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (data?.session) await startApplication(data.session);
+      else showScreen('landing');
+    } catch (error) {
+      console.error('INIT', error);
       showScreen('landing');
     }
-  } catch (error) {
-    console.error('SUPABASE INIT', error);
-    supabase = null;
-    showScreen('login');
-    setMessage('login-message', `No se pudo iniciar Xifre: ${error?.message || 'error de inicialización'}`, 'error');
   }
-}
 
-const _xifreV7LoadProfile = loadProfile;
-const _xifreV7RenderConversations = renderConversations;
-const _xifreV7OpenConversation = openConversation;
-const _xifreV7OpenChatInfo = openChatInfo;
-const _xifreV7StartApplication = startApplication;
-const _xifreV7Bind = bind;
-
-// ============================================================================
-// XIFRE V8 UI / PERFIL / TEMAS / AVATARES / PERSISTENCIA DE CHAT
-// ============================================================================
-
-let pendingProfileAvatarFile = null;
-let pendingGroupAvatarFile = null;
-let pendingProfileAvatarURL = null;
-let pendingGroupAvatarURL = null;
-
-function avatarMarkup(name, url, className = '', kind = 'private') {
-  const safeName = String(name || (kind === 'group' ? 'Grupo' : 'Usuario')).trim() || (kind === 'group' ? 'Grupo' : 'Usuario');
-  const initial = escapeHTML(kind === 'group' ? '✦' : (safeName.charAt(0).toUpperCase() || 'X'));
-  const safeUrl = escapeHTML(String(url || '').trim());
-  const extra = kind === 'group' ? ' group-avatar' : '';
-  return `<div class="avatar ${escapeHTML(className)}${extra}" data-avatar-kind="${kind}">${safeUrl ? `<img src="${safeUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">` : ''}<span>${initial}</span></div>`;
-}
-
-function currentTheme() {
-  return localStorage.getItem('xifre-theme') || 'dark';
-}
-
-function applyTheme(theme) {
-  const value = theme === 'light' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = value;
-  localStorage.setItem('xifre-theme', value);
-  $$('.theme-option').forEach(option => option.classList.toggle('active', option.dataset.themeChoice === value));
-}
-
-function syncProfileSettingsUI() {
-  const profile = currentProfile || {};
-  const name = profile.display_name || profile.username || 'Usuario';
-  const username = profile.username || 'usuario';
-  $('#settings-display-name').value = name;
-  $('#settings-username').value = username;
-  $('#settings-preview-name').textContent = name;
-  $('#settings-preview-username').textContent = `@${username}`;
-  $('#bottom-profile-name').textContent = name;
-  $('#bottom-profile-username').textContent = `@${username}`;
-  const preview = $('#settings-avatar-preview');
-  if (preview) preview.innerHTML = avatarMarkup(name, profile.avatar_url, 'settings-preview-avatar');
-}
-
-function syncThemeUI() {
-  applyTheme(currentTheme());
-}
-
-const v8LoadProfile = async function loadProfileV8() {
-  if (!currentUser) return;
-  const originalProfileLoader = _xifreV7LoadProfile;
-  if (originalProfileLoader) {
-    await originalProfileLoader();
-  } else {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id,username,display_name,avatar_url')
-      .eq('id', currentUser.id)
-      .maybeSingle();
-    currentProfile = data || {
-      id: currentUser.id,
-      username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
-      display_name: currentUser.user_metadata?.username || 'Usuario',
-      avatar_url: null
-    };
-    if (error) console.warn('PROFILE', error);
-  }
-  const name = currentProfile.display_name || currentProfile.username || 'Usuario';
-  const username = currentProfile.username || 'usuario';
-  const profileAvatar = $('#profile-avatar');
-  if (profileAvatar) profileAvatar.innerHTML = avatarMarkup(name, currentProfile.avatar_url, 'profile-avatar-image');
-  $('#profile-name').textContent = name;
-  $('#profile-username').textContent = `@${username}`;
-  syncProfileSettingsUI();
-}
-
-async function uploadXifreImage(file, path) {
-  if (!file) return null;
-  if (!/^image\/(png|jpeg|webp|gif)$/i.test(file.type)) throw new Error('Solo se permiten PNG, JPG, WEBP o GIF.');
-  if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB.');
-  const response = await supabase.storage.from('xifre-avatars').upload(path, file, {
-    cacheControl: '3600',
-    upsert: true,
-    contentType: file.type
-  });
-  if (response.error) throw response.error;
-  const publicResult = supabase.storage.from('xifre-avatars').getPublicUrl(path);
-  if (publicResult.error) throw publicResult.error;
-  return publicResult.data.publicUrl;
-}
-
-function fileExtension(file) {
-  const map = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif' };
-  return map[file?.type] || 'png';
-}
-
-function previewFile(file, target, kind = 'private', name = 'Usuario') {
-  if (!file || !target) return;
-  const objectURL = URL.createObjectURL(file);
-  target.innerHTML = avatarMarkup(name, objectURL, 'preview-object-avatar', kind);
-  target.dataset.objectUrl = objectURL;
-}
-
-function openSettings() {
-  syncProfileSettingsUI();
-  syncThemeUI();
-  $('#settings-modal')?.classList.remove('hidden');
-}
-
-function closeSettings() {
-  $('#settings-modal')?.classList.add('hidden');
-}
-
-function switchSettingsTab(tab) {
-  const valid = tab === 'appearance' ? 'appearance' : 'profile';
-  $$('.settings-nav-item[data-settings-tab]').forEach(button => button.classList.toggle('active', button.dataset.settingsTab === valid));
-  $('#settings-profile-tab')?.classList.toggle('active', valid === 'profile');
-  $('#settings-appearance-tab')?.classList.toggle('active', valid === 'appearance');
-}
-
-async function saveProfileSettings() {
-  if (!currentUser) return;
-  const button = $('#save-profile-settings');
-  const username = normalizeUsername($('#settings-username').value);
-  const displayName = String($('#settings-display-name').value || '').trim();
-  setModalMessage('profile-settings-message', '');
-
-  if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
-  if (!displayName || displayName.length > 32) return setModalMessage('profile-settings-message', 'El nombre para mostrar debe tener entre 1 y 32 caracteres.', 'error');
-
-  setLoading(button, true);
-  try {
-    let avatarURL = null;
-    if (pendingProfileAvatarFile) {
-      const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExtension(pendingProfileAvatarFile)}`;
-      avatarURL = await uploadXifreImage(pendingProfileAvatarFile, path);
-    }
-
-    const response = await supabase.rpc('xifre_update_profile', {
-      p_username: username,
-      p_display_name: displayName,
-      p_avatar_url: avatarURL
-    });
-    if (response.error) throw response.error;
-
-    currentProfile = Array.isArray(response.data) ? response.data[0] : response.data;
-    pendingProfileAvatarFile = null;
-    pendingProfileAvatarURL = null;
-    await loadProfile();
-    memberCache.clear();
-    await loadConversations();
-    if (currentConversation) {
-      const keep = currentConversation;
-      const data = conversationCache.find(c => String(c.id) === String(keep));
-      if (data) await openConversation(keep, data);
-    }
-    setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
-    toast('Perfil actualizado.', 'success');
-  } catch (error) {
-    console.error('PROFILE SETTINGS', error);
-    setModalMessage('profile-settings-message', error?.message || 'No se pudieron guardar los cambios.', 'error');
-  } finally {
-    setLoading(button, false);
-  }
-}
-
-async function saveGroupSettings() {
-  if (!currentConversation || currentConversationData?.type !== 'group') return;
-  const button = $('#save-group-settings');
-  const name = String($('#group-edit-name').value || '').trim();
-  if (!name) return setModalMessage('group-settings-message', 'Escribe un nombre para el grupo.', 'error');
-
-  setLoading(button, true);
-  try {
-    let avatarURL = null;
-    if (pendingGroupAvatarFile) {
-      const path = `${currentUser.id}/groups/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${fileExtension(pendingGroupAvatarFile)}`;
-      avatarURL = await uploadXifreImage(pendingGroupAvatarFile, path);
-    }
-
-    const response = await supabase.rpc('xifre_update_group', {
-      p_conversation_id: currentConversation,
-      p_name: name,
-      p_avatar_url: avatarURL
-    });
-    if (response.error) throw response.error;
-
-    const data = Array.isArray(response.data) ? response.data[0] : response.data;
-    currentConversationData.name = data?.name || name;
-    if (data?.avatar_url) currentConversationData.avatar_url = data.avatar_url;
-    const conversation = conversationCache.find(c => String(c.id) === String(currentConversation));
-    if (conversation) {
-      conversation.name = currentConversationData.name;
-      conversation.displayName = currentConversationData.name;
-      if (data?.avatar_url) conversation.avatar_url = data.avatar_url;
-    }
-    pendingGroupAvatarFile = null;
-    pendingGroupAvatarURL = null;
-    updateCurrentChatHeader();
-    renderConversations(conversationCache);
-    $('#group-edit-name').value = currentConversationData.name;
-    setModalMessage('group-settings-message', 'Cambios guardados.', 'success');
-    toast('Grupo actualizado.', 'success');
-  } catch (error) {
-    console.error('GROUP SETTINGS', error);
-    setModalMessage('group-settings-message', error?.message || 'No se pudieron guardar los cambios.', 'error');
-  } finally {
-    setLoading(button, false);
-  }
-}
-
-function updateCurrentChatHeader() {
-  if (!currentConversationData) return;
-  const isGroup = currentConversationData.type === 'group';
-  const members = memberCache.get(currentConversation) || [];
-  const other = members.find(member => String(member.user_id) !== String(currentUser?.id));
-  const name = isGroup ? (currentConversationData.name || 'Grupo') : (other?.display_name || other?.username || 'Chat privado');
-  const url = isGroup ? currentConversationData.avatar_url : other?.avatar_url;
-  $('#chat-title').textContent = name;
-  $('#chat-subtitle').textContent = isGroup ? `${members.length} miembros` : `@${other?.username || 'usuario'}`;
-  $('#chat-avatar').innerHTML = avatarMarkup(name, url, 'chat-avatar-image', isGroup ? 'group' : 'private');
-}
-
-const v8RenderConversations = function renderConversationsV8(conversations) {
-  const list = $('#conversation-list');
-  if (!list) return;
-  list.innerHTML = '';
-  $('#chat-count').textContent = String(conversations.length);
-  if (!conversations.length) {
-    list.innerHTML = '<div class="empty-sidebar">Todavía no tienes chats.<br>Haz clic en «Nuevo chat» para empezar.</div>';
-    return;
-  }
-  conversations.forEach(conversation => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = `conversation${String(currentConversation) === String(conversation.id) ? ' active' : ''}`;
-    const isGroup = conversation.type === 'group';
-    const label = conversation.displayName || conversation.name || (isGroup ? 'Grupo' : 'Chat privado');
-    const preview = conversation.last_message || (isGroup ? `${conversation.member_count || 0} miembros` : `@${conversation.username || 'usuario'}`);
-    row.innerHTML = `
-      ${avatarMarkup(label, conversation.avatar_url, 'conversation-avatar-image', isGroup ? 'group' : 'private')}
-      <span class="conversation-copy"><span class="conversation-name">${escapeHTML(label)}</span><span class="conversation-preview">${escapeHTML(preview)}</span></span>
-      <span class="conversation-meta">${escapeHTML(formatConversationDate(conversation.last_message_at))}</span>`;
-    row.addEventListener('click', () => openConversation(conversation.id, conversation));
-    list.appendChild(row);
-  });
-}
-
-const v8OpenConversation = async function openConversationV8(id, cached = null) {
-  const result = await _xifreV7OpenConversation(id, cached);
-  if (result === false) return result;
-  if (currentConversation) sessionStorage.setItem('xifre_current_conversation', String(currentConversation));
-  updateCurrentChatHeader();
-  return result;
-}
-
-async function restoreCurrentConversation() {
-  const saved = sessionStorage.getItem('xifre_current_conversation');
-  if (!saved || !currentUser) return;
-  const conversation = conversationCache.find(item => String(item.id) === String(saved));
-  if (!conversation) return;
-  try {
-    await openConversation(saved, conversation);
-  } catch (error) {
-    console.warn('RESTORE CHAT', error);
-  }
-}
-
-const v8OpenChatInfo = async function openChatInfoV8() {
-  const result = await _xifreV7OpenChatInfo();
-  if (!currentConversationData || currentConversationData.type !== 'group') return result;
-  const isOwner = String(currentConversationData.owner_id || '') === String(currentUser?.id);
-  $('#group-edit-name').value = currentConversationData.name || 'Grupo';
-  $('#group-edit-section')?.classList.toggle('hidden', !isOwner);
-  const preview = $('#group-edit-avatar-preview');
-  if (preview) preview.innerHTML = avatarMarkup(currentConversationData.name || 'Grupo', currentConversationData.avatar_url, 'group-edit-avatar-image', 'group');
-  $('#group-settings-message').textContent = '';
-  $('#group-avatar-file').value = '';
-  pendingGroupAvatarFile = null;
-  pendingGroupAvatarURL = null;
-  return result;
-}
-
-const v8StartApplication = async function startApplicationV8(session = null) {
-  const result = await _xifreV7StartApplication(session);
-  if (result) {
-    syncThemeUI();
-    await restoreCurrentConversation();
-  }
-  return result;
-}
-
-const v8Bind = function bindV8() {
-  _xifreV7Bind();
-
-  document.addEventListener('click', event => {
-    const actionElement = event.target.closest('[data-action]');
-    if (actionElement) {
-      const action = actionElement.dataset.action;
-      if (action === 'open-settings') openSettings();
-      if (action === 'close-settings') closeSettings();
-      if (action === 'save-profile-settings') saveProfileSettings();
-      if (action === 'save-group-settings') saveGroupSettings();
-      if (action === 'composer-placeholder') toast('Esta función de XIFRE está preparada para una próxima actualización.', 'info');
-    }
-    const settingsTab = event.target.closest('[data-settings-tab]');
-    if (settingsTab) switchSettingsTab(settingsTab.dataset.settingsTab);
-    const themeChoice = event.target.closest('[data-theme-choice]');
-    if (themeChoice) applyTheme(themeChoice.dataset.themeChoice);
-  });
-
-  $('#profile-avatar-file')?.addEventListener('change', event => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    pendingProfileAvatarFile = file;
-    previewFile(file, $('#settings-avatar-preview'), 'private', currentProfile?.display_name || currentProfile?.username || 'Usuario');
-  });
-
-  $('#group-avatar-file')?.addEventListener('change', event => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    pendingGroupAvatarFile = file;
-    previewFile(file, $('#group-edit-avatar-preview'), 'group', currentConversationData?.name || 'Grupo');
-  });
-
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !$('#settings-modal')?.classList.contains('hidden')) closeSettings();
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && currentUser) {
-      void loadConversations().then(() => restoreCurrentConversation()).catch(error => console.warn('VISIBILITY REFRESH', error));
-      if (currentConversation) void refreshMessagesSilently(currentConversation);
-    }
-  });
-}
-
-
-loadProfile = v8LoadProfile;
-renderConversations = v8RenderConversations;
-openConversation = v8OpenConversation;
-openChatInfo = v8OpenChatInfo;
-startApplication = v8StartApplication;
-bind = v8Bind;
-// Exponemos solo las acciones necesarias para que el HTML pueda impedir
-// cualquier submit/navegación nativa y delegar siempre en Xifre.
-window.XIFRE = {
-  login,
-  register,
-  showScreen,
-  logout
-};
-
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-else init();
-
+  window.XIFRE = { showScreen, login, register, logout };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
 })();
