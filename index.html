@@ -3,87 +3,61 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#5865f2">
+<meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-v9">
+<link rel="stylesheet" href="style.css?v=20261008-v10-authfix">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-<div class="ambient-background" aria-hidden="true">
-  <div class="ambient-orb orb-a"></div>
-  <div class="ambient-orb orb-b"></div>
-  <div class="ambient-orb orb-c"></div>
-</div>
-
+<div class="background-effects"><div class="background-glow glow-one"></div><div class="background-glow glow-two"></div><div class="background-glow glow-three"></div></div>
 <main id="app">
-  <!-- LANDING -->
-  <section id="landing-screen" class="screen active">
-    <div class="landing-card page-card">
-      <div class="landing-kicker">XIFRE</div>
-      <h1>XIFRE</h1>
-      <p>xifre es un servicio web de mensajeria<br>jaumico basado en xifre</p>
-      <button class="landing-enter" type="button" data-go="login">Entrar</button>
-      <span class="landing-note">(cuando le das a entrar si no tienes cuenta registrate gilipollas)</span>
-    </div>
-  </section>
+<section id="landing-screen" class="screen active">
+  <div class="landing-content">
+    <h1 class="xifre-logo">XIFRE</h1>
+    <p class="landing-description">xifre es un servicio web de mensajeria<br>jaumico basado en xifre</p>
+    <button class="primary-button" type="button" data-go="login">Entrar</button>
+    <p class="landing-note">(cuando le das a entrar si no tienes cuenta registrate gilipollas)</p>
+  </div>
+</section>
 
-  <!-- LOGIN -->
-  <section id="login-screen" class="screen">
-    <div class="auth-card page-card">
-      <div class="auth-brand">XIFRE</div>
-      <h2>Iniciar sesión</h2>
-      <p class="auth-subtitle">Entra en tu cuenta de XIFRE.</p>
-      <form id="login-form" novalidate>
-        <label class="field-label" for="login-email">Correo electrónico</label>
-        <input id="login-email" class="field-input" type="email" autocomplete="email" placeholder="tu@email.com" required>
-        <label class="field-label spaced" for="login-password">Contraseña</label>
-        <input id="login-password" class="field-input" type="password" autocomplete="current-password" placeholder="Tu contraseña" required>
-        <button id="login-button" class="primary-action" type="submit"><span>Iniciar sesión</span><i class="spinner"></i></button>
-      </form>
-      <div id="login-message" class="inline-message"></div>
-      <div class="auth-switch">¿No tienes cuenta? <button type="button" class="link-button" data-go="register">Regístrate</button></div>
-      <button type="button" class="back-link" data-go="landing">← Volver</button>
-    </div>
-  </section>
+<section id="login-screen" class="screen">
+  <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
+    <h2>Iniciar sesión</h2><p class="auth-description">Entra en tu cuenta de Xifre</p>
+    <form id="login-form" autocomplete="on">
+      <div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
+      <div class="input-group"><label for="login-password">Contraseña</label><input id="login-password" type="password" placeholder="Tu contraseña" autocomplete="current-password" required></div>
+      <button id="login-button" class="auth-button" type="submit"><span class="button-text">Iniciar sesión</span><span class="button-loader"></span></button>
+    </form>
+    <div id="login-message" class="auth-message"></div>
+    <div class="auth-switch"><span>¿No tienes cuenta?</span><button class="text-button" type="button" data-go="register">Regístrate</button></div>
+    <button class="back-button" type="button" data-go="landing">← Volver</button>
+  </div></div>
+</section>
 
-  <!-- REGISTER -->
-  <section id="register-screen" class="screen">
-    <div class="auth-card page-card">
-      <div class="auth-brand">XIFRE</div>
-      <h2>Crear cuenta</h2>
-      <p class="auth-subtitle">Tu username será tu identidad en XIFRE.</p>
-      <form id="register-form" novalidate>
-        <label class="field-label" for="register-username">Username</label>
-        <input id="register-username" class="field-input" type="text" autocomplete="username" maxlength="20" placeholder="tu_username" required>
-        <div class="field-help">3–20 caracteres: letras, números y _</div>
-        <label class="field-label spaced" for="register-email">Correo electrónico</label>
-        <input id="register-email" class="field-input" type="email" autocomplete="email" placeholder="tu@email.com" required>
-        <label class="field-label spaced" for="register-password">Contraseña</label>
-        <input id="register-password" class="field-input" type="password" autocomplete="new-password" minlength="6" placeholder="Mínimo 6 caracteres" required>
-        <button id="register-button" class="primary-action" type="submit"><span>Crear cuenta</span><i class="spinner"></i></button>
-      </form>
-      <div id="register-message" class="inline-message"></div>
-      <div class="auth-switch">¿Ya tienes cuenta? <button type="button" class="link-button" data-go="login">Inicia sesión</button></div>
-      <button type="button" class="back-link" data-go="landing">← Volver</button>
-    </div>
-  </section>
+<section id="register-screen" class="screen">
+  <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
+    <h2>Crear cuenta</h2><p class="auth-description">Elige tu username y crea tu cuenta</p>
+    <form id="register-form" autocomplete="on">
+      <div class="input-group"><label for="register-username">Username</label><input id="register-username" type="text" placeholder="sam" maxlength="20" autocomplete="username" required><small class="input-help">3–20 caracteres: letras, números y _</small></div>
+      <div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
+      <div class="input-group"><label for="register-password">Contraseña</label><input id="register-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" minlength="6" required></div>
+      <button id="register-button" class="auth-button" type="submit"><span class="button-text">Crear cuenta</span><span class="button-loader"></span></button>
+    </form>
+    <div id="register-message" class="auth-message"></div>
+    <div class="auth-switch"><span>¿Ya tienes cuenta?</span><button class="text-button" type="button" data-go="login">Inicia sesión</button></div>
+    <button class="back-button" type="button" data-go="landing">← Volver</button>
+  </div></div>
+</section>
 
-  <!-- EMAIL CONFIRM -->
-  <section id="email-screen" class="screen">
-    <div class="auth-card page-card centered-auth">
-      <div class="email-badge">@</div>
-      <div class="auth-brand">XIFRE</div>
-      <h2>Revisa tu correo</h2>
-      <p class="auth-subtitle">Te hemos enviado un correo para confirmar tu cuenta.</p>
-      <div id="confirmation-email" class="confirmation-email"></div>
-      <p class="field-help long-help">Después de confirmar tu correo podrás iniciar sesión con tu email y contraseña.</p>
-      <button id="resend-confirmation" class="secondary-action" type="button" data-action="resend">Reenviar correo</button>
-      <button class="primary-action" type="button" data-go="login">Volver al inicio de sesión</button>
-    </div>
-  </section>
+<section id="email-screen" class="screen">
+  <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card email-card">
+    <div class="email-icon">@</div><h2>Revisa tu correo</h2><p class="auth-description">Te hemos enviado un correo para confirmar tu cuenta.</p><p id="confirmation-email" class="confirmation-email"></p><p class="email-small">Después de confirmar tu correo podrás iniciar sesión con tu email y contraseña.</p>
+    <button id="resend-confirmation" class="secondary-button" type="button" data-action="resend">Reenviar correo</button>
+    <button class="auth-button" type="button" data-go="login">Volver al inicio de sesión</button>
+  </div></div>
+</section>
 
-  <!-- MAIN APP -->
-  <section id="main-screen" class="main-screen">
+<section id="main-screen" class="main-screen">
     <div class="app-shell">
       <!-- LEFT: navigation / conversations -->
       <aside class="left-pane">
@@ -326,6 +300,6 @@
   });
 })();
 </script>
-<script src="app.js?v=20261008-v9"></script>
+<script src="app.js?v=20261008-v10-authfix"></script>
 </body>
 </html>
