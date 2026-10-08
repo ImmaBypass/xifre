@@ -17,6 +17,7 @@
   let messageChannel = null;
   let requestChannel = null;
   let appStarted = false;
+  let startPromise = null;
   let pendingEmail = sessionStorage.getItem('xifre_pending_email') || '';
 
   const screens = ['landing', 'login', 'register', 'email'];
@@ -261,7 +262,7 @@
       if (!data?.session) throw new Error('No se recibió una sesión válida.');
       sessionStorage.removeItem('xifre_pending_email');
       pendingEmail = '';
-      await startApplication();
+      await startApplication(data.session);
     } catch (error) {
       console.error('XIFRE LOGIN:', error);
       const friendly = friendlyAuthError(error);
@@ -282,6 +283,7 @@
 
   async function loadProfile() {
     if (!currentUser) return;
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -289,41 +291,105 @@
       .maybeSingle();
 
     if (error) {
-      console.error('PROFILE:', error);
-      currentProfile = { username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario' };
-      return;
+      console.error('XIFRE PROFILE ERROR:', error);
+      currentProfile = {
+        id: currentUser.id,
+        username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
+        display_name: normalizeUsername(currentUser.user_metadata?.username) || 'Usuario'
+      };
+    } else {
+      currentProfile = data || {
+        id: currentUser.id,
+        username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario'
+      };
     }
 
-    currentProfile = data || { username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario' };
+    const display = currentProfile.display_name || currentProfile.username || 'Usuario';
+    const username = currentProfile.username || 'usuario';
 
-    $('#profile-name').textContent = currentProfile.display_name || currentProfile.username || 'Usuario';
-    $('#profile-username').textContent = `@${currentProfile.username || 'usuario'}`;
-    $('#profile-avatar').textContent = (currentProfile.username || 'U').charAt(0).toUpperCase();
+    $('#profile-name').textContent = display;
+    $('#profile-username').textContent = `@${username}`;
+    $('#profile-avatar').textContent = username.charAt(0).toUpperCase();
   }
 
-  async function startApplication() {
-    if (!supabaseReady()) return;
+  /*
+   * ÚNICO punto de entrada de la aplicación autenticada.
+   * startPromise impide que login() y SIGNED_IN arranquen
+   * dos procesos simultáneos.
+   */
+  async function startApplication(session = null) {
+    if (!supabaseReady()) return false;
+
     if (appStarted && currentUser) {
       showMainApp();
-      return;
+      return true;
     }
 
-    try {
-      const { data, error } = await supabase.auth.getUser();
-      if (error || !data?.user) throw error || new Error('No hay usuario.');
-      currentUser = data.user;
-      appStarted = true;
-      await loadProfile();
-      showMainApp();
-      await Promise.allSettled([loadFriends(), loadConversations()]);
-      setupRequestRealtime();
-    } catch (error) {
-      console.error('XIFRE APP:', error);
-      currentUser = null;
-      appStarted = false;
-      showScreen('login');
-      setMessage('login-message', 'No se pudo cargar tu cuenta. Revisa la configuración de Supabase.', 'error');
-    }
+    if (startPromise) return startPromise;
+
+    startPromise = (async () => {
+      try {
+        let user = session?.user || null;
+
+        /*
+         * Después de signInWithPassword ya tenemos user.
+         * Solo usamos getUser() en arranques automáticos.
+         */
+        if (!user) {
+          const result = await supabase.auth.getUser();
+
+          if (result.error || !result.data?.user) {
+            throw result.error || new Error('No hay ningún usuario autenticado.');
+          }
+
+          user = result.data.user;
+        }
+
+        currentUser = user;
+
+        /*
+         * El perfil NO puede volver a tumbar el login.
+         * loadProfile tiene fallback si la consulta de profiles falla.
+         */
+        await loadProfile();
+
+        appStarted = true;
+        showMainApp();
+
+        /*
+         * Amigos/conversaciones son secundarios.
+         * Si alguna tabla todavía tiene una policy incorrecta,
+         * el usuario seguirá entrando a XIFRE.
+         */
+        await Promise.allSettled([
+          loadFriends(),
+          loadConversations()
+        ]);
+
+        setupRequestRealtime();
+
+        return true;
+      } catch (error) {
+        console.error('XIFRE START APPLICATION:', error);
+
+        appStarted = false;
+        currentUser = null;
+        currentProfile = null;
+
+        showScreen('login');
+        setMessage(
+          'login-message',
+          `No se pudo cargar tu cuenta: ${error?.message || 'error desconocido'}`,
+          'error'
+        );
+
+        return false;
+      } finally {
+        startPromise = null;
+      }
+    })();
+
+    return startPromise;
   }
 
   async function logout() {
@@ -634,7 +700,7 @@
         });
         supabase.auth.onAuthStateChange((event, session) => {
           setTimeout(async () => {
-            if (event === 'SIGNED_IN' && session) await startApplication();
+            if (event === 'SIGNED_IN' && session) await startApplication(session);
             if (event === 'SIGNED_OUT') closeApplication();
           }, 0);
         });
