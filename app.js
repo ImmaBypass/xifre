@@ -1508,6 +1508,355 @@ async function init() {
   }
 }
 
+const _xifreV7LoadProfile = loadProfile;
+const _xifreV7RenderConversations = renderConversations;
+const _xifreV7OpenConversation = openConversation;
+const _xifreV7OpenChatInfo = openChatInfo;
+const _xifreV7StartApplication = startApplication;
+const _xifreV7Bind = bind;
+
+// ============================================================================
+// XIFRE V8 UI / PERFIL / TEMAS / AVATARES / PERSISTENCIA DE CHAT
+// ============================================================================
+
+let pendingProfileAvatarFile = null;
+let pendingGroupAvatarFile = null;
+let pendingProfileAvatarURL = null;
+let pendingGroupAvatarURL = null;
+
+function avatarMarkup(name, url, className = '', kind = 'private') {
+  const safeName = String(name || (kind === 'group' ? 'Grupo' : 'Usuario')).trim() || (kind === 'group' ? 'Grupo' : 'Usuario');
+  const initial = escapeHTML(kind === 'group' ? '✦' : (safeName.charAt(0).toUpperCase() || 'X'));
+  const safeUrl = escapeHTML(String(url || '').trim());
+  const extra = kind === 'group' ? ' group-avatar' : '';
+  return `<div class="avatar ${escapeHTML(className)}${extra}" data-avatar-kind="${kind}">${safeUrl ? `<img src="${safeUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">` : ''}<span>${initial}</span></div>`;
+}
+
+function currentTheme() {
+  return localStorage.getItem('xifre-theme') || 'dark';
+}
+
+function applyTheme(theme) {
+  const value = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = value;
+  localStorage.setItem('xifre-theme', value);
+  $$('.theme-option').forEach(option => option.classList.toggle('active', option.dataset.themeChoice === value));
+}
+
+function syncProfileSettingsUI() {
+  const profile = currentProfile || {};
+  const name = profile.display_name || profile.username || 'Usuario';
+  const username = profile.username || 'usuario';
+  $('#settings-display-name').value = name;
+  $('#settings-username').value = username;
+  $('#settings-preview-name').textContent = name;
+  $('#settings-preview-username').textContent = `@${username}`;
+  $('#bottom-profile-name').textContent = name;
+  $('#bottom-profile-username').textContent = `@${username}`;
+  const preview = $('#settings-avatar-preview');
+  if (preview) preview.innerHTML = avatarMarkup(name, profile.avatar_url, 'settings-preview-avatar');
+}
+
+function syncThemeUI() {
+  applyTheme(currentTheme());
+}
+
+const v8LoadProfile = async function loadProfileV8() {
+  if (!currentUser) return;
+  const originalProfileLoader = _xifreV7LoadProfile;
+  if (originalProfileLoader) {
+    await originalProfileLoader();
+  } else {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,username,display_name,avatar_url')
+      .eq('id', currentUser.id)
+      .maybeSingle();
+    currentProfile = data || {
+      id: currentUser.id,
+      username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
+      display_name: currentUser.user_metadata?.username || 'Usuario',
+      avatar_url: null
+    };
+    if (error) console.warn('PROFILE', error);
+  }
+  const name = currentProfile.display_name || currentProfile.username || 'Usuario';
+  const username = currentProfile.username || 'usuario';
+  const profileAvatar = $('#profile-avatar');
+  if (profileAvatar) profileAvatar.innerHTML = avatarMarkup(name, currentProfile.avatar_url, 'profile-avatar-image');
+  $('#profile-name').textContent = name;
+  $('#profile-username').textContent = `@${username}`;
+  syncProfileSettingsUI();
+}
+
+async function uploadXifreImage(file, path) {
+  if (!file) return null;
+  if (!/^image\/(png|jpeg|webp|gif)$/i.test(file.type)) throw new Error('Solo se permiten PNG, JPG, WEBP o GIF.');
+  if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB.');
+  const response = await supabase.storage.from('xifre-avatars').upload(path, file, {
+    cacheControl: '3600',
+    upsert: true,
+    contentType: file.type
+  });
+  if (response.error) throw response.error;
+  const publicResult = supabase.storage.from('xifre-avatars').getPublicUrl(path);
+  if (publicResult.error) throw publicResult.error;
+  return publicResult.data.publicUrl;
+}
+
+function fileExtension(file) {
+  const map = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif' };
+  return map[file?.type] || 'png';
+}
+
+function previewFile(file, target, kind = 'private', name = 'Usuario') {
+  if (!file || !target) return;
+  const objectURL = URL.createObjectURL(file);
+  target.innerHTML = avatarMarkup(name, objectURL, 'preview-object-avatar', kind);
+  target.dataset.objectUrl = objectURL;
+}
+
+function openSettings() {
+  syncProfileSettingsUI();
+  syncThemeUI();
+  $('#settings-modal')?.classList.remove('hidden');
+}
+
+function closeSettings() {
+  $('#settings-modal')?.classList.add('hidden');
+}
+
+function switchSettingsTab(tab) {
+  const valid = tab === 'appearance' ? 'appearance' : 'profile';
+  $$('.settings-nav-item[data-settings-tab]').forEach(button => button.classList.toggle('active', button.dataset.settingsTab === valid));
+  $('#settings-profile-tab')?.classList.toggle('active', valid === 'profile');
+  $('#settings-appearance-tab')?.classList.toggle('active', valid === 'appearance');
+}
+
+async function saveProfileSettings() {
+  if (!currentUser) return;
+  const button = $('#save-profile-settings');
+  const username = normalizeUsername($('#settings-username').value);
+  const displayName = String($('#settings-display-name').value || '').trim();
+  setModalMessage('profile-settings-message', '');
+
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+  if (!displayName || displayName.length > 32) return setModalMessage('profile-settings-message', 'El nombre para mostrar debe tener entre 1 y 32 caracteres.', 'error');
+
+  setLoading(button, true);
+  try {
+    let avatarURL = null;
+    if (pendingProfileAvatarFile) {
+      const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExtension(pendingProfileAvatarFile)}`;
+      avatarURL = await uploadXifreImage(pendingProfileAvatarFile, path);
+    }
+
+    const response = await supabase.rpc('xifre_update_profile', {
+      p_username: username,
+      p_display_name: displayName,
+      p_avatar_url: avatarURL
+    });
+    if (response.error) throw response.error;
+
+    currentProfile = Array.isArray(response.data) ? response.data[0] : response.data;
+    pendingProfileAvatarFile = null;
+    pendingProfileAvatarURL = null;
+    await loadProfile();
+    memberCache.clear();
+    await loadConversations();
+    if (currentConversation) {
+      const keep = currentConversation;
+      const data = conversationCache.find(c => String(c.id) === String(keep));
+      if (data) await openConversation(keep, data);
+    }
+    setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
+    toast('Perfil actualizado.', 'success');
+  } catch (error) {
+    console.error('PROFILE SETTINGS', error);
+    setModalMessage('profile-settings-message', error?.message || 'No se pudieron guardar los cambios.', 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+async function saveGroupSettings() {
+  if (!currentConversation || currentConversationData?.type !== 'group') return;
+  const button = $('#save-group-settings');
+  const name = String($('#group-edit-name').value || '').trim();
+  if (!name) return setModalMessage('group-settings-message', 'Escribe un nombre para el grupo.', 'error');
+
+  setLoading(button, true);
+  try {
+    let avatarURL = null;
+    if (pendingGroupAvatarFile) {
+      const path = `${currentUser.id}/groups/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${fileExtension(pendingGroupAvatarFile)}`;
+      avatarURL = await uploadXifreImage(pendingGroupAvatarFile, path);
+    }
+
+    const response = await supabase.rpc('xifre_update_group', {
+      p_conversation_id: currentConversation,
+      p_name: name,
+      p_avatar_url: avatarURL
+    });
+    if (response.error) throw response.error;
+
+    const data = Array.isArray(response.data) ? response.data[0] : response.data;
+    currentConversationData.name = data?.name || name;
+    if (data?.avatar_url) currentConversationData.avatar_url = data.avatar_url;
+    const conversation = conversationCache.find(c => String(c.id) === String(currentConversation));
+    if (conversation) {
+      conversation.name = currentConversationData.name;
+      conversation.displayName = currentConversationData.name;
+      if (data?.avatar_url) conversation.avatar_url = data.avatar_url;
+    }
+    pendingGroupAvatarFile = null;
+    pendingGroupAvatarURL = null;
+    updateCurrentChatHeader();
+    renderConversations(conversationCache);
+    $('#group-edit-name').value = currentConversationData.name;
+    setModalMessage('group-settings-message', 'Cambios guardados.', 'success');
+    toast('Grupo actualizado.', 'success');
+  } catch (error) {
+    console.error('GROUP SETTINGS', error);
+    setModalMessage('group-settings-message', error?.message || 'No se pudieron guardar los cambios.', 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+function updateCurrentChatHeader() {
+  if (!currentConversationData) return;
+  const isGroup = currentConversationData.type === 'group';
+  const members = memberCache.get(currentConversation) || [];
+  const other = members.find(member => String(member.user_id) !== String(currentUser?.id));
+  const name = isGroup ? (currentConversationData.name || 'Grupo') : (other?.display_name || other?.username || 'Chat privado');
+  const url = isGroup ? currentConversationData.avatar_url : other?.avatar_url;
+  $('#chat-title').textContent = name;
+  $('#chat-subtitle').textContent = isGroup ? `${members.length} miembros` : `@${other?.username || 'usuario'}`;
+  $('#chat-avatar').innerHTML = avatarMarkup(name, url, 'chat-avatar-image', isGroup ? 'group' : 'private');
+}
+
+const v8RenderConversations = function renderConversationsV8(conversations) {
+  const list = $('#conversation-list');
+  if (!list) return;
+  list.innerHTML = '';
+  $('#chat-count').textContent = String(conversations.length);
+  if (!conversations.length) {
+    list.innerHTML = '<div class="empty-sidebar">Todavía no tienes chats.<br>Haz clic en «Nuevo chat» para empezar.</div>';
+    return;
+  }
+  conversations.forEach(conversation => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = `conversation${String(currentConversation) === String(conversation.id) ? ' active' : ''}`;
+    const isGroup = conversation.type === 'group';
+    const label = conversation.displayName || conversation.name || (isGroup ? 'Grupo' : 'Chat privado');
+    const preview = conversation.last_message || (isGroup ? `${conversation.member_count || 0} miembros` : `@${conversation.username || 'usuario'}`);
+    row.innerHTML = `
+      ${avatarMarkup(label, conversation.avatar_url, 'conversation-avatar-image', isGroup ? 'group' : 'private')}
+      <span class="conversation-copy"><span class="conversation-name">${escapeHTML(label)}</span><span class="conversation-preview">${escapeHTML(preview)}</span></span>
+      <span class="conversation-meta">${escapeHTML(formatConversationDate(conversation.last_message_at))}</span>`;
+    row.addEventListener('click', () => openConversation(conversation.id, conversation));
+    list.appendChild(row);
+  });
+}
+
+const v8OpenConversation = async function openConversationV8(id, cached = null) {
+  const result = await _xifreV7OpenConversation(id, cached);
+  if (result === false) return result;
+  if (currentConversation) sessionStorage.setItem('xifre_current_conversation', String(currentConversation));
+  updateCurrentChatHeader();
+  return result;
+}
+
+async function restoreCurrentConversation() {
+  const saved = sessionStorage.getItem('xifre_current_conversation');
+  if (!saved || !currentUser) return;
+  const conversation = conversationCache.find(item => String(item.id) === String(saved));
+  if (!conversation) return;
+  try {
+    await openConversation(saved, conversation);
+  } catch (error) {
+    console.warn('RESTORE CHAT', error);
+  }
+}
+
+const v8OpenChatInfo = async function openChatInfoV8() {
+  const result = await _xifreV7OpenChatInfo();
+  if (!currentConversationData || currentConversationData.type !== 'group') return result;
+  const isOwner = String(currentConversationData.owner_id || '') === String(currentUser?.id);
+  $('#group-edit-name').value = currentConversationData.name || 'Grupo';
+  $('#group-edit-section')?.classList.toggle('hidden', !isOwner);
+  const preview = $('#group-edit-avatar-preview');
+  if (preview) preview.innerHTML = avatarMarkup(currentConversationData.name || 'Grupo', currentConversationData.avatar_url, 'group-edit-avatar-image', 'group');
+  $('#group-settings-message').textContent = '';
+  $('#group-avatar-file').value = '';
+  pendingGroupAvatarFile = null;
+  pendingGroupAvatarURL = null;
+  return result;
+}
+
+const v8StartApplication = async function startApplicationV8(session = null) {
+  const result = await _xifreV7StartApplication(session);
+  if (result) {
+    syncThemeUI();
+    await restoreCurrentConversation();
+  }
+  return result;
+}
+
+const v8Bind = function bindV8() {
+  _xifreV7Bind();
+
+  document.addEventListener('click', event => {
+    const actionElement = event.target.closest('[data-action]');
+    if (actionElement) {
+      const action = actionElement.dataset.action;
+      if (action === 'open-settings') openSettings();
+      if (action === 'close-settings') closeSettings();
+      if (action === 'save-profile-settings') saveProfileSettings();
+      if (action === 'save-group-settings') saveGroupSettings();
+      if (action === 'composer-placeholder') toast('Esta función de XIFRE está preparada para una próxima actualización.', 'info');
+    }
+    const settingsTab = event.target.closest('[data-settings-tab]');
+    if (settingsTab) switchSettingsTab(settingsTab.dataset.settingsTab);
+    const themeChoice = event.target.closest('[data-theme-choice]');
+    if (themeChoice) applyTheme(themeChoice.dataset.themeChoice);
+  });
+
+  $('#profile-avatar-file')?.addEventListener('change', event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    pendingProfileAvatarFile = file;
+    previewFile(file, $('#settings-avatar-preview'), 'private', currentProfile?.display_name || currentProfile?.username || 'Usuario');
+  });
+
+  $('#group-avatar-file')?.addEventListener('change', event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    pendingGroupAvatarFile = file;
+    previewFile(file, $('#group-edit-avatar-preview'), 'group', currentConversationData?.name || 'Grupo');
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !$('#settings-modal')?.classList.contains('hidden')) closeSettings();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && currentUser) {
+      void loadConversations().then(() => restoreCurrentConversation()).catch(error => console.warn('VISIBILITY REFRESH', error));
+      if (currentConversation) void refreshMessagesSilently(currentConversation);
+    }
+  });
+}
+
+
+loadProfile = v8LoadProfile;
+renderConversations = v8RenderConversations;
+openConversation = v8OpenConversation;
+openChatInfo = v8OpenChatInfo;
+startApplication = v8StartApplication;
+bind = v8Bind;
 // Exponemos solo las acciones necesarias para que el HTML pueda impedir
 // cualquier submit/navegación nativa y delegar siempre en Xifre.
 window.XIFRE = {
