@@ -366,7 +366,7 @@
           loadConversations()
         ]);
 
-        setupRequestRealtime();
+        setupRealtime();
 
         return true;
       } catch (error) {
