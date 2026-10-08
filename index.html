@@ -477,6 +477,19 @@
                             Crear grupo
                         </button>
 
+                        <button
+                            id="friend-requests-button" data-action="open-requests"
+                            class="sidebar-button requests-button"
+                            type="button"
+                        >
+                            <span>♢</span>
+                            Solicitudes
+                            <span
+                                id="friend-requests-badge"
+                                class="requests-badge hidden"
+                            >0</span>
+                        </button>
+
                     </div>
 
 
@@ -623,6 +636,49 @@
                 >
                     Enviar solicitud
                 </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- =================================================
+             FRIEND REQUESTS MODAL
+             ================================================= -->
+
+        <div
+            id="requests-modal"
+            class="modal hidden"
+        >
+
+            <div class="modal-card requests-card">
+
+                <button
+                    id="close-requests-modal" data-action="close-modal" data-modal="requests-modal"
+                    class="modal-close"
+                    type="button"
+                    aria-label="Cerrar solicitudes"
+                >
+                    ×
+                </button>
+
+                <h2>
+                    Solicitudes de amistad
+                </h2>
+
+                <p>
+                    Aquí puedes aceptar o rechazar las solicitudes que te hayan enviado.
+                </p>
+
+                <div
+                    id="requests-message"
+                    class="modal-message"
+                ></div>
+
+                <div
+                    id="friend-requests-list"
+                    class="friend-requests-list"
+                ></div>
 
             </div>
 
