@@ -161,7 +161,7 @@
   }
 
   async function register() {
-    if (authActionInFlight) return;
+    if (authActionInFlight || !supabase) return;
     const button = $('#register-button');
     const username = normalizeUsername($('#register-username')?.value);
     const email = String($('#register-email')?.value || '').trim();
@@ -201,21 +201,34 @@
   }
 
   async function login() {
-    if (authActionInFlight) return;
+    if (authActionInFlight || !supabase) return;
+
     const button = $('#login-button');
     const email = String($('#login-email')?.value || '').trim();
     const password = String($('#login-password')?.value || '');
     setMessage('login-message', '');
-    if (!email || !password) return setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
+
+    if (!email || !password) {
+      setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
+      return;
+    }
 
     authActionInFlight = true;
     setLoading(button, true);
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      if (!data?.session) throw new Error('No se recibió una sesión válida.');
+      const session = data?.session;
+      if (!session?.user) throw new Error('No se recibió una sesión válida.');
+
+      currentUser = session.user;
+      appStarted = true;
       sessionStorage.removeItem('xifre_pending_email');
-      await startApplication(data.session);
+      showMain();
+
+      // La sesión ya está abierta. El resto se carga en segundo plano.
+      void startApplication(session);
     } catch (error) {
       console.error('LOGIN', error);
       setMessage('login-message', friendlyError(error), 'error');
@@ -280,41 +293,54 @@
   async function startApplication(session = null) {
     if (!supabase) return false;
     if (startPromise) return startPromise;
+
     startPromise = (async () => {
+      let sessionUser = session?.user || null;
+      if (!sessionUser) {
+        const result = await supabase.auth.getSession();
+        sessionUser = result.data?.session?.user || null;
+      }
+      if (!sessionUser) throw new Error('No hay una sesión autenticada.');
+
+      currentUser = sessionUser;
+      appStarted = true;
+      applyTheme(currentTheme());
+      showMain();
+
+      const results = await Promise.allSettled([
+        loadProfile(),
+        loadFriends(),
+        loadConversations()
+      ]);
+      results.forEach(result => {
+        if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
+      });
+
       try {
-        let sessionUser = session?.user || null;
-        if (!sessionUser) {
-          const result = await supabase.auth.getSession();
-          sessionUser = result.data?.session?.user || null;
-        }
-        if (!sessionUser) throw new Error('No hay una sesión autenticada.');
-        currentUser = sessionUser;
-        await loadProfile();
-        appStarted = true;
-        applyTheme(currentTheme());
-        showMain();
-        await Promise.allSettled([loadFriends(), loadConversations()]);
         await restoreConversation();
-        return true;
-      } catch (error) {
-        console.error('START APPLICATION', error);
-        // La sesión sigue siendo válida aunque fallen cargas secundarias.
-        const { data } = await supabase.auth.getSession().catch(() => ({ data: {} }));
+      } catch (restoreError) {
+        console.warn('RESTORE CONVERSATION', restoreError);
+      }
+      return true;
+    })().catch(async error => {
+      console.error('START APPLICATION', error);
+      try {
+        const { data } = await supabase.auth.getSession();
         if (data?.session?.user) {
           currentUser = data.session.user;
           appStarted = true;
           showMain();
           return true;
         }
-        appStarted = false;
-        currentUser = null;
-        showScreen('login');
-        setMessage('login-message', 'No se pudo cargar la sesión.', 'error');
-        return false;
-      } finally {
-        startPromise = null;
+      } catch (sessionError) {
+        console.warn('SESSION CHECK', sessionError);
       }
-    })();
+      appStarted = false;
+      currentUser = null;
+      return false;
+    }).finally(() => {
+      startPromise = null;
+    });
     return startPromise;
   }
 
@@ -1181,7 +1207,26 @@
   /* Event wiring                                                             */
   /* ------------------------------------------------------------------------ */
   function bind() {
+    // Un solo submit handler por formulario.
+    $('#login-form')?.addEventListener('submit', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void login();
+    });
+    $('#register-form')?.addEventListener('submit', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void register();
+    });
+
     document.addEventListener('click', event => {
+      const go = event.target.closest('[data-go]');
+      if (go) {
+        event.preventDefault();
+        event.stopPropagation();
+        showScreen(go.dataset.go);
+        return;
+      }
       const action = event.target.closest('[data-action]');
       if (action) {
         const type = action.dataset.action;
@@ -1287,33 +1332,53 @@
   async function init() {
     bind();
     applyTheme(currentTheme());
-    if (!window.supabase?.createClient) return showScreen('landing');
-    supabase = window.supabase.createClient(CONFIG.url, CONFIG.key, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        storageKey: 'xifre-auth-v9'
-      }
-    });
 
-    supabase.auth.onAuthStateChange((event, session) => {
-      setTimeout(() => {
-        if (event === 'SIGNED_IN' && session) void startApplication(session);
-        if (event === 'INITIAL_SESSION' && session && !appStarted) void startApplication(session);
-        if (event === 'TOKEN_REFRESHED' && session && !appStarted) void startApplication(session);
-        if (event === 'SIGNED_OUT') { currentUser = null; appStarted = false; resetChatView(); showScreen('landing'); }
-      }, 0);
-    });
+    if (!window.supabase?.createClient) {
+      showScreen('landing');
+      return;
+    }
 
     try {
+      supabase = window.supabase.createClient(CONFIG.url, CONFIG.key, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storageKey: 'xifre-auth-v9'
+        }
+      });
+
+      supabase.auth.onAuthStateChange((event, session) => {
+        setTimeout(() => {
+          if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session) {
+            void startApplication(session);
+            return;
+          }
+          if (event === 'SIGNED_OUT') {
+            currentUser = null;
+            currentProfile = null;
+            appStarted = false;
+            resetChatView();
+            closeAllModals();
+            showScreen('landing');
+          }
+        }, 0);
+      });
+
       const { data, error } = await supabase.auth.getSession();
       if (error) throw error;
-      if (data?.session) await startApplication(data.session);
-      else showScreen('landing');
+
+      if (data?.session?.user) {
+        await startApplication(data.session);
+      } else if (!appStarted) {
+        showScreen('landing');
+      }
     } catch (error) {
       console.error('INIT', error);
-      showScreen('landing');
+      // Nunca navegamos a landing por un error secundario de la app.
+      // Si la librería/cliente falla de verdad, mostramos login con el error.
+      showScreen('login');
+      setMessage('login-message', `No se pudo conectar con XIFRE: ${friendlyError(error)}`, 'error');
     }
   }
 
