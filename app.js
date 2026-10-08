@@ -38,56 +38,33 @@
   let mentionPickerIndex = 0;
   let selectedMember = null;
   let selectedConversationForMenu = null;
-  let conversationSearchTimer = null;
   let conversationListPoll = null;
-  let conversationFilter = '';
+  let lastMessagesSignature = '';
   let pendingChatImages = [];
   let dragDepth = 0;
-
   const SCHOOL_EMAIL_DOMAIN = '@vedrunaimmaculada.cat';
-  const SCHOOL_HANDLE_RE = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}$/i;
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   const screens = ['landing', 'login', 'register', 'email'];
 
-  function randomAvatarColor() {
-    const palette = ['avatar-blue','avatar-yellow','avatar-red','avatar-green','avatar-orange'];
-    return palette[Math.floor(Math.random() * palette.length)];
-  }
-
-  function normalizeSchoolEmail(email) {
-    return String(email || '').trim().toLowerCase();
-  }
-
-  function isSchoolEmail(email) {
-    const value = normalizeSchoolEmail(email);
-    return value.endsWith(SCHOOL_EMAIL_DOMAIN) && value.length > SCHOOL_EMAIL_DOMAIN.length && value.indexOf('@') === value.lastIndexOf('@');
-  }
-
-  function schoolHandleFromEmail(email) {
-    const value = normalizeSchoolEmail(email);
-    if (!isSchoolEmail(value)) return '';
-    const local = value.slice(0, -SCHOOL_EMAIL_DOMAIN.length);
-    return SCHOOL_HANDLE_RE.test(local) ? local : '';
-  }
-
-  function schoolHandleForProfile(profile = currentProfile) {
-    return String(profile?.school_handle || schoolHandleFromEmail(profile?.email || currentUser?.email) || 'usuario').replace(/^@+/, '');
-  }
-
-  function isUUID(value) {
-    return UUID_RE.test(String(value || ''));
-  }
-
-  function formatFileSize(bytes) {
-    const n = Number(bytes) || 0;
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n/1024).toFixed(0)} KB`;
-    return `${(n/(1024*1024)).toFixed(1)} MB`;
-  }
-
   function normalizeUsername(value) {
     return String(value || '').trim().toLowerCase();
+  }
+
+  function normalizeSchoolEmail(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function isSchoolEmail(value) {
+    return normalizeSchoolEmail(value).endsWith(SCHOOL_EMAIL_DOMAIN);
+  }
+
+  function schoolHandleFromEmail(value) {
+    const email = normalizeSchoolEmail(value);
+    return isSchoolEmail(email) ? email.slice(0, -SCHOOL_EMAIL_DOMAIN.length) : '';
+  }
+
+  function schoolHandle(profile = currentProfile) {
+    return String(profile?.school_handle || schoolHandleFromEmail(currentUser?.email) || 'usuario').trim().toLowerCase();
   }
 
   function esc(value) {
@@ -96,21 +73,27 @@
     return div.innerHTML;
   }
 
-  function avatarHTML(name, url, kind = 'private', className = '', color = '') {
+  function avatarHTML(name, url, kind = 'private', className = '', color = '', stableId = '') {
     const safeName = String(name || (kind === 'group' ? 'Grupo' : 'Usuario')).trim() || (kind === 'group' ? 'Grupo' : 'Usuario');
     const initial = kind === 'group' ? '#' : (safeName.charAt(0).toUpperCase() || 'X');
     const safeUrl = String(url || '').trim();
-    const colorClass = kind === 'group' ? 'avatar-group' : (color || randomAvatarColor());
-    const fallbackClass = `avatar-fallback ${kind === 'group' ? 'group-fallback' : ''} ${colorClass} ${esc(className)}`;
-    if (safeUrl) {
-      return `<span class="avatar-media ${esc(className)}"><img class="avatar-img" src="${esc(safeUrl)}" alt="" loading="lazy" onerror="this.style.display='none'"><span class="${fallbackClass} avatar-fallback-hidden">${esc(initial)}</span></span>`;
+    const palette = ['avatar-blue','avatar-yellow','avatar-red','avatar-green','avatar-orange'];
+    const source = String(color || '').trim();
+    let colorClass = source && palette.includes(source) ? source : '';
+    if (!colorClass) {
+      const key = String(stableId || safeName);
+      let hash = 0;
+      for (const ch of key) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+      colorClass = kind === 'group' ? 'avatar-group' : palette[Math.abs(hash) % palette.length];
     }
-    return `<span class="${fallbackClass}">${esc(initial)}</span>`;
+    const classes = `${esc(className)} ${kind === 'group' ? 'avatar-group' : ''}`.trim();
+    const fallbackClasses = `avatar-fallback ${colorClass} ${kind === 'group' ? 'group-fallback' : ''}`;
+    return `<span class="avatar-media ${classes}" aria-hidden="true"><span class="${fallbackClasses}">${esc(initial)}</span>${safeUrl ? `<img class="avatar-img" src="${esc(safeUrl)}" alt="" loading="lazy" onerror="this.remove()" />` : ''}</span>`;
   }
 
-  function avatarInto(element, name, url, kind = 'private', color = '') {
+  function avatarInto(element, name, url, kind = 'private', color = '', stableId = '') {
     if (!element) return;
-    element.innerHTML = avatarHTML(name, url, kind, '', color);
+    element.innerHTML = avatarHTML(name, url, kind, '', color, stableId);
   }
 
   function setText(id, value) {
@@ -219,8 +202,8 @@
     const password = String($('#register-password')?.value || '');
     setMessage('register-message', '');
 
-    if (!/^[a-z0-9_]{3,20}$/.test(username)) return setMessage('register-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
     if (!isSchoolEmail(email)) return setMessage('register-message', 'Necesitas un correo del dominio vedruna', 'error');
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) return setMessage('register-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
     if (password.length < 6) return setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
 
     authActionInFlight = true;
@@ -271,6 +254,7 @@
 
     authActionInFlight = true;
     setLoading(button, true);
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -281,10 +265,12 @@
       appStarted = true;
       sessionStorage.removeItem('xifre_pending_email');
       showMain();
+
+      // La sesión ya está abierta. El resto se carga en segundo plano.
       void startApplication(session);
     } catch (error) {
       console.error('LOGIN', error);
-      setMessage('login-message', isSchoolEmail(email) ? friendlyError(error) : 'Necesitas un correo del dominio vedruna', 'error');
+      setMessage('login-message', friendlyError(error), 'error');
       if (String(error?.message || '').toLowerCase().includes('email not confirmed')) {
         sessionStorage.setItem('xifre_pending_email', email);
         setText('confirmation-email', email);
@@ -299,11 +285,7 @@
   async function resendConfirmation() {
     const email = normalizeSchoolEmail(sessionStorage.getItem('xifre_pending_email') || '');
     if (!email) return showScreen('register');
-    if (!isSchoolEmail(email)) {
-      showScreen('login');
-      setMessage('login-message', 'Necesitas un correo del dominio vedruna', 'error');
-      return;
-    }
+    if (!isSchoolEmail(email)) { toast('Necesitas un correo del dominio vedruna', 'error'); showScreen('login'); return; }
     const button = $('#resend-confirmation');
     setLoading(button, true);
     try {
@@ -319,45 +301,51 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,school_handle').eq('id', currentUser.id).maybeSingle();
-    if (result.error) console.warn('PROFILE LOAD', result.error);
-    let data = result.data || null;
-    try {
-      const ensured = await supabase.rpc('xifre_ensure_school_handle');
-      if (!ensured.error && ensured.data) {
-        const handle = Array.isArray(ensured.data) ? ensured.data[0]?.school_handle || ensured.data[0] : ensured.data?.school_handle || ensured.data;
-        if (handle) data = { ...(data || {}), school_handle: handle };
-      }
-    } catch (error) { console.warn('SCHOOL HANDLE', error); }
+    if (!isSchoolEmail(currentUser.email)) {
+      await supabase.auth.signOut().catch(() => {});
+      showScreen('login');
+      setMessage('login-message', 'Necesitas un correo del dominio vedruna', 'error');
+      throw new Error('Necesitas un correo del dominio vedruna');
+    }
+    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,school_handle').eq('id', currentUser.id).maybeSingle();
+    if (error) console.warn('PROFILE LOAD', error);
     currentProfile = data || {
       id: currentUser.id,
       username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
       display_name: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
       avatar_url: null,
-      avatar_color: randomAvatarColor(),
-      school_handle: schoolHandleFromEmail(currentUser.email) || 'usuario'
+      avatar_color: '',
+      school_handle: schoolHandleFromEmail(currentUser.email)
     };
     currentProfile.display_name = currentProfile.username;
-    currentProfile.school_handle = schoolHandleForProfile(currentProfile);
-    if (!currentProfile.avatar_color) currentProfile.avatar_color = randomAvatarColor();
+    if (!currentProfile.school_handle) {
+      try {
+        const ensured = await supabase.rpc('xifre_ensure_school_handle');
+        if (!ensured.error && ensured.data) currentProfile.school_handle = String(ensured.data);
+      } catch (e) { console.warn('SCHOOL HANDLE', e); }
+    }
     syncProfileUI();
   }
 
   function syncProfileUI() {
     const username = currentProfile?.username || 'usuario';
-    const schoolHandle = schoolHandleForProfile();
+    const handle = schoolHandle();
     setText('profile-name', username);
-    setText('profile-username', `@${schoolHandle}`);
+    setText('profile-username', `@${handle}`);
     setText('bottom-profile-name', username);
-    setText('bottom-profile-username', `@${schoolHandle}`);
+    setText('bottom-profile-username', `@${handle}`);
     setText('settings-nav-name', username);
-    setText('settings-nav-username', `@${schoolHandle}`);
-    setText('settings-preview-username', `@${username}`);
-    setText('settings-preview-school-handle', `@${schoolHandle}`);
+    setText('settings-nav-username', `@${handle}`);
+    setText('settings-preview-username', `@${handle}`);
+    setText('settings-preview-name', username);
+    setText('settings-preview-handle', `@${handle}`);
     avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
-    avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
-    avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
-    if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
+    avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color, currentUser?.id);
+    avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color, currentUser?.id);
+    if (!pendingProfileAvatarFile) {
+      avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color, currentUser?.id);
+      avatarInto($('#settings-preview-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color, currentUser?.id);
+    }
     const settingsUsername = $('#settings-username');
     if (settingsUsername && document.activeElement !== settingsUsername) settingsUsername.value = username;
   }
@@ -374,12 +362,10 @@
       }
       if (!sessionUser) throw new Error('No hay una sesión autenticada.');
       if (!isSchoolEmail(sessionUser.email)) {
-        try { await supabase.auth.signOut(); } catch (signOutError) { console.warn('INVALID DOMAIN SIGNOUT', signOutError); }
-        currentUser = null;
-        appStarted = false;
+        await supabase.auth.signOut().catch(() => {});
         showScreen('login');
         setMessage('login-message', 'Necesitas un correo del dominio vedruna', 'error');
-        return false;
+        throw new Error('Necesitas un correo del dominio vedruna');
       }
 
       currentUser = sessionUser;
@@ -387,13 +373,23 @@
       applyTheme(currentTheme());
       showMain();
 
-      const results = await Promise.allSettled([loadProfile(), loadFriends(), loadConversations()]);
-      results.forEach(result => { if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason); });
+      const results = await Promise.allSettled([
+        loadProfile(),
+        loadFriends(),
+        loadConversations()
+      ]);
+      results.forEach(result => {
+        if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
+      });
 
       if (conversationListPoll) clearInterval(conversationListPoll);
       conversationListPoll = setInterval(() => { if (document.visibilityState === 'visible' && currentUser) loadConversations().catch(() => {}); }, 4000);
 
-      try { await restoreConversation(); } catch (restoreError) { console.warn('RESTORE CONVERSATION', restoreError); }
+      try {
+        await restoreConversation();
+      } catch (restoreError) {
+        console.warn('RESTORE CONVERSATION', restoreError);
+      }
       return true;
     })().catch(async error => {
       console.error('START APPLICATION', error);
@@ -405,21 +401,26 @@
           showMain();
           return true;
         }
-      } catch (sessionError) { console.warn('SESSION CHECK', sessionError); }
+      } catch (sessionError) {
+        console.warn('SESSION CHECK', sessionError);
+      }
       appStarted = false;
       currentUser = null;
       return false;
-    }).finally(() => { startPromise = null; });
+    }).finally(() => {
+      startPromise = null;
+    });
     return startPromise;
   }
 
   async function logout() {
-    if (!currentUser) return;
     const ok = await askConfirm('Cerrar sesión', '¿Seguro que quieres cerrar tu sesión en XIFRE?', 'Cerrar sesión');
     if (!ok) return;
-    try { await supabase.auth.signOut(); }
-    catch (error) { console.error('LOGOUT', error); }
-    finally {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('LOGOUT', error);
+    } finally {
       stopChatRealtime();
       if (conversationListPoll) clearInterval(conversationListPoll);
       conversationListPoll = null;
@@ -428,10 +429,7 @@
       currentConversation = null;
       currentConversationData = null;
       currentMembers = [];
-      conversationFilter = '';
-      clearChatImages();
-      if ($('#conversation-search-input')) $('#conversation-search-input').value = '';
-      $('#conversation-search-clear')?.classList.add('hidden');
+      appStarted = false;
       sessionStorage.removeItem('xifre_current_conversation');
       closeAllModals();
       $('#settings-modal')?.classList.add('hidden');
@@ -450,9 +448,9 @@
   async function loadFriends() {
     if (!currentUser) return;
     const { data, error } = await supabase.from('friendships').select('user1_id,user2_id').or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`);
-    if (error) { console.warn('FRIENDS', error); friendCache = []; return; }
+    if (error) { console.warn('FRIENDS', error); return friendCache; }
     const ids = [...new Set((data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
-    if (!ids.length) { friendCache = []; return; }
+    if (!ids.length) { friendCache = []; return friendCache; }
     const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,school_handle').in('id', ids);
     if (!result.error) friendCache = result.data || [];
   }
@@ -466,8 +464,8 @@
       renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' })));
       return;
     }
-    if (clean.length < 2) {
-      list.innerHTML = '<div class="empty-sidebar">Escribe al menos 2 caracteres.</div>';
+    if (clean.length < 1) {
+      renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' })));
       return;
     }
     list.innerHTML = '<div class="empty-sidebar">Buscando...</div>';
@@ -494,14 +492,14 @@
       const row = document.createElement('div');
       row.className = 'search-result';
       row.innerHTML = `
-        <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
-        <div class="result-copy"><strong>${esc(person.username)}</strong><small>@${esc(person.school_handle || 'usuario')}</small></div>`;
+        <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color, person.id)}</span>
+        <div class="result-copy"><strong>${esc(person.username)}</strong><small>@${esc(person.school_handle || person.username || 'usuario')}</small></div>`;
       const action = document.createElement('button');
       action.type = 'button';
       action.className = `result-action ${relationship === 'friend' ? '' : 'secondary'}`;
       if (relationship === 'friend') {
         action.textContent = 'Abrir';
-        action.addEventListener('click', async () => { closeModal('friend-modal'); await openPrivateChat(person.id); });
+        action.addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(person.id); });
       } else if (relationship === 'outgoing_pending' || relationship === 'incoming_pending') {
         action.textContent = 'Pendiente';
         action.disabled = true;
@@ -537,8 +535,8 @@
     friendCache.forEach(friend => {
       const row = document.createElement('div');
       row.className = 'friend-item';
-      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || 'usuario')}</small></div><button class="open-chat" type="button">Abrir</button>`;
-      row.querySelector('button').addEventListener('click', async () => { closeModal('friends-modal'); await openPrivateChat(friend.id); });
+      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color, friend.id)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
+      row.querySelector('button').addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(friend.id); });
       list.appendChild(row);
     });
   }
@@ -561,11 +559,11 @@
     const list = $('#friend-requests-list');
     if (!list) return;
     list.innerHTML = '';
-    if (!requests.length) { list.innerHTML = '<div class="requests-empty">No hay solicitudes</div>'; return; }
+    if (!requests.length) { list.innerHTML = '<div class="empty-sidebar">No hay solicitudes</div>'; return; }
     requests.forEach(req => {
       const row = document.createElement('div');
       row.className = 'request-item';
-      row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar', req.sender.avatar_color)}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.school_handle || 'usuario')}</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
+      row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar', req.sender.avatar_color, req.sender.id)}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.school_handle || req.sender.username || 'usuario')}</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
       const [accept, reject] = $$('.request-actions button', row);
       accept.addEventListener('click', () => acceptRequest(req, row));
       reject.addEventListener('click', () => rejectRequest(req, row));
@@ -617,31 +615,34 @@
     if (error) { console.warn('CONVERSATIONS', error); return conversationCache; }
     conversationCache = (data || []).map(row => ({ ...row, displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado') }));
     conversationCache.sort((a,b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
-    renderConversations(conversationFilter);
+    renderConversations();
     return conversationCache;
   }
 
-  function renderConversations(filter = conversationFilter) {
-    const list = $('#conversation-list'); if (!list) return;
+  function renderConversations(filter = $('#conversation-search-input')?.value || '') {
+    const list = $('#conversation-list');
+    if (!list) return;
+    const q = normalizeUsername(filter).replace(/^@+/, '');
     list.innerHTML = '';
     setText('chat-count', conversationCache.length);
-    const q = normalizeUsername(filter);
     const visible = conversationCache.filter(c => {
       if (!q) return true;
-      const label = normalizeUsername(c.displayName || c.name || '');
-      const user = normalizeUsername(c.username || '');
-      const preview = normalizeUsername(c.last_message || '');
-      return label.includes(q) || user.includes(q) || preview.includes(q);
+      const haystack = [c.displayName, c.name, c.username, c.last_message].map(normalizeUsername).join(' ');
+      return haystack.includes(q);
     });
-    if (!visible.length) { list.innerHTML = `<div class="empty-sidebar">${q ? 'No se encontraron conversaciones.' : 'No tienes conversaciones todavía.'}</div>`; return; }
+    if (!visible.length) {
+      list.innerHTML = `<div class="empty-sidebar">${q ? 'No se encontraron conversaciones.' : 'No tienes conversaciones todavía.'}</div>`;
+      return;
+    }
     visible.forEach(conversation => {
       const isGroup = conversation.type === 'group';
       const label = conversation.displayName || conversation.name || (isGroup ? 'Grupo' : 'Chat privado');
-      const row = document.createElement('button'); row.type='button';
+      const row = document.createElement('button');
+      row.type = 'button';
       const unread = Number(conversation.unread_count || 0);
       const mentioned = !!conversation.has_mention;
       row.className = `conversation${String(currentConversation)===String(conversation.id)?' active':''}${unread?' unread':''}`;
-      row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color)}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
+      row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color,conversation.id)}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
       row.addEventListener('click',()=>openConversation(conversation.id,conversation));
       row.addEventListener('contextmenu',e=>{e.preventDefault(); openConversationMenu(conversation,e.clientX,e.clientY);});
       list.appendChild(row);
@@ -677,6 +678,7 @@
     if (!conversation) return false;
 
     try {
+      if (String(currentConversation) !== conversationId) lastMessagesSignature = '';
       currentConversation = conversationId;
       currentConversationData = conversation;
       sessionStorage.setItem('xifre_current_conversation', conversationId);
@@ -695,7 +697,7 @@
       setupTypingChannel(conversationId);
       setupMessageChannel(conversationId);
       $('#message-input').disabled = false;
-      $('#send-button').disabled = true;
+      updateSendState();
       $('#message-input').focus();
       return true;
     } catch (error) {
@@ -728,7 +730,8 @@
     } else {
       subtitle = `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`;
     }
-    avatarInto($('#chat-avatar'), name, url, isGroup ? 'group' : 'private', isGroup ? '' : (currentMembers.find(m=>String(m.user_id)!==String(currentUser.id))?.avatar_color || ''));
+    const otherMember = currentMembers.find(m=>String(m.user_id)!==String(currentUser.id));
+    avatarInto($('#chat-avatar'), name, url, isGroup ? 'group' : 'private', isGroup ? '' : (otherMember?.avatar_color || ''), otherMember?.user_id || currentConversation);
     setText('chat-title', name);
     setText('chat-subtitle', subtitle);
     $('#chat-info-button')?.classList.remove('hidden');
@@ -741,113 +744,118 @@
     return { ...row };
   }
 
+  function normalizeAttachments(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(a => a && typeof a.url === 'string' && a.url && /^image\/(png|jpeg|webp|gif)$/i.test(String(a.type || '')))
+      .map(a => ({ url: String(a.url), name: String(a.name || 'imagen'), size: Number(a.size || 0), type: String(a.type || '') }));
+  }
+
+  function messageSignature(messages) {
+    return messages.map(m => `${m.id}|${m.created_at}|${m.content || ''}|${m.reply_to || ''}|${(m.mentions || []).join(',')}|${!!m.mention_everyone}|${m.message_type || ''}|${JSON.stringify(m.attachments || [])}`).join('||');
+  }
+
   async function loadMessages(conversationId, forceBottom = false) {
     const { data, error } = await supabase.rpc('xifre_get_messages', { p_conversation_id: conversationId, p_limit: 500 });
     if (error) throw error;
-    if (String(currentConversation) !== String(conversationId)) return;
-    renderMessages((data || []).map(messageObject), forceBottom);
+    const messages = (data || []).map(messageObject);
+    const signature = messageSignature(messages);
+    if (!forceBottom && String(currentConversation) === String(conversationId) && signature === lastMessagesSignature) return;
+    lastMessagesSignature = signature;
+    renderMessages(messages, forceBottom);
   }
 
   function renderMessageContent(content, message) {
     const members = currentMembers || [];
     let html = esc(content || '');
-    html = html.replace(/@everyone\b/g, '<span class="mention-token everyone">@everyone</span>');
+    if (currentConversationData?.type === 'group') html = html.replace(/@everyone\b/gi, '<span class="mention-token everyone">@everyone</span>');
     members.forEach(m => {
-      const u = String(m.username || '').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-      if (!u) return;
-      const re = new RegExp(`@${u}\\b`, 'gi');
-      html = html.replace(re, `<span class="mention-token ${String(m.user_id)===String(currentUser.id)?'self':''}">@${esc(m.username)}</span>`);
+      const username = String(m.username || '').trim();
+      const userId = String(m.user_id || '');
+      if (!username || !userId) return;
+      const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      html = html.replace(new RegExp(`@${escapedUsername}\\b`, 'gi'), `<span class="mention-token ${userId===String(currentUser.id)?'self':''}">@${esc(username)}</span>`);
     });
     return html;
   }
 
-  function messageMentionsMe(message){
-    return String(message.sender_id)!==String(currentUser.id) && (message.mention_everyone || (message.mentions||[]).some(id=>String(id)===String(currentUser.id)));
+  function messageMentionsMe(message) {
+    return String(message.sender_id) !== String(currentUser.id) && (message.mention_everyone || (message.mentions || []).some(id => String(id) === String(currentUser.id)));
   }
 
-  function messagesSignature(messages){
-    return messages.map(m=>[String(m.id||''),String(m.created_at||''),String(m.content||''),JSON.stringify(m.attachments||[]),String(m.mentions||[]),!!m.mention_everyone,String(m.message_type||'')].join('¦')).join('\n');
+  function renderAttachments(attachments) {
+    const items = normalizeAttachments(attachments);
+    if (!items.length) return '';
+    return `<div class="message-attachments">${items.map((a,i)=>`<button class="message-attachment" type="button" data-image-url="${esc(a.url)}" data-image-name="${esc(a.name)}" aria-label="Abrir imagen ${i+1}"><img src="${esc(a.url)}" alt="${esc(a.name)}" loading="lazy"></button>`).join('')}</div>`;
   }
 
-  function renderMessages(messages, forceBottom=false) {
-    const box=$('#messages'); if(!box)return;
-    const signature=messagesSignature(messages);
-    if(!forceBottom && signature===lastMessagesSignature) return;
-
-    const previousScrollTop=box.scrollTop;
-    const previousDistance=box.scrollHeight-box.scrollTop-box.clientHeight;
-    const wasNearBottom=forceBottom || previousDistance<140;
-    let anchorId='';
-    let anchorOffset=0;
-    if(!wasNearBottom){
-      const boxRect=box.getBoundingClientRect();
-      const rows=[...box.querySelectorAll('.message-row,.system-message-row')];
-      const anchor=rows.find(row=>row.getBoundingClientRect().bottom>boxRect.top+8);
-      if(anchor){
-        anchorId=String(anchor.dataset.messageId||'');
-        anchorOffset=anchor.getBoundingClientRect().top-boxRect.top;
-      }
-    }
-
-    lastMessagesSignature=signature;
-    box.innerHTML='';
-    if(!messages.length){
-      box.innerHTML='<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
-      requestAnimationFrame(()=>{box.scrollTop=0;});
+  function renderMessages(messages, forceBottom = false) {
+    const box = $('#messages');
+    if (!box) return;
+    const oldScrollHeight = box.scrollHeight;
+    const oldScrollTop = box.scrollTop;
+    const oldDistance = oldScrollHeight - oldScrollTop - box.clientHeight;
+    const wasNearBottom = forceBottom || oldDistance < 100;
+    box.innerHTML = '';
+    if (!messages.length) {
+      box.innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
       return;
     }
-    const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m]));
-    messages.forEach(m=>renderOneMessage(m,profiles));
-    requestAnimationFrame(()=>{
-      if(forceBottom||wasNearBottom){
-        box.scrollTop=box.scrollHeight;
-        return;
-      }
-      if(anchorId){
-        const anchor=box.querySelector(`[data-message-id="${CSS.escape(anchorId)}"]`);
-        if(anchor){
-          const boxRect=box.getBoundingClientRect();
-          const newOffset=anchor.getBoundingClientRect().top-boxRect.top;
-          box.scrollTop += newOffset-anchorOffset;
-          return;
-        }
-      }
-      const max=Math.max(0,box.scrollHeight-box.clientHeight);
-      box.scrollTop=Math.min(previousScrollTop,max);
+    const profiles = new Map(currentMembers.map(m => [String(m.user_id), m]));
+    messages.forEach(m => renderOneMessage(m, profiles));
+    requestAnimationFrame(() => {
+      if (wasNearBottom) box.scrollTop = box.scrollHeight;
+      else box.scrollTop = Math.max(0, oldScrollTop + (box.scrollHeight - oldScrollHeight));
     });
   }
 
-  function renderOneMessage(message, profiles=new Map()) {
-    const box=$('#messages'); if(!box||!message?.id)return;
-    if(box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`))return;
-    $('.chat-welcome',box)?.remove();
-    if(message.message_type==='system'){
-      const row=document.createElement('div');row.className='system-message-row';row.dataset.messageId=String(message.id);row.innerHTML=`<span>${esc(message.content||'')}</span>`;box.appendChild(row);return;
+  function renderOneMessage(message, profiles = new Map()) {
+    const box = $('#messages');
+    if (!box || !message?.id) return;
+    if (box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`)) return;
+    $('.chat-welcome', box)?.remove();
+    if (message.message_type === 'system') {
+      const row = document.createElement('div');
+      row.className = 'system-message-row';
+      row.dataset.messageId = String(message.id);
+      row.innerHTML = `<span>${esc(message.content || '')}</span>`;
+      box.appendChild(row);
+      return;
     }
-    const mine=String(message.sender_id)===String(currentUser.id); const cached=profiles.get(String(message.sender_id))||{};
-    const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null,avatar_color:message.sender_avatar_color||cached.avatar_color||randomAvatarColor(),school_handle:message.sender_school_handle||cached.school_handle||'usuario'};
-    const mentioned=!mine && !!(message.mention_everyone || (message.mentions||[]).some(id=>String(id)===String(currentUser.id)));
-    const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);
-    const attachments=Array.isArray(message.attachments)?message.attachments.filter(a=>a&&a.url):[];
-    const attachmentsHTML=attachments.length?`<div class="message-attachments">${attachments.map((a,i)=>`<button type="button" class="message-attachment" data-image-url="${esc(a.url)}" data-image-name="${esc(a.name||`Imagen ${i+1}`)}"><img src="${esc(a.url)}" alt="${esc(a.name||'Imagen adjunta')}" loading="lazy"><span>${esc(a.name||'Imagen')}</span></button>`).join('')}</div>`:'';
-    row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',sender.avatar_color)}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div>${attachmentsHTML}</div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
-    row.querySelector('[data-message-action="reply"]').addEventListener('click',e=>{e.stopPropagation();setReplyTo(message);highlightMessage(message.id);});
-    row.querySelector('[data-message-action="more"]').addEventListener('click',e=>{e.stopPropagation();openMessageMenu(message,e.currentTarget);});
-    row.querySelector('.message-reply-preview')?.addEventListener('click',()=>highlightMessage(message.reply_to));
-    $$('.message-attachment',row).forEach(button=>button.addEventListener('click',e=>{e.stopPropagation();openImageLightbox(button.dataset.imageUrl,button.dataset.imageName||'Imagen');}));
-    row.addEventListener('contextmenu',e=>{e.preventDefault();openMessageMenu(message,row);});
+    const mine = String(message.sender_id) === String(currentUser.id);
+    const cached = profiles.get(String(message.sender_id)) || {};
+    const sender = {
+      username: message.sender_username || cached.username || 'Usuario',
+      avatar_url: message.sender_avatar_url || cached.avatar_url || null,
+      avatar_color: message.sender_avatar_color || cached.avatar_color || '',
+      school_handle: message.sender_school_handle || cached.school_handle || ''
+    };
+    const mentioned = !mine && messageMentionsMe(message);
+    const row = document.createElement('article');
+    row.className = `message-row${mine ? ' mine' : ''}${mentioned ? ' mentioned' : ''}`;
+    row.dataset.messageId = String(message.id);
+    const reply = message.reply_to ? `<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'private', '', message.reply_sender_avatar_color || '', message.reply_to)}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(message.reply_content || '[Imagen]')}</span></div></div>` : '';
+    row.innerHTML = `<span class="message-avatar">${avatarHTML(sender.username, sender.avatar_url, 'private', '', sender.avatar_color, sender.user_id || message.sender_id)}</span><div class="message-body">${reply}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content, message)}</div>${renderAttachments(message.attachments)}</div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
+    row.querySelector('[data-message-action="reply"]').addEventListener('click', e => { e.stopPropagation(); setReplyTo(message); highlightMessage(message.id); });
+    row.querySelector('[data-message-action="more"]').addEventListener('click', e => { e.stopPropagation(); openMessageMenu(message, e.currentTarget); });
+    row.querySelector('.message-reply-preview')?.addEventListener('click', () => highlightMessage(message.reply_to));
+    row.querySelectorAll('[data-image-url]').forEach(btn => btn.addEventListener('click', () => openImageLightbox(btn.dataset.imageUrl, btn.dataset.imageName || '')));
+    row.addEventListener('contextmenu', e => { e.preventDefault(); openMessageMenu(message, row); });
     box.appendChild(row);
   }
 
-  function highlightMessage(id){
-    $$('.message-row', $('#messages')).forEach(r=>r.classList.remove('reply-target'));
-    const row=$(`[data-message-id="${CSS.escape(String(id))}"]`,$('#messages')); if(!row)return; row.classList.add('reply-target'); row.scrollIntoView({behavior:'smooth',block:'center'}); setTimeout(()=>row.classList.remove('reply-target'),1600);
+  function highlightMessage(id) {
+    $$('.message-row', $('#messages')).forEach(r => r.classList.remove('reply-target'));
+    const row = $(`[data-message-id="${CSS.escape(String(id))}"]`, $('#messages'));
+    if (!row) return;
+    row.classList.add('reply-target');
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => row.classList.remove('reply-target'), 1600);
   }
 
   function setReplyTo(message) {
     replyTarget = message;
     setText('replying-name', `@${message.sender_username || 'usuario'}`);
-    setText('replying-content', message.content || '');
+    setText('replying-content', message.content || (normalizeAttachments(message.attachments).length ? '[Imagen]' : ''));
     $('#reply-bar')?.classList.remove('hidden');
     $('#message-input')?.focus();
   }
@@ -887,86 +895,186 @@
     const { error } = await supabase.rpc('xifre_delete_message', { p_message_id: message.id });
     if (error) return toast(friendlyError(error), 'error');
     closeMessageMenu();
-    const row = $(`[data-message-id="${CSS.escape(String(message.id))}"]`);
-    row?.remove();
-    if (!$$('.message-row', $('#messages')).length) $('#messages').innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
-    if (replyTarget?.id === message.id) clearReply();
+    await loadMessages(currentConversation, false).catch(() => {});
     await loadConversations();
     toast('Mensaje eliminado.', 'success');
   }
 
-  function updateMentionPicker(){
-    const input=$('#message-input'); const picker=$('#mention-picker'); if(!input||!picker)return;
-    const value=input.value; const before=value.slice(0,input.selectionStart??value.length); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i);
-    if(!currentConversation||!match){picker.classList.add('hidden');return;}
-    const query=match[2].toLowerCase();
-    const people=currentMembers.filter(m=>String(m.user_id)!==String(currentUser.id)&&isUUID(m.user_id)&&String(m.username||'').toLowerCase().startsWith(query));
-    const items=people.slice(0,8);
-    mentionPickerIndex=0;
-    picker.innerHTML='';
-    if(!items.length){picker.classList.add('hidden');return;}
-    items.forEach((p,i)=>{
-      const row=document.createElement('div'); row.className=`mention-item${i===mentionPickerIndex?' active':''}`;
-      row.innerHTML=`${avatarHTML(p.username,p.avatar_url,'private','mention-avatar',p.avatar_color)}<span class="mention-item-copy"><strong>${esc(p.username)}</strong><small>@${esc(p.username)}</small></span>`;
-      row.addEventListener('mousedown',e=>{e.preventDefault();selectMention(p);});
+  function updateMentionPicker() {
+    const input = $('#message-input');
+    const picker = $('#mention-picker');
+    if (!input || !picker) return;
+    const value = input.value;
+    const before = value.slice(0, input.selectionStart ?? value.length);
+    const match = before.match(/(^|\s)@([a-z0-9_]*)$/i);
+    if (!currentConversation || !match) { picker.classList.add('hidden'); return; }
+    const query = match[2].toLowerCase();
+    const people = currentMembers
+      .filter(m => String(m.user_id) !== String(currentUser.id))
+      .filter(m => String(m.username || '').toLowerCase().startsWith(query));
+    if (!people.length) { picker.classList.add('hidden'); return; }
+    mentionPickerIndex = Math.min(Math.max(mentionPickerIndex, 0), Math.max(people.length - 1, 0));
+    picker.innerHTML = '';
+    people.slice(0, 8).forEach((person, index) => {
+      const row = document.createElement('div');
+      row.className = `mention-item${index === mentionPickerIndex ? ' active' : ''}`;
+      row.innerHTML = `${avatarHTML(person.username, person.avatar_url, 'private', 'mention-avatar', person.avatar_color, person.user_id)}<span class="mention-item-copy"><strong>${esc(person.username)}</strong><small>@${esc(person.username)}</small></span>`;
+      row.addEventListener('mousedown', e => { e.preventDefault(); selectMention(person); });
       picker.appendChild(row);
     });
     picker.classList.remove('hidden');
   }
-  function selectMention(person){
-    const input=$('#message-input');
-    const userId=String(person?.user_id||'');
-    if(!isUUID(userId)){toast('No se pudo identificar a ese usuario.','error');return;}
-    const username=String(person?.username||'').trim(); if(!username)return;
-    const value=input.value; const pos=input.selectionStart??value.length; const before=value.slice(0,pos); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i); if(!match)return;
-    const start=pos-match[2].length-1; const token='@'+username+' '; input.value=value.slice(0,start)+token+value.slice(pos); input.focus(); const newPos=start+token.length; input.setSelectionRange(newPos,newPos);
-    $('#mention-picker').classList.add('hidden'); currentMentionIds.add(userId); updateSendState(); scheduleTyping();
+
+  function selectMention(person) {
+    const input = $('#message-input');
+    if (!input || !person?.user_id || !person?.username) return;
+    const value = input.value;
+    const pos = input.selectionStart ?? value.length;
+    const before = value.slice(0, pos);
+    const match = before.match(/(^|\s)@([a-z0-9_]*)$/i);
+    if (!match) return;
+    const start = pos - match[2].length - 1;
+    const token = `@${person.username} `;
+    input.value = value.slice(0, start) + token + value.slice(pos);
+    input.focus();
+    const newPos = start + token.length;
+    input.setSelectionRange(newPos, newPos);
+    $('#mention-picker').classList.add('hidden');
+    currentMentionIds.add(String(person.user_id));
+    updateSendState();
+    scheduleTyping();
   }
-  function updateSendState(){
-    const input=$('#message-input');
-    const hasText=!!String(input?.value||'').trim();
-    const hasImages=pendingChatImages.length>0;
-    if($('#send-button')) $('#send-button').disabled=!(hasText||hasImages)||!currentConversation;
+
+  function updateSendState() {
+    const input = $('#message-input');
+    const button = $('#send-button');
+    if (!button) return;
+    button.disabled = !(String(input?.value || '').trim() || pendingChatImages.length);
   }
-  function deriveMentions(content){
-    const ids=[];
-    for(const m of currentMembers){
-      const uid=String(m.user_id||''); if(!isUUID(uid)) continue;
-      const username=String(m.username||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); if(!username) continue;
-      if(new RegExp(`@${username}\\b`,'i').test(content)) ids.push(uid);
+
+  function deriveMentions(content) {
+    const ids = [];
+    for (const m of currentMembers) {
+      const username = String(m.username || '').trim();
+      const userId = String(m.user_id || '').trim();
+      if (!username || !userId) continue;
+      if (new RegExp(`@${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(content)) ids.push(userId);
     }
-    return {ids:[...new Set(ids)],everyone:/@everyone\b/i.test(content)};
+    return { ids: [...new Set(ids)].filter(Boolean), everyone: currentConversationData?.type === 'group' && /@everyone\b/i.test(content) };
+  }
+
+  function clearPendingChatImages() {
+    pendingChatImages.forEach(item => { try { URL.revokeObjectURL(item.previewUrl); } catch {} });
+    pendingChatImages = [];
+    renderAttachmentPreview();
+    updateSendState();
+  }
+
+  function chatImageExtension(file) {
+    return ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' })[file?.type] || 'png';
+  }
+
+  function validateChatImage(file) {
+    if (!file || !/^image\/(png|jpeg|webp|gif)$/i.test(file.type || '')) throw new Error('Solo puedes subir PNG, JPG, WEBP o GIF.');
+    if (file.size > 10 * 1024 * 1024) throw new Error('Cada imagen puede pesar como máximo 10 MB.');
+  }
+
+  function renderAttachmentPreview() {
+    const box = $('#attachment-preview');
+    if (!box) return;
+    if (!pendingChatImages.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.innerHTML = pendingChatImages.map((item, index) => `<div class="attachment-card"><img src="${esc(item.previewUrl)}" alt="${esc(item.file.name)}"><button class="attachment-remove" type="button" data-attachment-remove="${index}" aria-label="Quitar imagen">×</button></div>`).join('');
+    box.querySelectorAll('[data-attachment-remove]').forEach(btn => btn.addEventListener('click', () => {
+      const index = Number(btn.dataset.attachmentRemove);
+      const item = pendingChatImages[index];
+      if (item) { try { URL.revokeObjectURL(item.previewUrl); } catch {} }
+      pendingChatImages.splice(index, 1);
+      renderAttachmentPreview();
+      updateSendState();
+    }));
+  }
+
+  function addChatImages(fileList) {
+    const files = [...(fileList || [])].filter(Boolean);
+    if (!files.length) return;
+    for (const file of files) {
+      if (pendingChatImages.length >= 4) { toast('Máximo 4 imágenes por mensaje.', 'error'); break; }
+      try { validateChatImage(file); } catch (error) { toast(error.message, 'error'); continue; }
+      const duplicate = pendingChatImages.some(item => item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified);
+      if (duplicate) continue;
+      pendingChatImages.push({ file, previewUrl: URL.createObjectURL(file) });
+    }
+    renderAttachmentPreview();
+    updateSendState();
+  }
+
+  function openImageLightbox(url, name = '') {
+    const lightbox = $('#image-lightbox');
+    const img = $('#image-lightbox-image');
+    if (!lightbox || !img) return;
+    img.src = url;
+    img.alt = name;
+    lightbox.classList.remove('hidden');
+  }
+
+  function closeImageLightbox() {
+    const lightbox = $('#image-lightbox');
+    const img = $('#image-lightbox-image');
+    lightbox?.classList.add('hidden');
+    if (img) img.src = '';
   }
 
   async function sendMessage() {
-    if(!currentUser||!currentConversation)return;
-    const input=$('#message-input'); const content=String(input.value||'').trim();
-    if(!content && !pendingChatImages.length)return;
-    const button=$('#send-button'); button.disabled=true;
-    const uploadedPaths=[];
-    try{
-      const derived=deriveMentions(content);
-      const mentions=derived.ids;
-      const attachments=[];
-      for(const item of pendingChatImages){
-        const uploaded=await uploadChatImage(item.file); uploadedPaths.push(uploaded.path);
-        attachments.push({url:uploaded.url,type:item.file.type,name:item.file.name,size:item.file.size});
+    if (!currentUser || !currentConversation) return;
+    const input = $('#message-input');
+    const content = String(input?.value || '').trim();
+    if (!content && !pendingChatImages.length) return;
+    const button = $('#send-button');
+    if (button) button.disabled = true;
+    const filesToSend = pendingChatImages.map(item => item.file);
+    const uploadedPaths = [];
+    try {
+      const derived = deriveMentions(content);
+      const mentions = [...new Set([...derived.ids, ...currentMentionIds])].filter(Boolean);
+      const attachments = [];
+      for (const file of filesToSend) {
+        const path = `${currentUser.id}/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${chatImageExtension(file)}`;
+        const upload = await supabase.storage.from('xifre-chat').upload(path, file, { upsert: false, contentType: file.type, cacheControl: '31536000' });
+        if (upload.error) throw upload.error;
+        uploadedPaths.push(path);
+        const publicUrl = supabase.storage.from('xifre-chat').getPublicUrl(path).data?.publicUrl;
+        if (!publicUrl) throw new Error('No se pudo obtener la URL de la imagen.');
+        attachments.push({ path, url: publicUrl, name: file.name, size: file.size, type: file.type });
       }
-      const {data,error}=await supabase.rpc('xifre_send_message',{p_conversation_id:currentConversation,p_content:content,p_reply_to:replyTarget?.id||null,p_mentions:mentions,p_mention_everyone:derived.everyone,p_attachments:attachments});
-      if(error)throw error;
-      const sent=Array.isArray(data)?data[0]:data;
-      const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m]));
-      renderOneMessage(sent,profiles);
-      input.value=''; clearReply(); clearChatImages(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden'); stopTypingBroadcast();
-      $('#messages').scrollTop=$('#messages').scrollHeight;
+      const { data, error } = await supabase.rpc('xifre_send_message', {
+        p_conversation_id: currentConversation,
+        p_content: content,
+        p_reply_to: replyTarget?.id || null,
+        p_mentions: mentions,
+        p_mention_everyone: derived.everyone,
+        p_attachments: attachments
+      });
+      if (error) throw error;
+      const sent = Array.isArray(data) ? data[0] : data;
+      input.value = '';
+      clearReply();
+      currentMentionIds.clear();
+      mentionEverywhere = false;
+      $('#mention-picker')?.classList.add('hidden');
+      stopTypingBroadcast();
+      clearPendingChatImages();
+      await loadMessages(currentConversation, true);
       await loadConversations();
-      await supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation}).catch(()=>{});
-      const c=conversationCache.find(x=>String(x.id)===String(currentConversation)); if(c){c.unread_count=0;c.has_mention=false;}
-      renderConversations(conversationFilter);
-    }catch(error){
-      if(uploadedPaths.length) await supabase.storage.from('xifre-chat').remove(uploadedPaths).catch(()=>{});
-      toast(friendlyError(error),'error');
-    }finally{updateSendState();input.focus();}
+      await supabase.rpc('xifre_mark_read', { p_conversation_id: currentConversation });
+      return sent;
+    } catch (error) {
+      if (uploadedPaths.length) await supabase.storage.from('xifre-chat').remove(uploadedPaths).catch(() => {});
+      toast(friendlyError(error), 'error');
+    } finally {
+      updateSendState();
+      input?.focus();
+    }
   }
 
   /* ------------------------------------------------------------------------ */
@@ -1071,48 +1179,97 @@
     if (!isGroup) {
       const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
       const name = other?.username || 'Usuario';
-      avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other?.avatar_color);
+      avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other?.avatar_color, other?.user_id);
       setText('right-profile-name', name);
-      setText('right-profile-username', `@${other?.school_handle || 'usuario'}`);
+      setText('right-profile-handle', `@${other?.school_handle || other?.username || 'usuario'}`);
     } else {
       const name = currentConversationData?.name || 'Grupo';
       avatarInto($('#right-group-avatar'), name, currentConversationData?.avatar_url, 'group');
       setText('right-group-name', name);
       setText('right-group-count', `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`);
       const list = $('#right-group-members');
+      if (!list) return;
       list.innerHTML = '';
       currentMembers.forEach(member => {
         const row = document.createElement('div');
         row.className = 'right-member';
-        row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar', member.avatar_color)}<span class="right-member-name">${esc(member.username || 'Usuario')}</span>${member.is_owner?'<span class="member-role-crown crown-owner" title="Creador">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin" title="Administrador">♛</span>':''}`;
-        row.addEventListener('click',e=>{if(e.defaultPrevented)return;showMemberProfile(member,row);});
-        row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
+        row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar', member.avatar_color, member.user_id)}<span class="right-member-copy"><span class="right-member-name">${esc(member.username || 'Usuario')}</span><small>@${esc(member.school_handle || member.username || 'usuario')}</small></span>${member.is_owner?'<span class="member-role-crown crown-owner" title="Creador">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin" title="Administrador">♛</span>':''}`;
+        row.addEventListener('click', e => { if (!e.defaultPrevented) showMemberProfile(member, row); });
+        row.addEventListener('contextmenu', e => { e.preventDefault(); closeMemberProfile(); openMemberMenu(member, e.clientX, e.clientY); });
         list.appendChild(row);
       });
     }
   }
 
-  function showMemberProfile(member,anchor){
-    const pop=$('#member-profile-popover'); if(!pop)return;
-    selectedMember=member;
-    avatarInto($('#member-profile-avatar'),member.username,member.avatar_url,'private',member.avatar_color);
-    setText('member-profile-name',member.username||'Usuario');
-    setText('member-profile-username',`@${member.school_handle || 'usuario'}`);
+  function showMemberProfile(member, anchor) {
+    const pop = $('#member-profile-popover');
+    if (!pop || !member) return;
+    selectedMember = member;
+    avatarInto($('#member-profile-avatar'), member.username, member.avatar_url, 'private', member.avatar_color, member.user_id);
+    setText('member-profile-name', member.username || 'Usuario');
+    setText('member-profile-username', `@${member.school_handle || member.username || 'usuario'}`);
+    const role = $('#member-profile-role');
+    role?.classList.add('hidden');
+    role?.classList.remove('owner','admin');
+    if (member.is_owner) { role?.classList.remove('hidden'); role?.classList.add('owner'); setText('member-profile-role','Creador'); }
+    else if (member.is_admin) { role?.classList.remove('hidden'); role?.classList.add('admin'); setText('member-profile-role','Administrador'); }
     pop.classList.remove('hidden');
-    const r=anchor.getBoundingClientRect(); const width=246,height=220;
-    const left=Math.min(Math.max(10,r.left),window.innerWidth-width-10); const top=Math.min(r.bottom+10,window.innerHeight-height-10);
-    pop.style.left=`${left}px`; pop.style.top=`${Math.max(10,top)}px`;
+    const r = anchor.getBoundingClientRect();
+    const width = 280, height = 245;
+    let left = Math.min(r.right + 8, window.innerWidth - width - 10);
+    if (left < 10) left = 10;
+    let top = Math.min(r.top, window.innerHeight - height - 10);
+    if (top < 10) top = 10;
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
   }
-  function closeMemberProfile(){ $('#member-profile-popover')?.classList.add('hidden'); selectedMember=null; }
-  function openMemberMenu(member,x,y){
-    selectedMember=member; const menu=$('#member-menu'); if(!menu)return; const me=currentMembers.find(m=>String(m.user_id)===String(currentUser.id)); const creator=!!me?.is_owner, admin=!!me?.is_admin;
-    const canManage=creator||admin; const targetIsAdmin=!!member.is_admin||!!member.is_owner; $('#member-menu [data-member-menu="kick"]')?.classList.toggle('hidden',!canManage||member.is_owner||(!creator&&targetIsAdmin)); $('#member-menu [data-member-menu="grant"]')?.classList.toggle('hidden',!creator||member.is_owner||member.is_admin); $('#member-menu [data-member-menu="revoke"]')?.classList.toggle('hidden',!creator||!member.is_admin); menu.classList.remove('hidden'); menu.style.left=`${Math.min(x,window.innerWidth-205)}px`; menu.style.top=`${Math.min(y,window.innerHeight-150)}px`;
+
+  function closeMemberProfile() {
+    $('#member-profile-popover')?.classList.add('hidden');
+    selectedMember = null;
   }
-  function closeMemberMenu(){ $('#member-menu')?.classList.add('hidden'); selectedMember=null; }
-  async function memberAction(action){
-    const member=selectedMember; closeMemberMenu(); if(!member||!currentConversation)return;
-    let fn='',args={p_conversation_id:currentConversation,p_user_id:member.user_id}; if(action==='kick')fn='xifre_remove_group_member'; if(action==='grant')fn='xifre_grant_group_admin'; if(action==='revoke')fn='xifre_revoke_group_admin'; if(!fn)return;
-    const {error}=await supabase.rpc(fn,args); if(error)return toast(friendlyError(error),'error'); memberCache.delete(currentConversation); const r=await supabase.rpc('xifre_get_conversation_members',{p_conversation_id:currentConversation}); if(r.error)return toast(friendlyError(r.error),'error'); currentMembers=r.data||[]; memberCache.set(currentConversation,currentMembers); renderRightPane(); await openChatInfo(); await loadMessages(currentConversation, false); await loadConversations(); toast(action==='kick'?'Persona expulsada.':action==='grant'?'Administrador añadido.':'Administrador retirado.','success');
+
+  function openMemberMenu(member, x, y) {
+    selectedMember = member;
+    const menu = $('#member-menu');
+    if (!menu) return;
+    const me = currentMembers.find(m => String(m.user_id) === String(currentUser.id));
+    const creator = !!me?.is_owner;
+    const admin = !!me?.is_admin;
+    const canManage = creator || admin;
+    const targetIsAdmin = !!member.is_admin || !!member.is_owner;
+    $('#member-menu [data-member-menu="kick"]')?.classList.toggle('hidden', !canManage || member.is_owner || (!creator && targetIsAdmin));
+    $('#member-menu [data-member-menu="grant"]')?.classList.toggle('hidden', !creator || member.is_owner || member.is_admin);
+    $('#member-menu [data-member-menu="revoke"]')?.classList.toggle('hidden', !creator || !member.is_admin);
+    menu.classList.remove('hidden');
+    menu.style.left = `${Math.min(x, window.innerWidth - 205)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - 150)}px`;
+  }
+
+  function closeMemberMenu() { $('#member-menu')?.classList.add('hidden'); selectedMember = null; }
+
+  async function memberAction(action) {
+    const member = selectedMember;
+    closeMemberMenu();
+    if (!member || !currentConversation) return;
+    let fn = '';
+    const args = { p_conversation_id: currentConversation, p_user_id: member.user_id };
+    if (action === 'kick') fn = 'xifre_remove_group_member';
+    if (action === 'grant') fn = 'xifre_grant_group_admin';
+    if (action === 'revoke') fn = 'xifre_revoke_group_admin';
+    if (!fn) return;
+    const { error } = await supabase.rpc(fn, args);
+    if (error) return toast(friendlyError(error), 'error');
+    memberCache.delete(currentConversation);
+    const r = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: currentConversation });
+    if (r.error) return toast(friendlyError(r.error), 'error');
+    currentMembers = r.data || [];
+    memberCache.set(currentConversation, currentMembers);
+    renderRightPane();
+    await openChatInfo();
+    await loadMessages(currentConversation, false);
+    await loadConversations();
+    toast(action === 'kick' ? 'Persona expulsada.' : action === 'grant' ? 'Administrador añadido.' : 'Administrador retirado.', 'success');
   }
 
   /* ------------------------------------------------------------------------ */
@@ -1125,7 +1282,7 @@
     friendCache.forEach(friend => {
       const row = document.createElement('label');
       row.className = 'selection-item';
-      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || 'usuario')}</small></span>`;
+      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color, friend.id)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || friend.username)}</small></span>`;
       list.appendChild(row);
     });
     updateGroupSelectedCount();
@@ -1188,9 +1345,9 @@
     members.forEach(member => {
       const row = document.createElement('div');
       row.className = 'friend-item';
-      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>@${esc(member.school_handle || 'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
-      row.addEventListener('click',()=>showMemberProfile(member,row));
-      row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
+      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color, member.user_id)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>@${esc(member.school_handle || member.username || 'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
+      row.addEventListener('click', () => showMemberProfile(member, row));
+      row.addEventListener('contextmenu', e => { e.preventDefault(); closeMemberProfile(); openMemberMenu(member, e.clientX, e.clientY); });
       list.appendChild(row);
     });
   }
@@ -1204,7 +1361,7 @@
     candidates.forEach(friend => {
       const row = document.createElement('label');
       row.className = 'selection-item';
-      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || 'usuario')}</small></span>`;
+      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color, friend.id)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || friend.username)}</small></span>`;
       list.appendChild(row);
     });
     updateGroupAddCount();
@@ -1296,103 +1453,75 @@
   /* Avatar upload / profile settings                                         */
   /* ------------------------------------------------------------------------ */
   function fileExt(file) {
-    const map = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif' };
+    const map = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
     return map[file?.type] || 'png';
   }
 
   function validateImage(file) {
     if (!file) throw new Error('No se ha seleccionado ninguna imagen.');
     if (!/^image\/(png|jpeg|webp|gif)$/i.test(file.type)) throw new Error('Solo se permiten PNG, JPG, WEBP o GIF.');
-    if (file.size > 5*1024*1024) throw new Error('La imagen no puede superar 5 MB.');
+    if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB.');
   }
 
-  async function uploadAvatar(file,path) {
+  async function uploadAvatar(file, path) {
     validateImage(file);
-    const {error}=await supabase.storage.from('xifre-avatars').upload(path,file,{upsert:false,contentType:file.type,cacheControl:'31536000'});
-    if(error)throw error;
-    const result=supabase.storage.from('xifre-avatars').getPublicUrl(path);
-    if(result.error)throw result.error;
+    const { error } = await supabase.storage.from('xifre-avatars').upload(path, file, { upsert: false, contentType: file.type, cacheControl: '31536000' });
+    if (error) throw error;
+    const result = supabase.storage.from('xifre-avatars').getPublicUrl(path);
+    if (result.error) throw result.error;
     return `${result.data.publicUrl}?v=${Date.now()}`;
   }
 
-  function previewFile(file,target,name,kind,color='') {
-    try{validateImage(file);}catch(error){toast(error.message,'error');return;}
-    if(!target)return;
-    const previous=target.dataset.objectUrl; if(previous)URL.revokeObjectURL(previous);
-    const url=URL.createObjectURL(file); target.innerHTML=avatarHTML(name,url,kind,'',color || currentProfile?.avatar_color || randomAvatarColor()); target.dataset.objectUrl=url;
+  function previewFile(file, target, name, kind, color = '') {
+    try { validateImage(file); } catch (error) { toast(error.message, 'error'); return; }
+    const oldUrl = target?.dataset.objectUrl;
+    if (oldUrl) { try { URL.revokeObjectURL(oldUrl); } catch {} }
+    const url = URL.createObjectURL(file);
+    if (target) { target.innerHTML = avatarHTML(name, url, kind, '', color); target.dataset.objectUrl = url; }
   }
 
-  function clearPreviewObjectUrl(target){
-    if(!target)return; const url=target.dataset.objectUrl; if(url)URL.revokeObjectURL(url); delete target.dataset.objectUrl;
+  function openSettings() {
+    syncProfileUI();
+    applyTheme(currentTheme());
+    $('#settings-modal')?.classList.remove('hidden');
+    if (!pendingProfileAvatarFile) { avatarInto($('#settings-avatar-preview'), currentProfile?.username || 'Usuario', currentProfile?.avatar_url, 'private', currentProfile?.avatar_color); avatarInto($('#settings-preview-avatar'), currentProfile?.username || 'Usuario', currentProfile?.avatar_url, 'private', currentProfile?.avatar_color); }
   }
 
-  function validateChatImage(file){
-    if(!file)throw new Error('No se ha seleccionado ninguna imagen.');
-    if(!/^image\/(png|jpeg|webp|gif)$/i.test(file.type))throw new Error('Solo puedes adjuntar imágenes PNG, JPG, WEBP o GIF.');
-    if(file.size>10*1024*1024)throw new Error('Cada imagen puede pesar como máximo 10 MB.');
-  }
-
-  function clearChatImages(){
-    pendingChatImages.forEach(item=>{if(item?.previewUrl)URL.revokeObjectURL(item.previewUrl);}); pendingChatImages=[]; renderAttachmentPreview(); updateSendState();
-  }
-
-  function removeChatImage(index){
-    const item=pendingChatImages[index]; if(item?.previewUrl)URL.revokeObjectURL(item.previewUrl); pendingChatImages.splice(index,1); renderAttachmentPreview(); updateSendState();
-  }
-
-  function addChatImages(fileList){
-    if(!currentConversation)return;
-    const files=[...fileList||[]].filter(file=>String(file?.type||'').startsWith('image/'));
-    for(const file of files){
-      try{validateChatImage(file);}catch(error){toast(error.message,'error');continue;}
-      if(pendingChatImages.some(item=>item.file.name===file.name&&item.file.size===file.size&&item.file.lastModified===file.lastModified))continue;
-      if(pendingChatImages.length>=4){toast('Puedes adjuntar hasta 4 imágenes por mensaje.','error');break;}
-      pendingChatImages.push({file,previewUrl:URL.createObjectURL(file)});
+  async function saveProfileSettings() {
+    if (!currentUser) return;
+    const button = $('#save-profile-settings');
+    const username = normalizeUsername($('#settings-username').value);
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+    setLoading(button, true);
+    try {
+      let avatarUrl = null;
+      if (pendingProfileAvatarFile) {
+        const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;
+        avatarUrl = await uploadAvatar(pendingProfileAvatarFile, path);
+      }
+      const { data, error } = await supabase.rpc('xifre_update_profile', { p_username: username, p_display_name: username, p_avatar_url: avatarUrl });
+      if (error) throw error;
+      currentProfile = Array.isArray(data) ? data[0] : data;
+      const previewTargets = [$('#settings-avatar-preview'), $('#settings-preview-avatar')];
+      previewTargets.forEach(target => { const u = target?.dataset.objectUrl; if (u) { try { URL.revokeObjectURL(u); } catch {} } if (target) delete target.dataset.objectUrl; });
+      pendingProfileAvatarFile = null;
+      pendingProfileAvatarURL = null;
+      syncProfileUI();
+      memberCache.clear();
+      await loadFriends();
+      await loadConversations();
+      if (currentConversation) {
+        await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: currentConversation }).then(r => { if (!r.error) currentMembers = r.data || []; }).catch(() => {});
+        updateChatHeader();
+        renderRightPane();
+        await loadMessages(currentConversation, false);
+      }
+      setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
+    } catch (error) {
+      setModalMessage('profile-settings-message', friendlyError(error), 'error');
+    } finally {
+      setLoading(button, false);
     }
-    renderAttachmentPreview(); updateSendState();
-  }
-
-  function renderAttachmentPreview(){
-    const box=$('#attachment-preview'); if(!box)return; box.innerHTML='';
-    if(!pendingChatImages.length){box.classList.add('hidden');return;}
-    pendingChatImages.forEach((item,index)=>{
-      const card=document.createElement('div'); card.className='attachment-preview-item';
-      card.innerHTML=`<img src="${esc(item.previewUrl)}" alt="${esc(item.file.name)}"><div class="attachment-preview-copy"><strong>${esc(item.file.name)}</strong><small>${formatFileSize(item.file.size)}</small></div><button type="button" class="attachment-remove" aria-label="Quitar imagen">×</button>`;
-      card.querySelector('.attachment-remove').addEventListener('click',()=>removeChatImage(index)); box.appendChild(card);
-    });
-    box.classList.remove('hidden');
-  }
-
-  async function uploadChatImage(file){
-    validateChatImage(file);
-    const path=`${currentUser.id}/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${fileExt(file)}`;
-    const {error}=await supabase.storage.from('xifre-chat').upload(path,file,{upsert:false,contentType:file.type,cacheControl:'31536000'});
-    if(error)throw error;
-    const {data}=supabase.storage.from('xifre-chat').getPublicUrl(path);
-    if(!data?.publicUrl)throw new Error('No se pudo generar la URL de la imagen.');
-    return {path,url:`${data.publicUrl}?v=${Date.now()}`};
-  }
-
-  function openImageLightbox(url,name='Imagen'){const box=$('#image-lightbox'),img=$('#image-lightbox-img');if(!box||!img)return;img.src=url||'';img.alt=name;box.classList.remove('hidden');}
-  function closeImageLightbox(){const box=$('#image-lightbox'),img=$('#image-lightbox-img');box?.classList.add('hidden');if(img)img.src='';}
-
-  function openSettings(){syncProfileUI();applyTheme(currentTheme());$('#settings-modal')?.classList.remove('hidden');}
-
-  async function saveProfileSettings(){
-    if(!currentUser)return;
-    const button=$('#save-profile-settings'); const username=normalizeUsername($('#settings-username').value);
-    if(!/^[a-z0-9_]{3,20}$/.test(username))return setModalMessage('profile-settings-message','El username debe tener 3–20 caracteres y solo letras, números y _.','error');
-    setLoading(button,true);
-    try{
-      let avatarUrl=null;
-      if(pendingProfileAvatarFile){const path=`${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;avatarUrl=await uploadAvatar(pendingProfileAvatarFile,path);}
-      const {data,error}=await supabase.rpc('xifre_update_profile',{p_username:username,p_display_name:username,p_avatar_url:avatarUrl}); if(error)throw error;
-      currentProfile=Array.isArray(data)?data[0]:data; currentProfile.school_handle=schoolHandleForProfile(currentProfile);
-      pendingProfileAvatarFile=null; clearPreviewObjectUrl($('#settings-avatar-preview')); pendingProfileAvatarURL=null; syncProfileUI(); memberCache.clear();
-      await loadFriends(); await loadConversations(); if(currentConversation)await loadMessages(currentConversation,false);
-      setModalMessage('profile-settings-message','Cambios guardados.','success');
-    }catch(error){setModalMessage('profile-settings-message',friendlyError(error),'error');}
-    finally{setLoading(button,false);}
   }
 
   /* ------------------------------------------------------------------------ */
@@ -1428,6 +1557,8 @@
 
   function resetChatView() {
     stopChatRealtime();
+    lastMessagesSignature = '';
+    clearPendingChatImages();
     setText('chat-title', 'XIFRE');
     setText('chat-subtitle', 'Selecciona una conversación');
     avatarInto($('#chat-avatar'), 'XIFRE', null, 'private');
@@ -1435,7 +1566,7 @@
     $('#message-input').disabled = true;
     $('#message-input').value = '';
     $('#send-button').disabled = true;
-    clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden'); clearChatImages();
+    clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden');
     setTypingVisible(false);
     $('#messages').innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Bienvenido a XIFRE</h3><p>Selecciona un chat de la izquierda para empezar.</p></div>';
     $('.right-pane-empty')?.classList.remove('hidden');
@@ -1484,9 +1615,6 @@
         const type = action.dataset.action;
         if (type === 'open-settings') openSettings();
         else if (type === 'close-settings') $('#settings-modal')?.classList.add('hidden');
-        else if (type === 'close-member-profile') closeMemberProfile();
-        else if (type === 'close-image-lightbox') closeImageLightbox();
-        else if (type === 'open-chat-image') $('#chat-image-file')?.click();
         else if (type === 'logout') void logout();
         else if (type === 'open-friend') { openModal('people-modal'); showPeopleTab('add'); $('#friend-search').value=''; searchPeople(''); $('#friend-search').focus(); }
         else if (type === 'open-friends') { openModal('people-modal'); showPeopleTab('friends'); renderFriendsModal(); }
@@ -1499,9 +1627,10 @@
         else if (type === 'add-group-members') void addGroupMembers();
         else if (type === 'request-delete-group') void deleteGroup();
         else if (type === 'save-profile-settings') void saveProfileSettings();
-        else if (type === 'composer-placeholder') return;
+        else if (type === 'open-chat-image-picker') { $('#chat-image-file')?.click(); return; }
         else if (type === 'resend') void resendConfirmation();
         else if (type === 'close-modal') closeModal(action.dataset.modal);
+        else if (type === 'close-member-profile') closeMemberProfile();
       }
 
       const tab = event.target.closest('[data-settings-tab]');
@@ -1533,16 +1662,13 @@
     }, true);
 
     $('#friend-search')?.addEventListener('input', e => searchPeople(e.target.value));
-    $('#conversation-search-input')?.addEventListener('input', e => {
-      conversationFilter = String(e.target.value || '');
-      $('#conversation-search-clear')?.classList.toggle('hidden', !conversationFilter);
-      renderConversations(conversationFilter);
+    $('#settings-username')?.addEventListener('input', e => {
+      const value = normalizeUsername(e.target.value) || 'usuario';
+      setText('settings-preview-name', value);
+      setText('settings-preview-username', `@${schoolHandle()}`);
     });
-    $('#conversation-search-clear')?.addEventListener('click', () => {
-      const input=$('#conversation-search-input'); conversationFilter='';
-      if(input){input.value='';input.focus();}
-      $('#conversation-search-clear')?.classList.add('hidden'); renderConversations('');
-    });
+    $('#conversation-search-input')?.addEventListener('input', e => { const clear = $('#conversation-search-clear'); clear?.classList.toggle('hidden', !e.target.value); renderConversations(e.target.value); });
+    $('#conversation-search-clear')?.addEventListener('click', () => { const input = $('#conversation-search-input'); if (!input) return; input.value = ''; input.focus(); $('#conversation-search-clear')?.classList.add('hidden'); renderConversations(''); });
     document.addEventListener('click',event=>{const tab=event.target.closest('[data-people-tab]');if(tab)showPeopleTab(tab.dataset.peopleTab);});
     document.addEventListener('click',event=>{const a=event.target.closest('[data-member-menu]');if(a)void memberAction(a.dataset.memberMenu);});
     document.addEventListener('click',event=>{if(!event.target.closest('#member-menu'))closeMemberMenu();if(!event.target.closest('#member-profile-popover')&&!event.target.closest('.right-member')&&!event.target.closest('#info-members .friend-item'))closeMemberProfile();});
@@ -1555,7 +1681,8 @@
       if (!file) return;
       try { validateImage(file); } catch (error) { event.target.value = ''; toast(error.message, 'error'); return; }
       pendingProfileAvatarFile = file;
-      previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private', currentProfile?.avatar_color || randomAvatarColor());
+      previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private', currentProfile?.avatar_color);
+      previewFile(file, $('#settings-preview-avatar'), currentProfile?.username || 'Usuario', 'private', currentProfile?.avatar_color);
     });
 
     $('#group-avatar-file')?.addEventListener('change', event => {
@@ -1566,24 +1693,12 @@
       previewFile(file, $('#group-edit-avatar-preview'), currentConversationData?.name || 'Grupo', 'group');
     });
 
-    $('#chat-image-file')?.addEventListener('change', event => { addChatImages(event.target.files); event.target.value=''; });
-    $('#message-input')?.addEventListener('paste', event => {
-      const files=[...(event.clipboardData?.files||[])].filter(file=>String(file.type||'').startsWith('image/'));
-      const itemFiles=[...((event.clipboardData?.items)||[])].map(item=>item.kind==='file'?item.getAsFile():null).filter(file=>file&&String(file.type||'').startsWith('image/'));
-      const images=files.length?files:itemFiles;
-      if(images.length){event.preventDefault();addChatImages(images);}
-    });
-    const centerPane=$('#center-pane');
-    centerPane?.addEventListener('dragenter',event=>{if(![...(event.dataTransfer?.items||[])].some(item=>item.kind==='file'))return;event.preventDefault();dragDepth++;centerPane.classList.add('drag-over');});
-    centerPane?.addEventListener('dragover',event=>{if(![...(event.dataTransfer?.items||[])].some(item=>item.kind==='file'))return;event.preventDefault();});
-    centerPane?.addEventListener('dragleave',event=>{event.preventDefault();dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)centerPane.classList.remove('drag-over');});
-    centerPane?.addEventListener('drop',event=>{const files=[...(event.dataTransfer?.files||[])].filter(file=>String(file.type||'').startsWith('image/'));if(!files.length)return;event.preventDefault();dragDepth=0;centerPane.classList.remove('drag-over');addChatImages(files);});
-
     $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
     $('#message-input')?.addEventListener('input', () => {
       const value = String($('#message-input').value || '').trim();
       updateMentionPicker();
-      if (value) scheduleTyping(); else stopTypingBroadcast();
+      updateSendState();
+      if (value || pendingChatImages.length) scheduleTyping(); else stopTypingBroadcast();
     });
     $('#message-input')?.addEventListener('keydown', event => {
       const picker=$('#mention-picker');
@@ -1597,12 +1712,33 @@
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
     });
     $('#message-input')?.addEventListener('blur', () => stopTypingBroadcast());
+    $('#chat-image-file')?.addEventListener('change', event => {
+      addChatImages(event.target.files);
+      event.target.value = '';
+    });
+    $('#message-input')?.addEventListener('paste', event => {
+      const images = [];
+      for (const item of [...(event.clipboardData?.items || [])]) {
+        if (item.kind === 'file' && /^image\//i.test(item.type)) {
+          const file = item.getAsFile();
+          if (file) images.push(file);
+        }
+      }
+      if (images.length) { event.preventDefault(); addChatImages(images); }
+    });
+    $('.center-pane')?.addEventListener('dragenter', event => { event.preventDefault(); dragDepth += 1; if (event.dataTransfer?.types?.includes('Files')) $('#chat-drop-overlay')?.classList.remove('hidden'); });
+    $('.center-pane')?.addEventListener('dragover', event => { event.preventDefault(); if (event.dataTransfer?.types?.includes('Files')) event.dataTransfer.dropEffect = 'copy'; });
+    $('.center-pane')?.addEventListener('dragleave', event => { event.preventDefault(); dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $('#chat-drop-overlay')?.classList.add('hidden'); });
+    $('.center-pane')?.addEventListener('drop', event => { event.preventDefault(); dragDepth = 0; $('#chat-drop-overlay')?.classList.add('hidden'); addChatImages(event.dataTransfer?.files); });
+    $('#image-lightbox-close')?.addEventListener('click', closeImageLightbox);
+    $('#image-lightbox')?.addEventListener('click', event => { if (event.target.id === 'image-lightbox') closeImageLightbox(); });
     $('#messages')?.addEventListener('scroll',()=>{const box=$('#messages');if(!currentConversation||!box)return;if(box.scrollHeight-box.scrollTop-box.clientHeight<12){const c=conversationCache.find(x=>String(x.id)===String(currentConversation));if(c&&(Number(c.unread_count)||c.has_mention)){void supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation}).then(()=>{c.unread_count=0;c.has_mention=false;renderConversations();});}}});
 
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         if (!$('#image-lightbox').classList.contains('hidden')) return closeImageLightbox();
         if (!$('#member-profile-popover').classList.contains('hidden')) return closeMemberProfile();
+        if (!$('#member-menu').classList.contains('hidden')) return closeMemberMenu();
         if (!$('#message-menu').classList.contains('hidden')) return closeMessageMenu();
         if (!$('#confirm-modal').classList.contains('hidden')) return finishConfirm(false);
         if (!$('#settings-modal').classList.contains('hidden')) return $('#settings-modal').classList.add('hidden');
@@ -1612,12 +1748,8 @@
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && currentUser) {
-        void loadConversations().then(async () => {
-          if (currentConversation) {
-            currentConversationData = conversationCache.find(c => String(c.id) === String(currentConversation)) || currentConversationData;
-            await loadMessages(currentConversation, false).catch(() => {});
-            updateChatHeader(); renderRightPane(); return;
-          }
+        void loadConversations().then(() => {
+          if (currentConversation) return loadMessages(currentConversation, false);
           return restoreConversation();
         }).catch(() => {});
       }
