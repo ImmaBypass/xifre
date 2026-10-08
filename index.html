@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-v12">
+<link rel="stylesheet" href="style.css?v=20261008-v14r">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -67,7 +67,7 @@
           <div class="nav-actions">
             <div class="conversation-search-box">
               <span class="conversation-search-icon">⌕</span>
-              <input id="conversation-search-input" type="text" autocomplete="off" maxlength="40" placeholder="Buscar">
+              <input id="conversation-search-input" type="text" autocomplete="off" placeholder="Buscar" aria-label="Buscar conversaciones">
               <button id="conversation-search-clear" class="conversation-search-clear hidden" type="button" aria-label="Borrar búsqueda">×</button>
             </div>
             <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
@@ -92,7 +92,7 @@
       </aside>
 
       <!-- CENTER: chat -->
-      <section id="center-pane" class="center-pane">
+      <section class="center-pane">
         <header class="chat-topbar">
           <div class="chat-topbar-left">
             <span id="chat-avatar" class="chat-header-avatar">X</span>
@@ -120,17 +120,17 @@
           <span id="typing-text">Alguien está escribiendo...</span>
         </div>
 
+        <div id="chat-drop-overlay" class="chat-drop-overlay hidden"><div>Soltar imagen aquí</div></div>
         <form id="message-form" class="composer-area">
+          <div id="attachment-preview" class="attachment-preview hidden"></div>
           <div id="reply-bar" class="reply-bar hidden">
             <div class="reply-bar-accent"></div>
             <div class="reply-bar-copy"><span class="reply-label">RESPONDIENDO A</span><strong id="replying-name">Usuario</strong><span id="replying-content"></span></div>
             <button id="cancel-reply" class="reply-close" type="button" aria-label="Cancelar respuesta">×</button>
           </div>
-          <div id="attachment-preview" class="attachment-preview hidden"></div>
           <div class="composer-box">
-            <button class="composer-plus" type="button" data-action="open-chat-image" aria-label="Añadir imagen">＋</button>
+            <button id="composer-plus" class="composer-plus" type="button" data-action="open-chat-image-picker" aria-label="Añadir imagen">＋</button><input id="chat-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
             <input id="message-input" type="text" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled>
-            <input id="chat-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
             <button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
           </div>
         </form>
@@ -145,7 +145,7 @@
         <div id="right-dm-content" class="right-profile hidden">
           <div class="right-cover"></div>
           <div class="right-profile-avatar-wrap"><span id="right-profile-avatar" class="right-profile-avatar">X</span></div>
-          <div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3><span id="right-profile-username" class="right-profile-username">@usuario</span></div>
+          <div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3><p id="right-profile-handle">@usuario</p></div>
         </div>
         <div id="right-group-content" class="right-group hidden">
           <div class="right-group-head"><span id="right-group-avatar" class="right-group-avatar">#</span><div><h3 id="right-group-name">Grupo</h3><p id="right-group-count">0 miembros</p></div></div>
@@ -212,12 +212,13 @@
 
   <!-- MEMBER MINI PROFILE -->
   <div id="member-profile-popover" class="member-profile-popover hidden">
+    <button class="popover-close" type="button" data-action="close-member-profile" aria-label="Cerrar">×</button>
     <div class="member-profile-banner"></div>
-    <button class="popover-close" type="button" data-action="close-member-profile" aria-label="Cerrar perfil">×</button>
     <div class="member-profile-avatar-wrap"><div id="member-profile-avatar" class="member-profile-avatar">X</div></div>
     <div class="member-profile-copy">
       <strong id="member-profile-name">Usuario</strong>
       <small id="member-profile-username">@usuario</small>
+      <span id="member-profile-role" class="member-profile-role hidden"></span>
     </div>
   </div>
 
@@ -241,9 +242,9 @@
         <div id="friend-requests-list" class="friends-list"></div>
       </section>
       <section id="people-add-panel" class="people-panel">
-        <h2>Añadir amigo</h2><p>Busca por el username personalizado o por tu @usuario escolar.</p>
+        <h2>Añadir amigo</h2><p>Busca a alguien por su username o @nombre.</p>
         <label class="modal-label" for="friend-search">Username</label>
-        <input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="64" autocomplete="off" placeholder="Username o @usuario...">
+        <input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Username o @nombre...">
         <div id="friend-search-results" class="search-results"></div>
         <div id="friend-message" class="modal-message"></div>
       </section>
@@ -289,7 +290,9 @@
             <span id="settings-avatar-preview" class="settings-avatar-preview">X</span>
             <label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
           </div>
-          <div class="settings-user-readout"><strong id="settings-preview-username">usuario</strong><small id="settings-preview-school-handle">@usuario</small><span>Tu username personalizado es el que usarán para mencionarte y localizarte. También pueden encontrarte por tu @usuario escolar.</span></div>
+          <div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong></div>
+          <div class="settings-preview-label">Vista previa</div>
+          <div class="settings-profile-preview-card"><div id="settings-preview-avatar" class="settings-profile-preview-avatar">X</div><div><strong id="settings-preview-name">Usuario</strong><small id="settings-preview-handle">@usuario</small></div></div>
           <div class="settings-field-block">
             <label for="settings-username">Username</label>
             <input id="settings-username" class="settings-field-input" type="text" maxlength="20" placeholder="username">
@@ -311,14 +314,13 @@
       </section>
     </div>
   </div>
-
-  <div id="image-lightbox" class="image-lightbox hidden">
-    <button class="image-lightbox-close" type="button" data-action="close-image-lightbox" aria-label="Cerrar imagen">×</button>
-    <img id="image-lightbox-img" src="" alt="Imagen ampliada">
-  </div>
+<div id="image-lightbox" class="image-lightbox hidden">
+  <button id="image-lightbox-close" class="image-lightbox-close" type="button" aria-label="Cerrar">×</button>
+  <img id="image-lightbox-image" src="" alt="">
+</div>
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261008-v13"></script>
+<script src="app.js?v=20261008-v14r"></script>
 </body>
 </html>
