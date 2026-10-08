@@ -2644,470 +2644,389 @@ body {
 }
 
 /* =========================================================
-   EXTRA HIGH-QUALITY UI MOTION
+   XIFRE UI POLISH — SOLICITUDES / SIDEBAR / CHAT
    ========================================================= */
 
-.primary-button,
-.auth-button,
 .sidebar-button,
+.conversation,
 .send-button,
-.text-button,
-.back-button,
-.modal-close,
-.logout-button {
-    -webkit-tap-highlight-color: transparent;
-    will-change: transform, box-shadow, background-color;
-}
-
-.primary-button {
-    transition:
-        transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-        box-shadow 0.28s ease,
-        background-color 0.28s ease;
-}
-
-.primary-button:hover {
-    transform: translateY(-4px) scale(1.025);
-    box-shadow:
-        0 18px 45px rgba(10, 4, 55, 0.28),
-        0 0 0 1px rgba(255,255,255,0.22);
-}
-
-.primary-button:active {
-    transform: translateY(-1px) scale(0.975);
-    transition-duration: 0.08s;
-}
-
-.primary-button:focus-visible,
-.auth-button:focus-visible,
-.text-button:focus-visible,
-.back-button:focus-visible,
-.sidebar-button:focus-visible,
-.send-button:focus-visible {
-    outline: 2px solid rgba(255,255,255,0.9);
-    outline-offset: 4px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-        scroll-behavior: auto !important;
-    }
-}
-
-/* =========================================================
-   XIFRE FINAL NAVIGATION / MOTION PATCH
-   ========================================================= */
-
-.screen.screen-entering .auth-container,
-.screen.screen-entering .landing-content {
-    animation: xifreScreenContentIn .62s cubic-bezier(.16,1,.3,1) both;
-}
-
-.screen.screen-entering .auth-logo,
-.screen.screen-entering .xifre-logo {
-    animation: xifreLogoIn .72s cubic-bezier(.16,1,.3,1) both;
-}
-
-.screen.screen-entering .auth-card {
-    animation: xifreCardIn .68s .06s cubic-bezier(.16,1,.3,1) both;
-}
-
-.main-screen.main-entering .sidebar,
-.main-screen.main-entering .chat-area {
-    animation: xifreScreenContentIn .68s cubic-bezier(.16,1,.3,1) both;
-}
-
-.primary-button,
-.auth-button,
-.secondary-button,
-.text-button,
-.back-button,
-.sidebar-button,
+.request-action,
 .logout-button,
-.send-button,
-.modal-close,
-.conversation {
-    -webkit-tap-highlight-color: transparent;
+.modal-close {
+  -webkit-tap-highlight-color: transparent;
 }
 
-.primary-button:focus-visible,
-.auth-button:focus-visible,
-.secondary-button:focus-visible,
-.text-button:focus-visible,
-.back-button:focus-visible,
-.sidebar-button:focus-visible,
-.logout-button:focus-visible,
-.send-button:focus-visible,
-.modal-close:focus-visible,
-.conversation:focus-visible,
-input:focus-visible {
-    outline: 2px solid rgba(255,255,255,.92);
-    outline-offset: 3px;
+.sidebar-button {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.055);
+  background: linear-gradient(135deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+  transition: transform .22s cubic-bezier(.2,.8,.2,1),
+              background .22s ease,
+              border-color .22s ease,
+              box-shadow .22s ease;
 }
 
-.secondary-button {
-    position: relative;
-    display: block;
-    width: 100%;
-    min-height: 42px;
-    margin-top: 10px;
-    border: 1px solid rgba(255,255,255,.15);
-    border-radius: 999px;
-    background: rgba(255,255,255,.07);
-    color: rgba(255,255,255,.86);
-    cursor: pointer;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    transition: transform .25s cubic-bezier(.16,1,.3,1), background .25s ease, border-color .25s ease, box-shadow .25s ease;
+.sidebar-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255,255,255,.08) 50%, transparent 75%);
+  transform: translateX(-120%);
+  transition: transform .55s ease;
+  pointer-events: none;
 }
 
-.secondary-button:hover {
-    transform: translateY(-2px);
-    background: rgba(255,255,255,.13);
-    border-color: rgba(255,255,255,.25);
-    box-shadow: 0 10px 30px rgba(0,0,0,.13);
+.sidebar-button:hover {
+  transform: translateY(-2px);
+  border-color: rgba(180,165,255,.2);
+  background: linear-gradient(135deg, rgba(111,92,255,.15), rgba(255,255,255,.045));
+  box-shadow: 0 10px 25px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.055);
 }
 
-.secondary-button:active {
-    transform: scale(.975);
+.sidebar-button:hover::after {
+  transform: translateX(120%);
 }
 
-.auth-button,
-.primary-button,
-.secondary-button,
-.sidebar-button,
-.logout-button,
-.send-button,
-.modal-close,
-.conversation {
-    will-change: transform;
+.sidebar-button:active {
+  transform: translateY(0) scale(.985);
 }
-
-.auth-button.loading,
-.primary-button:disabled,
-.secondary-button:disabled {
-    cursor: wait;
-}
-
-.auth-button.loading .button-loader {
-    display: block;
-}
-
-#toast-container {
-    position: fixed;
-    z-index: 9999;
-    right: 20px;
-    bottom: 20px;
-    width: min(360px, calc(100vw - 40px));
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-    pointer-events: none;
-}
-
-.toast {
-    padding: 13px 16px;
-    border: 1px solid rgba(255,255,255,.13);
-    border-radius: 14px;
-    background: rgba(17,13,55,.78);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    box-shadow: 0 15px 45px rgba(0,0,0,.25);
-    color: rgba(255,255,255,.9);
-    font-size: 13px;
-    line-height: 1.4;
-    opacity: 0;
-    transform: translateY(12px) scale(.97);
-    transition: opacity .3s ease, transform .42s cubic-bezier(.16,1,.3,1);
-}
-
-.toast.show {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-}
-
-.toast-success { border-color: rgba(145,239,187,.25); }
-.toast-error { border-color: rgba(255,119,119,.3); }
-
-.empty-sidebar {
-    padding: 12px;
-    color: rgba(255,255,255,.3);
-    font-size: 11px;
-    text-align: center;
-}
-
-.friend-item {
-    width: 100%;
-    border: 0;
-    text-align: left;
-}
-
-@keyframes xifreScreenContentIn {
-    from {
-        opacity: 0;
-        transform: translateY(18px) scale(.985);
-        filter: blur(7px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-        filter: blur(0);
-    }
-}
-
-@keyframes xifreLogoIn {
-    from {
-        opacity: 0;
-        transform: translateY(24px) scale(.92);
-        filter: blur(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-        filter: blur(0);
-    }
-}
-
-@keyframes xifreCardIn {
-    from {
-        opacity: 0;
-        transform: translateY(24px) scale(.96);
-        filter: blur(8px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-        filter: blur(0);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .screen,
-    .screen.screen-entering .auth-container,
-    .screen.screen-entering .landing-content,
-    .screen.screen-entering .auth-logo,
-    .screen.screen-entering .xifre-logo,
-    .screen.screen-entering .auth-card,
-    .main-screen.main-entering .sidebar,
-    .main-screen.main-entering .chat-area,
-    .toast {
-        animation: none !important;
-        transition: opacity .15s ease !important;
-        filter: none !important;
-        transform: none !important;
-    }
-}
-
-
-/* =========================================================
-   FRIEND REQUESTS
-   ========================================================= */
 
 .requests-button {
-    position: relative;
+  justify-content: flex-start;
 }
 
 .requests-badge {
-    min-width: 20px;
-    height: 20px;
-    padding: 0 6px;
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.92);
-    color: #25169c;
-    font-size: 11px;
-    font-weight: 800;
-    line-height: 1;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12);
-    transition: transform 0.25s ease, opacity 0.25s ease;
-}
-
-.requests-badge.hidden {
-    display: none;
-}
-
-.requests-card {
-    width: min(560px, calc(100vw - 40px));
-}
-
-.friend-requests-list {
-    margin-top: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-height: min(58vh, 560px);
-    overflow-y: auto;
-    padding-right: 3px;
+  margin-left: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8d7cff, #6957ff);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(105,87,255,.38);
+  animation: badgePop .28s cubic-bezier(.2,.9,.3,1.3);
 }
 
 .friend-request-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    padding: 13px;
-    border: 1px solid rgba(255, 255, 255, 0.11);
-    border-radius: 15px;
-    background: rgba(255, 255, 255, 0.055);
-    transition:
-        transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-        background 0.25s ease,
-        border-color 0.25s ease;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 17px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.065), rgba(255,255,255,.025));
+  box-shadow: 0 10px 30px rgba(0,0,0,.13), inset 0 1px 0 rgba(255,255,255,.035);
+  transition: transform .22s ease, border-color .22s ease, background .22s ease;
+  animation: requestIn .32s both;
 }
 
 .friend-request-item:hover {
-    transform: translateY(-2px);
-    background: rgba(255, 255, 255, 0.085);
-    border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+  border-color: rgba(161,145,255,.2);
+  background:
+    linear-gradient(135deg, rgba(120,100,255,.105), rgba(255,255,255,.035));
 }
 
 .friend-request-user {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .friend-request-avatar {
-    width: 42px;
-    height: 42px;
-    flex: 0 0 42px;
-    display: grid;
-    place-items: center;
-    border-radius: 13px;
-    background: linear-gradient(145deg, rgba(255,255,255,.25), rgba(255,255,255,.08));
-    border: 1px solid rgba(255,255,255,.14);
-    font-weight: 800;
+  width: 43px;
+  height: 43px;
+  flex: 0 0 43px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 800;
+  font-size: 16px;
+  background: linear-gradient(135deg, #7565ff, #a08fff);
+  box-shadow: 0 7px 20px rgba(100,80,255,.28);
 }
 
 .friend-request-info {
-    min-width: 0;
-}
-
-.friend-request-name,
-.friend-request-username {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  min-width: 0;
 }
 
 .friend-request-name {
-    font-size: 14px;
-    font-weight: 700;
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .friend-request-username {
-    margin-top: 3px;
-    font-size: 12px;
-    color: rgba(255,255,255,.48);
+  margin-top: 3px;
+  color: rgba(221,216,255,.55);
+  font-size: 12px;
 }
 
 .friend-request-actions {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .request-action {
-    height: 35px;
-    padding: 0 12px;
-    border: 1px solid rgba(255,255,255,.13);
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 700;
-    transition:
-        transform .2s ease,
-        background .2s ease,
-        border-color .2s ease,
-        opacity .2s ease;
+  border: 0;
+  border-radius: 11px;
+  padding: 9px 13px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform .18s ease, filter .18s ease, box-shadow .18s ease, opacity .18s ease;
 }
 
 .request-action:hover {
-    transform: translateY(-2px);
+  transform: translateY(-1px);
+  filter: brightness(1.08);
 }
 
 .request-action:active {
-    transform: scale(.96);
+  transform: scale(.96);
+}
+
+.request-action:disabled {
+  cursor: wait;
+  opacity: .62;
+  transform: none;
 }
 
 .request-accept {
-    background: rgba(255,255,255,.94);
-    color: #171717;
-}
-
-.request-accept:hover {
-    background: #fff;
+  background: linear-gradient(135deg, #6557e9, #8879ff);
+  box-shadow: 0 7px 18px rgba(100,85,235,.28);
 }
 
 .request-reject {
-    background: rgba(255,255,255,.06);
-    color: rgba(255,255,255,.82);
+  background: rgba(255,255,255,.065);
+  color: rgba(255,255,255,.82);
+  border: 1px solid rgba(255,255,255,.07);
 }
 
 .request-reject:hover {
-    background: rgba(255,255,255,.11);
-    border-color: rgba(255,255,255,.25);
+  background: rgba(255,255,255,.105);
 }
 
-.request-action.loading {
-    pointer-events: none;
-    opacity: .55;
+.requests-card {
+  width: min(590px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  overflow: auto;
+}
+
+.requests-card > h2 {
+  margin-bottom: 6px;
+}
+
+.requests-card > p {
+  color: rgba(255,255,255,.53);
+  line-height: 1.5;
+}
+
+.friend-requests-list {
+  margin-top: 20px;
 }
 
 .requests-empty {
-    min-height: 180px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 7px;
-    color: rgba(255,255,255,.56);
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 28px;
+  border: 1px dashed rgba(255,255,255,.1);
+  border-radius: 18px;
+  background: rgba(255,255,255,.025);
+  color: rgba(255,255,255,.55);
 }
 
 .requests-empty strong {
-    color: rgba(255,255,255,.88);
-    font-size: 14px;
+  color: rgba(255,255,255,.9);
+  font-size: 14px;
 }
 
 .requests-empty span {
-    max-width: 310px;
-    font-size: 12px;
-    line-height: 1.5;
+  max-width: 310px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .requests-empty-icon {
-    width: 45px;
-    height: 45px;
-    margin-bottom: 5px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    background: rgba(255,255,255,.09);
-    border: 1px solid rgba(255,255,255,.12);
-    font-size: 18px;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 5px;
+  border-radius: 14px;
+  color: #a99dff;
+  background: rgba(122,105,255,.11);
+  border: 1px solid rgba(153,138,255,.13);
+  font-weight: 800;
 }
 
-@media (max-width: 650px) {
-    .friend-request-item {
-        align-items: flex-start;
-        flex-direction: column;
-    }
+.conversation {
+  transition: transform .2s ease, background .2s ease, border-color .2s ease;
+}
 
-    .friend-request-actions {
-        width: 100%;
-    }
+.conversation:hover {
+  transform: translateX(3px);
+}
 
-    .request-action {
-        flex: 1;
-    }
+.send-button {
+  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease, filter .2s ease;
+}
+
+.send-button:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+}
+
+.send-button:active {
+  transform: translateY(0) scale(.94);
+}
+
+@keyframes requestIn {
+  from { opacity: 0; transform: translateY(7px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes badgePop {
+  from { opacity: 0; transform: scale(.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 560px) {
+  .friend-request-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .friend-request-actions {
+    width: 100%;
+  }
+
+  .request-action {
+    flex: 1;
+  }
+}
+
+
+/* =========================================================
+   XIFRE V4 — SOLICITUDES POLISH
+   ========================================================= */
+.requests-button {
+  min-width: 0;
+  position: relative;
+}
+
+.requests-button .sidebar-button-icon {
+  width: 20px;
+  display: inline-grid;
+  place-items: center;
+  color: rgba(219,212,255,.82);
+}
+
+.requests-button .sidebar-button-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.requests-button:focus-visible,
+.request-action:focus-visible,
+.modal-close:focus-visible,
+.send-button:focus-visible {
+  outline: 2px solid rgba(174,160,255,.85);
+  outline-offset: 2px;
+}
+
+.requests-card {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(122,101,255,.15), transparent 38%),
+    linear-gradient(145deg, rgba(27,20,91,.97), rgba(12,11,47,.96));
+  backdrop-filter: blur(22px) saturate(130%);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  border-color: rgba(192,181,255,.14);
+  box-shadow:
+    0 30px 100px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 0 0 1px rgba(123,104,255,.04);
+}
+
+.requests-card .modal-close {
+  transition: transform .22s ease, background .22s ease, color .22s ease;
+}
+
+.requests-card .modal-close:hover {
+  transform: rotate(6deg) scale(1.05);
+  background: rgba(255,255,255,.09);
+}
+
+.friend-request-item {
+  will-change: transform, opacity;
+}
+
+.friend-request-item.request-accepted {
+  pointer-events: none;
+  animation: requestAccepted .32s ease forwards;
+}
+
+.request-user-success {
+  animation: requestUserSuccess .3s ease;
+}
+
+.request-accept {
+  min-width: 90px;
+}
+
+.request-action.loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.request-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+.requests-empty {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(117,101,255,.10), transparent 45%),
+    rgba(255,255,255,.025);
+}
+
+@keyframes requestAccepted {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-4px) scale(.985); }
+}
+
+@keyframes requestUserSuccess {
+  50% { transform: translateX(3px); }
+  100% { transform: translateX(0); }
 }
