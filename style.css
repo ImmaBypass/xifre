@@ -2901,3 +2901,213 @@ input:focus-visible {
         transform: none !important;
     }
 }
+
+
+/* =========================================================
+   FRIEND REQUESTS
+   ========================================================= */
+
+.requests-button {
+    position: relative;
+}
+
+.requests-badge {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    color: #25169c;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12);
+    transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.requests-badge.hidden {
+    display: none;
+}
+
+.requests-card {
+    width: min(560px, calc(100vw - 40px));
+}
+
+.friend-requests-list {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: min(58vh, 560px);
+    overflow-y: auto;
+    padding-right: 3px;
+}
+
+.friend-request-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.055);
+    transition:
+        transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+        background 0.25s ease,
+        border-color 0.25s ease;
+}
+
+.friend-request-item:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.085);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.friend-request-user {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.friend-request-avatar {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 13px;
+    background: linear-gradient(145deg, rgba(255,255,255,.25), rgba(255,255,255,.08));
+    border: 1px solid rgba(255,255,255,.14);
+    font-weight: 800;
+}
+
+.friend-request-info {
+    min-width: 0;
+}
+
+.friend-request-name,
+.friend-request-username {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.friend-request-name {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.friend-request-username {
+    margin-top: 3px;
+    font-size: 12px;
+    color: rgba(255,255,255,.48);
+}
+
+.friend-request-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+}
+
+.request-action {
+    height: 35px;
+    padding: 0 12px;
+    border: 1px solid rgba(255,255,255,.13);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    transition:
+        transform .2s ease,
+        background .2s ease,
+        border-color .2s ease,
+        opacity .2s ease;
+}
+
+.request-action:hover {
+    transform: translateY(-2px);
+}
+
+.request-action:active {
+    transform: scale(.96);
+}
+
+.request-accept {
+    background: rgba(255,255,255,.94);
+    color: #171717;
+}
+
+.request-accept:hover {
+    background: #fff;
+}
+
+.request-reject {
+    background: rgba(255,255,255,.06);
+    color: rgba(255,255,255,.82);
+}
+
+.request-reject:hover {
+    background: rgba(255,255,255,.11);
+    border-color: rgba(255,255,255,.25);
+}
+
+.request-action.loading {
+    pointer-events: none;
+    opacity: .55;
+}
+
+.requests-empty {
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 7px;
+    color: rgba(255,255,255,.56);
+}
+
+.requests-empty strong {
+    color: rgba(255,255,255,.88);
+    font-size: 14px;
+}
+
+.requests-empty span {
+    max-width: 310px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.requests-empty-icon {
+    width: 45px;
+    height: 45px;
+    margin-bottom: 5px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: rgba(255,255,255,.09);
+    border: 1px solid rgba(255,255,255,.12);
+    font-size: 18px;
+}
+
+@media (max-width: 650px) {
+    .friend-request-item {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .friend-request-actions {
+        width: 100%;
+    }
+
+    .request-action {
+        flex: 1;
+    }
+}
