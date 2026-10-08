@@ -24,6 +24,10 @@ let conversationCache = [];
 let friendCache = [];
 let memberCache = new Map();
 let lastRenderedMessageId = null;
+let replyingTo = null;
+let peopleSearchTimer = null;
+let peopleSearchSeq = 0;
+let authActionInFlight = false;
 
 const screens = ['landing', 'login', 'register', 'email'];
 
@@ -99,11 +103,21 @@ function toast(text, type = 'info') {
 
 function friendlyAuthError(error) {
   const message = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toLowerCase();
+  const status = Number(error?.status || 0);
   if (message.includes('email not confirmed')) return 'Primero tienes que confirmar tu correo electrónico.';
   if (message.includes('invalid login credentials')) return 'El correo o la contraseña no son correctos.';
   if (message.includes('user already registered')) return 'Ese correo ya está registrado.';
   if (message.includes('password should be at least')) return 'La contraseña es demasiado corta.';
-  if (message.includes('rate limit')) return 'Demasiados intentos. Espera un poco y vuelve a intentarlo.';
+  if (
+    code === 'over_request_rate_limit' ||
+    code === 'over_email_send_rate_limit' ||
+    status === 429 ||
+    message.includes('too many requests') ||
+    message.includes('rate limit')
+  ) {
+    return 'Supabase ha bloqueado temporalmente esta IP/cuenta por demasiadas peticiones. Xifre evita ahora las peticiones duplicadas; espera a que termine el límite y vuelve a intentarlo.';
+  }
   return error?.message || 'Ha ocurrido un error.';
 }
 
@@ -134,6 +148,7 @@ async function checkUsername(username) {
 }
 
 async function register() {
+  if (authActionInFlight) return;
   const button = $('#register-button');
   const username = normalizeUsername($('#register-username')?.value);
   const email = String($('#register-email')?.value || '').trim();
@@ -145,6 +160,7 @@ async function register() {
   if (!email) return setMessage('register-message', 'Escribe tu correo.', 'error');
   if (password.length < 6) return setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
 
+  authActionInFlight = true;
   setLoading(button, true);
   try {
     if (!(await checkUsername(username))) {
@@ -174,10 +190,13 @@ async function register() {
     setMessage('register-message', friendlyAuthError(error), 'error');
   } finally {
     setLoading(button, false);
+    authActionInFlight = false;
   }
 }
 
 async function login() {
+  if (authActionInFlight) return;
+
   const button = $('#login-button');
   const email = String($('#login-email')?.value || '').trim();
   const password = String($('#login-password')?.value || '');
@@ -186,6 +205,7 @@ async function login() {
   if (!supabase) return setMessage('login-message', 'Supabase no se ha cargado.', 'error');
   if (!email || !password) return setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
 
+  authActionInFlight = true;
   setLoading(button, true);
   try {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -205,6 +225,7 @@ async function login() {
     }
   } finally {
     setLoading(button, false);
+    authActionInFlight = false;
   }
 }
 
@@ -411,8 +432,7 @@ async function loadFriends() {
   if (!ids.length) {
     friendCache = [];
     renderFriendsModal();
-    renderNewChatFriends();
-    renderGroupFriends();
+      renderGroupFriends();
     return;
   }
 
@@ -428,7 +448,6 @@ async function loadFriends() {
 
   friendCache = profiles.data || [];
   renderFriendsModal();
-  renderNewChatFriends();
   renderGroupFriends();
 }
 
@@ -463,71 +482,143 @@ function renderFriendsModal() {
   });
 }
 
-function renderNewChatFriends() {
-  const list = $('#new-chat-friends');
+async function sendFriendRequest(targetId = null) {
+  if (!currentUser) return;
+
+  const input = $('#friend-search');
+  const typed = normalizeUsername(input?.value);
+  const target = targetId || typed;
+
+  if (!target) {
+    return setModalMessage('friend-message', 'Escribe un username para buscarlo.', 'error');
+  }
+
+  try {
+    let userId = target;
+    if (!/^[0-9a-f-]{36}$/i.test(target)) {
+      const lookup = await supabase.rpc('xifre_search_people', { p_query: target });
+      if (lookup.error) throw lookup.error;
+      const exact = (lookup.data || []).find(person => normalizeUsername(person.username) === target);
+      if (!exact) return setModalMessage('friend-message', 'No existe ese username.', 'error');
+      userId = exact.id;
+    }
+
+    const response = await supabase.rpc('xifre_send_friend_request', {
+      p_target_user: userId
+    });
+    if (response.error) throw response.error;
+
+    if (input) input.value = '';
+    setModalMessage('friend-message', 'Solicitud enviada.', 'success');
+    renderPeopleResults([], false);
+  } catch (error) {
+    console.error('FRIEND REQUEST', error);
+    setModalMessage('friend-message', friendlyDataError(error), 'error');
+  }
+}
+
+function friendlyDataError(error) {
+  const message = String(error?.message || '').trim();
+  if (/already friends/i.test(message)) return 'Ya sois amigos.';
+  if (/not found|no existe/i.test(message)) return 'No existe ese username.';
+  return message || 'No se pudo completar la operación.';
+}
+
+async function searchPeople(query) {
+  const list = $('#friend-search-results');
   if (!list) return;
-  const search = normalizeUsername($('#friend-search')?.value);
-  list.innerHTML = '';
 
-  const friends = friendCache.filter(friend => {
-    if (!search) return true;
-    return normalizeUsername(friend.username).includes(search) || normalizeUsername(friend.display_name).includes(search);
-  });
+  const clean = normalizeUsername(query);
+  if (peopleSearchTimer) clearTimeout(peopleSearchTimer);
 
-  if (!friends.length) {
-    list.innerHTML = '<div class="requests-empty compact-empty"><strong>No hay resultados</strong><span>Si aún no sois amigos, usa el formulario de username de abajo.</span></div>';
+  if (!clean) {
+    renderPeopleResults(friendCache.map(friend => ({ ...friend, relationship: 'friend' })), true);
     return;
   }
 
-  friends.forEach(friend => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'new-chat-friend';
-    const name = friend.display_name || friend.username || 'Usuario';
-    row.innerHTML = `
-      ${avatarMarkup(name, friend.avatar_url, 'small-avatar')}
-      <span class="new-chat-friend-copy"><strong>${escapeHTML(name)}</strong><small>@${escapeHTML(friend.username || 'usuario')}</small></span>
-      <span class="new-chat-arrow">→</span>`;
-    row.addEventListener('click', () => {
-      closeModal('friend-modal');
-      openPrivateChat(friend.id);
-    });
-    list.appendChild(row);
-  });
+  if (clean.length < 2) {
+    list.innerHTML = '<div class="requests-empty compact-empty"><strong>Escribe al menos 2 caracteres</strong><span>Busca un username para encontrar a esa persona.</span></div>';
+    return;
+  }
+
+  const seq = ++peopleSearchSeq;
+  list.innerHTML = '<div class="people-search-loading">Buscando personas…</div>';
+
+  peopleSearchTimer = setTimeout(async () => {
+    try {
+      const response = await supabase.rpc('xifre_search_people', { p_query: clean });
+      if (seq !== peopleSearchSeq) return;
+      if (response.error) throw response.error;
+      renderPeopleResults(response.data || [], false);
+    } catch (error) {
+      console.error('PEOPLE SEARCH', error);
+      if (seq !== peopleSearchSeq) return;
+      list.innerHTML = `<div class="requests-empty compact-empty"><strong>No se pudo buscar</strong><span>${escapeHTML(error?.message || 'Error de Supabase')}</span></div>`;
+    }
+  }, 180);
 }
 
-async function sendFriendRequest() {
-  if (!currentUser) return;
-  const input = $('#friend-username');
-  const username = normalizeUsername(input?.value);
-  if (!username) return setModalMessage('friend-message', 'Escribe un username.', 'error');
-  if (username === currentProfile?.username) return setModalMessage('friend-message', 'No puedes añadirte a ti mismo.', 'error');
+function renderPeopleResults(results, localFriends = false) {
+  const list = $('#friend-search-results');
+  if (!list) return;
+  list.innerHTML = '';
 
-  const profile = await supabase.from('profiles').select('id,username').eq('username', username).maybeSingle();
-  if (profile.error) return setModalMessage('friend-message', profile.error.message, 'error');
-  if (!profile.data) return setModalMessage('friend-message', 'No existe ese username.', 'error');
+  if (!results.length) {
+    list.innerHTML = '<div class="requests-empty compact-empty"><strong>No hay resultados</strong><span>Comprueba el username e inténtalo de nuevo.</span></div>';
+    return;
+  }
 
-  const friendship = await supabase
-    .from('friendships')
-    .select('id')
-    .or(`and(user1_id.eq.${currentUser.id},user2_id.eq.${profile.data.id}),and(user1_id.eq.${profile.data.id},user2_id.eq.${currentUser.id})`)
-    .maybeSingle();
-  if (friendship.error) return setModalMessage('friend-message', friendship.error.message, 'error');
-  if (friendship.data) return setModalMessage('friend-message', 'Ya sois amigos.', 'success');
+  results.forEach(person => {
+    const name = person.display_name || person.username || 'Usuario';
+    const relationship = localFriends ? 'friend' : (person.relationship || 'none');
+    const row = document.createElement('div');
+    row.className = 'people-search-result';
+    row.innerHTML = `
+      ${avatarMarkup(name, person.avatar_url, 'small-avatar')}
+      <div class="people-result-copy">
+        <strong>${escapeHTML(name)}</strong>
+        <small>@${escapeHTML(person.username || 'usuario')}</small>
+      </div>
+    `;
 
-  const existing = await supabase
-    .from('friend_requests')
-    .select('id,sender_id,receiver_id')
-    .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${profile.data.id}),and(sender_id.eq.${profile.data.id},receiver_id.eq.${currentUser.id})`)
-    .maybeSingle();
-  if (existing.error) return setModalMessage('friend-message', existing.error.message, 'error');
-  if (existing.data) return setModalMessage('friend-message', 'Ya existe una solicitud pendiente.', 'error');
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = `people-result-action ${relationship === 'friend' ? 'is-primary' : ''}`;
 
-  const insert = await supabase.from('friend_requests').insert({ sender_id: currentUser.id, receiver_id: profile.data.id });
-  if (insert.error) return setModalMessage('friend-message', insert.error.message, 'error');
+    if (relationship === 'friend') {
+      action.textContent = 'Abrir chat';
+      action.addEventListener('click', async () => {
+        closeModal('friend-modal');
+        await openPrivateChat(person.id);
+      });
+    } else if (relationship === 'outgoing_pending') {
+      action.textContent = 'Pendiente';
+      action.disabled = true;
+    } else if (relationship === 'incoming_pending') {
+      action.textContent = 'Solicitud recibida';
+      action.disabled = true;
+    } else {
+      action.textContent = 'Añadir';
+      action.addEventListener('click', async () => {
+        action.disabled = true;
+        action.textContent = 'Enviando…';
+        try {
+          const response = await supabase.rpc('xifre_send_friend_request', { p_target_user: person.id });
+          if (response.error) throw response.error;
+          action.textContent = 'Pendiente';
+          setModalMessage('friend-message', 'Solicitud enviada.', 'success');
+        } catch (error) {
+          console.error('SEND REQUEST', error);
+          action.disabled = false;
+          action.textContent = 'Añadir';
+          setModalMessage('friend-message', friendlyDataError(error), 'error');
+        }
+      });
+    }
 
-  input.value = '';
-  setModalMessage('friend-message', 'Solicitud enviada.', 'success');
+    row.appendChild(action);
+    list.appendChild(row);
+  });
 }
 
 async function loadFriendRequests() {
@@ -777,10 +868,35 @@ function messageFromRPC(row) {
     sender_id: row.sender_id,
     content: row.content,
     created_at: row.created_at,
+    reply_to: row.reply_to || null,
     sender_username: row.sender_username,
     sender_display_name: row.sender_display_name,
-    sender_avatar_url: row.sender_avatar_url
+    sender_avatar_url: row.sender_avatar_url,
+    reply_sender_username: row.reply_sender_username,
+    reply_sender_display_name: row.reply_sender_display_name,
+    reply_sender_avatar_url: row.reply_sender_avatar_url,
+    reply_content: row.reply_content
   };
+}
+
+function showMessageEmpty() {
+  $('#messages').innerHTML = '<div class="empty-chat"><div class="empty-chat-logo">✦</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
+}
+
+function setReplyTo(message) {
+  if (!message) return;
+  replyingTo = message;
+  $('#replying-name').textContent = message.sender_display_name || message.sender_username || 'Usuario';
+  $('#replying-content').textContent = message.content || '';
+  $('#reply-bar')?.classList.remove('hidden');
+  $('#message-input')?.focus();
+}
+
+function clearReplyTo() {
+  replyingTo = null;
+  $('#reply-bar')?.classList.add('hidden');
+  if ($('#replying-name')) $('#replying-name').textContent = '';
+  if ($('#replying-content')) $('#replying-content').textContent = '';
 }
 
 async function loadMessages(conversationId, members = []) {
@@ -800,29 +916,16 @@ async function loadMessages(conversationId, members = []) {
     return;
   }
 
-  box.innerHTML = '';
   const messages = (response.data || []).map(messageFromRPC);
-  lastRenderedMessageId = messages.length ? messages[messages.length - 1].id : null;
-
-  if (!messages.length) {
-    box.innerHTML = '<div class="empty-chat"><div class="empty-chat-logo">✦</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
-    return;
-  }
-
-  const profileMap = new Map(members.map(member => [member.user_id, {
-    username: member.username,
-    display_name: member.display_name,
-    avatar_url: member.avatar_url
-  }]));
-
-  messages.forEach(message => renderMessage(message, profileMap, currentConversationData?.type === 'group'));
-  scrollMessages();
+  renderFullMessageSet(messages, members, false);
 }
 
 function renderMessage(message, profileMap, isGroup) {
   const box = $('#messages');
   if (!box || !message?.id) return;
-  if ($(`[data-message-id="${CSS.escape(String(message.id))}"]`, box)) return;
+
+  const existing = box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`);
+  if (existing) return;
 
   $('.empty-chat', box)?.remove();
 
@@ -837,18 +940,77 @@ function renderMessage(message, profileMap, isGroup) {
   const row = document.createElement('div');
   row.className = `message-row${mine ? ' mine' : ''}`;
   row.dataset.messageId = String(message.id);
+  row.dataset.messageContent = message.content || '';
 
-  const showSender = isGroup && !mine;
+  const replyBlock = message.reply_to
+    ? `<div class="message-reply-preview">
+        ${avatarMarkup(message.reply_sender_display_name || message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'reply-preview-avatar')}
+        <div class="reply-preview-copy">
+          <strong>${escapeHTML(message.reply_sender_display_name || message.reply_sender_username || 'Usuario')}</strong>
+          <span>${escapeHTML(message.reply_content || '')}</span>
+        </div>
+      </div>`
+    : '';
+
   row.innerHTML = `
-    ${!mine ? avatarMarkup(senderName, sender.avatar_url, 'message-avatar') : ''}
-    <div class="message-bubble">
-      ${showSender ? `<div class="message-sender">${escapeHTML(senderName)}</div>` : ''}
-      <div class="message-content">${escapeHTML(message.content)}</div>
-      <div class="message-time">${escapeHTML(formatTime(message.created_at))}</div>
+    ${avatarMarkup(senderName, sender.avatar_url, 'message-avatar')}
+    <div class="message-main">
+      <div class="message-meta-line">
+        <span class="message-sender">${escapeHTML(senderName)}</span>
+        <span class="message-username">@${escapeHTML(sender.username || 'usuario')}</span>
+        <span class="message-time">${escapeHTML(formatTime(message.created_at))}</span>
+      </div>
+      <div class="message-bubble">
+        ${replyBlock}
+        <div class="message-content">${escapeHTML(message.content)}</div>
+      </div>
+      <div class="message-actions">
+        <button type="button" class="message-action-button" data-message-action="reply" title="Responder">↩</button>
+        ${mine ? '<button type="button" class="message-action-button danger" data-message-action="delete" title="Eliminar">⌫</button>' : ''}
+      </div>
     </div>`;
+
+  row.addEventListener('click', event => {
+    if (event.target.closest('[data-message-action]')) return;
+    row.classList.toggle('selected');
+  });
+
+  row.querySelector('[data-message-action="reply"]')?.addEventListener('click', event => {
+    event.stopPropagation();
+    setReplyTo(message);
+  });
+
+  row.querySelector('[data-message-action="delete"]')?.addEventListener('click', event => {
+    event.stopPropagation();
+    deleteMessage(message.id, row);
+  });
 
   box.appendChild(row);
   lastRenderedMessageId = message.id;
+}
+
+function renderFullMessageSet(messages, members, preserveBottom = true) {
+  const box = $('#messages');
+  if (!box) return;
+
+  const wasAtBottom = preserveBottom ? isMessagesNearBottom() : true;
+  box.innerHTML = '';
+
+  if (!messages.length) {
+    showMessageEmpty();
+    lastRenderedMessageId = null;
+    return;
+  }
+
+  const profileMap = new Map(members.map(member => [member.user_id, {
+    username: member.username,
+    display_name: member.display_name,
+    avatar_url: member.avatar_url
+  }]));
+
+  messages.forEach(message => renderMessage(message, profileMap, currentConversationData?.type === 'group'));
+  lastRenderedMessageId = messages[messages.length - 1].id;
+  if (wasAtBottom) scrollMessages();
 }
 
 function subscribeMessages(conversationId) {
@@ -884,6 +1046,7 @@ function subscribeMessages(conversationId) {
 
 async function refreshMessagesSilently(conversationId) {
   if (!currentUser || currentConversation !== conversationId) return;
+
   const response = await supabase.rpc('xifre_get_messages', {
     p_conversation_id: conversationId,
     p_limit: 300
@@ -894,27 +1057,13 @@ async function refreshMessagesSilently(conversationId) {
   }
 
   const messages = (response.data || []).map(messageFromRPC);
-  const newestId = messages.length ? messages[messages.length - 1].id : null;
-  if (newestId === lastRenderedMessageId && messages.length === $$('.message-row', $('#messages')).length) return;
+  const currentIds = $$('.message-row', $('#messages')).map(row => row.dataset.messageId);
+  const nextIds = messages.map(message => String(message.id));
+
+  if (currentIds.length === nextIds.length && currentIds.every((id, index) => id === nextIds[index])) return;
 
   const members = memberCache.get(conversationId) || [];
-  const profileMap = new Map(members.map(member => [member.user_id, {
-    username: member.username,
-    display_name: member.display_name,
-    avatar_url: member.avatar_url
-  }]));
-  const wasAtBottom = isMessagesNearBottom();
-  const box = $('#messages');
-
-  if (!messages.length) {
-    box.innerHTML = '<div class="empty-chat"><div class="empty-chat-logo">✦</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
-    lastRenderedMessageId = null;
-    return;
-  }
-
-  messages.forEach(message => renderMessage(message, profileMap, currentConversationData?.type === 'group'));
-  lastRenderedMessageId = newestId;
-  if (wasAtBottom) scrollMessages();
+  renderFullMessageSet(messages, members, true);
 }
 
 async function sendMessage() {
@@ -932,13 +1081,13 @@ async function sendMessage() {
   try {
     const response = await supabase.rpc('xifre_send_message', {
       p_conversation_id: currentConversation,
-      p_content: content
+      p_content: content,
+      p_reply_to: replyingTo?.id || null
     });
     if (response.error) throw response.error;
 
-    const data = response.data;
-    const message = Array.isArray(data) ? data[0] : data;
-    if (!message?.id) throw new Error('Supabase no devolvió el mensaje enviado.');
+    const data = Array.isArray(response.data) ? response.data[0] : response.data;
+    if (!data?.id) throw new Error('Supabase no devolvió el mensaje enviado.');
 
     const members = memberCache.get(currentConversation) || [];
     const profileMap = new Map(members.map(member => [member.user_id, {
@@ -946,23 +1095,25 @@ async function sendMessage() {
       display_name: member.display_name,
       avatar_url: member.avatar_url
     }]));
-    renderMessage(messageFromRPC(message), profileMap, currentConversationData?.type === 'group');
 
+    renderMessage(messageFromRPC(data), profileMap, currentConversationData?.type === 'group');
     input.value = '';
+    clearReplyTo();
+
     $('#message-status').textContent = 'enviado';
-    scrollMessages();
     setTimeout(() => {
       if (currentConversation) $('#message-status').textContent = '';
     }, 1200);
 
-    // Actualiza el preview del chat lateral inmediatamente.
     const conversation = conversationCache.find(item => String(item.id) === String(currentConversation));
     if (conversation) {
       conversation.last_message = content;
-      conversation.last_message_at = message.created_at;
+      conversation.last_message_at = data.created_at;
       conversationCache.sort((a, b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
       renderConversations(conversationCache);
     }
+
+    scrollMessages();
   } catch (error) {
     console.error('SEND MESSAGE', error);
     $('#message-status').textContent = '';
@@ -972,6 +1123,26 @@ async function sendMessage() {
     input.disabled = false;
     input.focus();
   }
+}
+
+async function deleteMessage(messageId, row) {
+  if (!currentUser || !messageId) return;
+
+  const content = row?.dataset?.messageContent || 'este mensaje';
+  if (!window.confirm(`¿Eliminar "${content.slice(0, 80)}${content.length > 80 ? '…' : ''}"?`)) return;
+
+  const response = await supabase.rpc('xifre_delete_message', { p_message_id: messageId });
+  if (response.error) {
+    console.error('DELETE MESSAGE', response.error);
+    toast(`No se pudo eliminar: ${response.error.message}`, 'error');
+    return;
+  }
+
+  if (row?.isConnected) row.remove();
+  if (!$$('.message-row', $('#messages')).length) showMessageEmpty();
+  if (replyingTo?.id === messageId) clearReplyTo();
+  toast('Mensaje eliminado.', 'success');
+  await loadConversations();
 }
 
 // ---------------------------------------------------------------------------
@@ -1047,14 +1218,19 @@ async function createGroup() {
 
 async function openChatInfo() {
   if (!currentConversation || !currentConversationData) return;
+
   try {
     const members = await loadConversationMembers(currentConversation);
-    const title = currentConversationData.type === 'group'
+    const isGroup = currentConversationData.type === 'group';
+    const isOwner = String(currentConversationData.owner_id || '') === String(currentUser.id);
+
+    const title = isGroup
       ? (currentConversationData.name || 'Grupo')
       : (members.find(member => String(member.user_id) !== String(currentUser.id))?.display_name || 'Chat privado');
 
     $('#info-title').textContent = title;
-    $('#info-subtitle').textContent = currentConversationData.type === 'group' ? `${members.length} miembros` : 'Conversación privada';
+    $('#info-subtitle').textContent = isGroup ? `${members.length} miembros` : 'Conversación privada';
+
     const list = $('#chat-members');
     list.innerHTML = '';
 
@@ -1065,14 +1241,112 @@ async function openChatInfo() {
       const role = member.is_owner ? 'Administrador' : (String(member.user_id) === String(currentUser.id) ? 'Tú' : 'Miembro');
       row.innerHTML = `
         ${avatarMarkup(name, member.avatar_url, 'small-avatar')}
-        <div class="chat-member-copy"><div class="chat-member-name">${escapeHTML(name)}</div><div class="chat-member-role">@${escapeHTML(member.username || 'usuario')} · ${escapeHTML(role)}</div></div>`;
+        <div class="chat-member-copy">
+          <div class="chat-member-name">${escapeHTML(name)}</div>
+          <div class="chat-member-role">@${escapeHTML(member.username || 'usuario')} · ${escapeHTML(role)}</div>
+        </div>`;
       list.appendChild(row);
     });
+
+    $('#group-management')?.classList.toggle('hidden', !isGroup);
+    $('#delete-group-button')?.classList.toggle('hidden', !isOwner);
+
+    if (isGroup) renderGroupAddMembers(members);
 
     openModal('chat-info-modal');
   } catch (error) {
     console.error('CHAT INFO', error);
     toast(`No se pudo cargar la información: ${error?.message || 'error'}`, 'error');
+  }
+}
+
+function renderGroupAddMembers(currentMembers) {
+  const list = $('#group-add-list');
+  if (!list) return;
+
+  const memberIds = new Set(currentMembers.map(member => String(member.user_id)));
+  const candidates = friendCache.filter(friend => !memberIds.has(String(friend.id)));
+
+  list.innerHTML = '';
+
+  if (!candidates.length) {
+    list.innerHTML = '<div class="requests-empty compact-empty"><strong>No hay más amigos para añadir</strong><span>Todos tus amigos ya están en este grupo.</span></div>';
+    $('#group-add-selected-count').textContent = '0 seleccionados';
+    return;
+  }
+
+  candidates.forEach(friend => {
+    const name = friend.display_name || friend.username || 'Usuario';
+    const label = document.createElement('label');
+    label.className = 'group-friend-option';
+    label.innerHTML = `
+      <input type="checkbox" value="${escapeHTML(friend.id)}" class="group-add-check">
+      ${avatarMarkup(name, friend.avatar_url, 'small-avatar')}
+      <span class="group-friend-copy"><strong>${escapeHTML(name)}</strong><small>@${escapeHTML(friend.username || 'usuario')}</small></span>
+      <span class="custom-check">✓</span>`;
+    list.appendChild(label);
+  });
+
+  $('#group-add-selected-count').textContent = '0 seleccionados';
+  $$('.group-add-check', list).forEach(input => input.addEventListener('change', () => {
+    const count = $$('.group-add-check:checked', list).length;
+    $('#group-add-selected-count').textContent = `${count} seleccionado${count === 1 ? '' : 's'}`;
+  }));
+}
+
+async function addGroupMembers() {
+  if (!currentConversation || currentConversationData?.type !== 'group') return;
+
+  const selected = $$('.group-add-check:checked', $('#group-add-list')).map(input => input.value).filter(Boolean);
+  if (!selected.length) {
+    toast('Selecciona al menos una persona.', 'info');
+    return;
+  }
+
+  const button = $('#add-group-members-button');
+  setLoading(button, true);
+
+  try {
+    const response = await supabase.rpc('xifre_add_group_members', {
+      p_conversation_id: currentConversation,
+      p_member_ids: selected
+    });
+    if (response.error) throw response.error;
+
+    memberCache.delete(currentConversation);
+    await loadConversationMembers(currentConversation);
+    await openChatInfo();
+    await loadConversations();
+    toast('Personas añadidas al grupo.', 'success');
+  } catch (error) {
+    console.error('ADD GROUP MEMBERS', error);
+    toast(`No se pudieron añadir: ${error?.message || 'error'}`, 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+async function deleteGroup() {
+  if (!currentConversation || currentConversationData?.type !== 'group') return;
+  if (!window.confirm(`¿Eliminar definitivamente el grupo "${currentConversationData.name || 'Grupo'}"?`)) return;
+
+  try {
+    const response = await supabase.rpc('xifre_delete_group', {
+      p_conversation_id: currentConversation
+    });
+    if (response.error) throw response.error;
+
+    const deletedId = currentConversation;
+    closeModal('chat-info-modal');
+    memberCache.delete(deletedId);
+    currentConversation = null;
+    currentConversationData = null;
+    resetChatView();
+    await loadConversations();
+    toast('Grupo eliminado.', 'success');
+  } catch (error) {
+    console.error('DELETE GROUP', error);
+    toast(`No se pudo eliminar el grupo: ${error?.message || 'error'}`, 'error');
   }
 }
 
@@ -1132,10 +1406,11 @@ function bind() {
     if (action === 'close-modal') closeModal(actionElement.dataset.modal);
     if (action === 'open-friend') {
       openModal('friend-modal');
-      renderNewChatFriends();
-      $('#friend-username')?.focus();
+      if ($('#friend-search')) $('#friend-search').value = '';
+      renderPeopleResults(friendCache.map(friend => ({ ...friend, relationship: 'friend' })), true);
+      $('#friend-search')?.focus();
     }
-    if (action === 'focus-friend-request') $('#friend-username')?.focus();
+    if (action === 'focus-friend-request') $('#friend-search')?.focus();
     if (action === 'open-group') {
       openModal('group-modal');
       renderGroupFriends();
@@ -1143,6 +1418,8 @@ function bind() {
     }
     if (action === 'send-friend') sendFriendRequest();
     if (action === 'create-group') createGroup();
+    if (action === 'add-group-members') addGroupMembers();
+    if (action === 'delete-group') deleteGroup();
     if (action === 'open-requests') openFriendRequests();
     if (action === 'open-friends') {
       openModal('friends-modal');
@@ -1152,9 +1429,17 @@ function bind() {
     if (action === 'open-chat-info') openChatInfo();
   });
 
-  $('#friend-search')?.addEventListener('input', renderNewChatFriends);
-  $('#login-form')?.addEventListener('submit', event => { event.preventDefault(); login(); });
-  $('#register-form')?.addEventListener('submit', event => { event.preventDefault(); register(); });
+  $('#friend-search')?.addEventListener('input', event => searchPeople(event.target.value));
+  $('#login-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    login();
+  });
+  $('#register-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    register();
+  });
   $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); sendMessage(); });
   $('#message-input')?.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -1162,12 +1447,14 @@ function bind() {
       sendMessage();
     }
   });
+  $('#cancel-reply')?.addEventListener('click', clearReplyTo);
 
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') $$('.modal:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
-    if (event.key === 'Enter' && event.target.matches('#friend-username')) {
+    if (event.key === 'Enter' && event.target.matches('#friend-search')) {
       event.preventDefault();
-      sendFriendRequest();
+      const value = normalizeUsername(event.target.value);
+      if (value) searchPeople(value);
     }
   });
 }
@@ -1185,7 +1472,7 @@ async function init() {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storageKey: 'xifre-auth-v6'
+        storageKey: 'xifre-auth-v7'
       }
     });
 
