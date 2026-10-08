@@ -363,7 +363,8 @@
          */
         await Promise.allSettled([
           loadFriends(),
-          loadConversations()
+          loadConversations(),
+          loadFriendRequests()
         ]);
 
         setupRealtime();
@@ -489,6 +490,243 @@
     setModalMessage('friend-message', 'Solicitud enviada.', 'success');
     if (input) input.value = '';
   }
+
+  async function loadFriendRequests() {
+    if (!currentUser) return;
+
+    const { data, error } = await supabase
+      .from('friend_requests')
+      .select(`
+        id,
+        sender_id,
+        receiver_id,
+        created_at,
+        sender:profiles!friend_requests_sender_id_fkey (
+          id,
+          username,
+          display_name,
+          avatar_url
+        )
+      `)
+      .eq('receiver_id', currentUser.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      /*
+       * Algunas bases de datos no tienen una FK con ese nombre.
+       * Hacemos una segunda consulta simple para que las solicitudes
+       * sigan funcionando aunque el nombre de la relación sea distinto.
+       */
+      console.error('FRIEND REQUESTS JOIN ERROR:', error);
+
+      const fallback = await supabase
+        .from('friend_requests')
+        .select('id,sender_id,receiver_id,created_at')
+        .eq('receiver_id', currentUser.id)
+        .order('created_at', { ascending: false });
+
+      if (fallback.error) {
+        console.error('FRIEND REQUESTS ERROR:', fallback.error);
+        updateRequestsBadge(0);
+        renderFriendRequests([]);
+        return;
+      }
+
+      const senderIds = [...new Set((fallback.data || []).map(row => row.sender_id).filter(Boolean))];
+
+      let profiles = [];
+      if (senderIds.length) {
+        const profileResult = await supabase
+          .from('profiles')
+          .select('id,username,display_name,avatar_url')
+          .in('id', senderIds);
+
+        if (!profileResult.error) profiles = profileResult.data || [];
+      }
+
+      const profileMap = new Map(profiles.map(profile => [profile.id, profile]));
+
+      const requests = (fallback.data || []).map(request => ({
+        ...request,
+        sender: profileMap.get(request.sender_id) || null
+      }));
+
+      updateRequestsBadge(requests.length);
+      renderFriendRequests(requests);
+      return;
+    }
+
+    const requests = data || [];
+    updateRequestsBadge(requests.length);
+    renderFriendRequests(requests);
+  }
+
+  function updateRequestsBadge(count) {
+    const badge = $('#friend-requests-badge');
+    if (!badge) return;
+
+    badge.textContent = String(count);
+
+    if (count > 0) {
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  }
+
+  function renderFriendRequests(requests) {
+    const list = $('#friend-requests-list');
+    if (!list) return;
+
+    list.innerHTML = '';
+
+    if (!requests.length) {
+      list.innerHTML = `
+        <div class="requests-empty">
+          <div class="requests-empty-icon">✓</div>
+          <strong>No tienes solicitudes pendientes</strong>
+          <span>Cuando alguien quiera ser tu amigo aparecerá aquí.</span>
+        </div>
+      `;
+      return;
+    }
+
+    requests.forEach(request => {
+      const sender = request.sender || {};
+      const username = sender.username || 'usuario';
+      const displayName = sender.display_name || username;
+
+      const item = document.createElement('div');
+      item.className = 'friend-request-item';
+
+      item.innerHTML = `
+        <div class="friend-request-user">
+          <div class="friend-request-avatar">
+            ${escapeHTML(username.charAt(0).toUpperCase())}
+          </div>
+          <div class="friend-request-info">
+            <div class="friend-request-name">${escapeHTML(displayName)}</div>
+            <div class="friend-request-username">@${escapeHTML(username)}</div>
+          </div>
+        </div>
+
+        <div class="friend-request-actions">
+          <button
+            type="button"
+            class="request-action request-accept"
+            data-request-action="accept"
+            data-request-id="${escapeHTML(request.id)}"
+            data-sender-id="${escapeHTML(request.sender_id)}"
+          >
+            Aceptar
+          </button>
+
+          <button
+            type="button"
+            class="request-action request-reject"
+            data-request-action="reject"
+            data-request-id="${escapeHTML(request.id)}"
+          >
+            Rechazar
+          </button>
+        </div>
+      `;
+
+      list.appendChild(item);
+    });
+  }
+
+  async function acceptFriendRequest(requestId, senderId, button) {
+    if (!currentUser || !requestId || !senderId) return;
+
+    if (button) setLoading(button, true);
+
+    try {
+      /*
+       * Evitamos duplicados aunque ya exista una amistad.
+       * El orden user1/user2 queda siempre estable.
+       */
+      const firstId = String(currentUser.id) < String(senderId)
+        ? currentUser.id
+        : senderId;
+
+      const secondId = String(currentUser.id) < String(senderId)
+        ? senderId
+        : currentUser.id;
+
+      const existing = await supabase
+        .from('friendships')
+        .select('id')
+        .eq('user1_id', firstId)
+        .eq('user2_id', secondId)
+        .maybeSingle();
+
+      if (existing.error) throw existing.error;
+
+      if (!existing.data) {
+        const { error: friendshipError } = await supabase
+          .from('friendships')
+          .insert({
+            user1_id: firstId,
+            user2_id: secondId
+          });
+
+        if (friendshipError) throw friendshipError;
+      }
+
+      const { error: deleteError } = await supabase
+        .from('friend_requests')
+        .delete()
+        .eq('id', requestId)
+        .eq('receiver_id', currentUser.id);
+
+      if (deleteError) throw deleteError;
+
+      toast('Solicitud aceptada. Ahora sois amigos.', 'success');
+
+      await Promise.allSettled([
+        loadFriends(),
+        loadFriendRequests()
+      ]);
+
+    } catch (error) {
+      console.error('ACCEPT FRIEND REQUEST:', error);
+      toast('No se pudo aceptar la solicitud.', 'error');
+    } finally {
+      if (button) setLoading(button, false);
+    }
+  }
+
+  async function rejectFriendRequest(requestId, button) {
+    if (!currentUser || !requestId) return;
+
+    if (button) setLoading(button, true);
+
+    try {
+      const { error } = await supabase
+        .from('friend_requests')
+        .delete()
+        .eq('id', requestId)
+        .eq('receiver_id', currentUser.id);
+
+      if (error) throw error;
+
+      toast('Solicitud rechazada.', 'info');
+      await loadFriendRequests();
+
+    } catch (error) {
+      console.error('REJECT FRIEND REQUEST:', error);
+      toast('No se pudo rechazar la solicitud.', 'error');
+    } finally {
+      if (button) setLoading(button, false);
+    }
+  }
+
+  async function openFriendRequests() {
+    $('#requests-modal')?.classList.remove('hidden');
+    await loadFriendRequests();
+  }
+
 
   async function loadConversations() {
     if (!currentUser) return;
@@ -641,9 +879,25 @@
   function setupRealtime() {
     if (!currentUser || !supabaseReady()) return;
     if (requestChannel) supabase.removeChannel(requestChannel);
-    requestChannel = supabase.channel(`xifre-requests-${currentUser.id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${currentUser.id}` }, () => {
-      toast('Tienes una nueva solicitud de amistad.', 'info');
-    }).subscribe();
+    requestChannel = supabase
+      .channel(`xifre-requests-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'friend_requests',
+          filter: `receiver_id=eq.${currentUser.id}`
+        },
+        async payload => {
+          await loadFriendRequests();
+
+          if (payload.eventType === 'INSERT') {
+            toast('Tienes una nueva solicitud de amistad.', 'info');
+          }
+        }
+      )
+      .subscribe();
   }
 
   function bindEvents() {
@@ -675,6 +929,24 @@
       }
       if (type === 'send-friend') sendFriendRequest();
       if (type === 'create-group') createGroup();
+      if (type === 'open-requests') openFriendRequests();
+
+      const requestAction = event.target.closest('[data-request-action]');
+      if (requestAction) {
+        event.preventDefault();
+
+        const actionType = requestAction.dataset.requestAction;
+        const requestId = requestAction.dataset.requestId;
+        const senderId = requestAction.dataset.senderId;
+
+        if (actionType === 'accept') {
+          acceptFriendRequest(requestId, senderId, requestAction);
+        }
+
+        if (actionType === 'reject') {
+          rejectFriendRequest(requestId, requestAction);
+        }
+      }
     });
 
     $('#login-form')?.addEventListener('submit', event => { event.preventDefault(); login(); });
