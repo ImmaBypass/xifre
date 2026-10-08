@@ -40,8 +40,51 @@
   let selectedConversationForMenu = null;
   let conversationSearchTimer = null;
   let conversationListPoll = null;
+  let conversationFilter = '';
+  let pendingChatImages = [];
+  let dragDepth = 0;
+
+  const SCHOOL_EMAIL_DOMAIN = '@vedrunaimmaculada.cat';
+  const SCHOOL_HANDLE_RE = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}$/i;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   const screens = ['landing', 'login', 'register', 'email'];
+
+  function randomAvatarColor() {
+    const palette = ['avatar-blue','avatar-yellow','avatar-red','avatar-green','avatar-orange'];
+    return palette[Math.floor(Math.random() * palette.length)];
+  }
+
+  function normalizeSchoolEmail(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  function isSchoolEmail(email) {
+    const value = normalizeSchoolEmail(email);
+    return value.endsWith(SCHOOL_EMAIL_DOMAIN) && value.length > SCHOOL_EMAIL_DOMAIN.length && value.indexOf('@') === value.lastIndexOf('@');
+  }
+
+  function schoolHandleFromEmail(email) {
+    const value = normalizeSchoolEmail(email);
+    if (!isSchoolEmail(value)) return '';
+    const local = value.slice(0, -SCHOOL_EMAIL_DOMAIN.length);
+    return SCHOOL_HANDLE_RE.test(local) ? local : '';
+  }
+
+  function schoolHandleForProfile(profile = currentProfile) {
+    return String(profile?.school_handle || schoolHandleFromEmail(profile?.email || currentUser?.email) || 'usuario').replace(/^@+/, '');
+  }
+
+  function isUUID(value) {
+    return UUID_RE.test(String(value || ''));
+  }
+
+  function formatFileSize(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n/1024).toFixed(0)} KB`;
+    return `${(n/(1024*1024)).toFixed(1)} MB`;
+  }
 
   function normalizeUsername(value) {
     return String(value || '').trim().toLowerCase();
@@ -57,9 +100,7 @@
     const safeName = String(name || (kind === 'group' ? 'Grupo' : 'Usuario')).trim() || (kind === 'group' ? 'Grupo' : 'Usuario');
     const initial = kind === 'group' ? '#' : (safeName.charAt(0).toUpperCase() || 'X');
     const safeUrl = String(url || '').trim();
-    const palette = ['avatar-blue','avatar-yellow','avatar-red','avatar-green','avatar-orange'];
-    let hash = 0; for (const ch of safeName) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
-    const colorClass = kind === 'group' ? 'avatar-group' : (color || palette[Math.abs(hash) % palette.length]);
+    const colorClass = kind === 'group' ? 'avatar-group' : (color || randomAvatarColor());
     const fallbackClass = `avatar-fallback ${kind === 'group' ? 'group-fallback' : ''} ${colorClass} ${esc(className)}`;
     if (safeUrl) {
       return `<span class="avatar-media ${esc(className)}"><img class="avatar-img" src="${esc(safeUrl)}" alt="" loading="lazy" onerror="this.style.display='none'"><span class="${fallbackClass} avatar-fallback-hidden">${esc(initial)}</span></span>`;
@@ -174,11 +215,12 @@
     if (authActionInFlight || !supabase) return;
     const button = $('#register-button');
     const username = normalizeUsername($('#register-username')?.value);
-    const email = String($('#register-email')?.value || '').trim();
+    const email = normalizeSchoolEmail($('#register-email')?.value);
     const password = String($('#register-password')?.value || '');
     setMessage('register-message', '');
 
     if (!/^[a-z0-9_]{3,20}$/.test(username)) return setMessage('register-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+    if (!isSchoolEmail(email)) return setMessage('register-message', 'Necesitas un correo del dominio vedruna', 'error');
     if (password.length < 6) return setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
 
     authActionInFlight = true;
@@ -214,7 +256,7 @@
     if (authActionInFlight || !supabase) return;
 
     const button = $('#login-button');
-    const email = String($('#login-email')?.value || '').trim();
+    const email = normalizeSchoolEmail($('#login-email')?.value);
     const password = String($('#login-password')?.value || '');
     setMessage('login-message', '');
 
@@ -222,10 +264,13 @@
       setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
       return;
     }
+    if (!isSchoolEmail(email)) {
+      setMessage('login-message', 'Necesitas un correo del dominio vedruna', 'error');
+      return;
+    }
 
     authActionInFlight = true;
     setLoading(button, true);
-
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -236,12 +281,10 @@
       appStarted = true;
       sessionStorage.removeItem('xifre_pending_email');
       showMain();
-
-      // La sesión ya está abierta. El resto se carga en segundo plano.
       void startApplication(session);
     } catch (error) {
       console.error('LOGIN', error);
-      setMessage('login-message', friendlyError(error), 'error');
+      setMessage('login-message', isSchoolEmail(email) ? friendlyError(error) : 'Necesitas un correo del dominio vedruna', 'error');
       if (String(error?.message || '').toLowerCase().includes('email not confirmed')) {
         sessionStorage.setItem('xifre_pending_email', email);
         setText('confirmation-email', email);
@@ -254,8 +297,13 @@
   }
 
   async function resendConfirmation() {
-    const email = sessionStorage.getItem('xifre_pending_email') || '';
+    const email = normalizeSchoolEmail(sessionStorage.getItem('xifre_pending_email') || '');
     if (!email) return showScreen('register');
+    if (!isSchoolEmail(email)) {
+      showScreen('login');
+      setMessage('login-message', 'Necesitas un correo del dominio vedruna', 'error');
+      return;
+    }
     const button = $('#resend-confirmation');
     setLoading(button, true);
     try {
@@ -271,29 +319,42 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color').eq('id', currentUser.id).maybeSingle();
-    if (error) console.warn('PROFILE LOAD', error);
+    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,school_handle').eq('id', currentUser.id).maybeSingle();
+    if (result.error) console.warn('PROFILE LOAD', result.error);
+    let data = result.data || null;
+    try {
+      const ensured = await supabase.rpc('xifre_ensure_school_handle');
+      if (!ensured.error && ensured.data) {
+        const handle = Array.isArray(ensured.data) ? ensured.data[0]?.school_handle || ensured.data[0] : ensured.data?.school_handle || ensured.data;
+        if (handle) data = { ...(data || {}), school_handle: handle };
+      }
+    } catch (error) { console.warn('SCHOOL HANDLE', error); }
     currentProfile = data || {
       id: currentUser.id,
       username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
       display_name: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
       avatar_url: null,
-      avatar_color: 'avatar-blue'
+      avatar_color: randomAvatarColor(),
+      school_handle: schoolHandleFromEmail(currentUser.email) || 'usuario'
     };
     currentProfile.display_name = currentProfile.username;
+    currentProfile.school_handle = schoolHandleForProfile(currentProfile);
+    if (!currentProfile.avatar_color) currentProfile.avatar_color = randomAvatarColor();
     syncProfileUI();
   }
 
   function syncProfileUI() {
     const username = currentProfile?.username || 'usuario';
+    const schoolHandle = schoolHandleForProfile();
     setText('profile-name', username);
-    setText('profile-username', `@${username}`);
+    setText('profile-username', `@${schoolHandle}`);
     setText('bottom-profile-name', username);
-    setText('bottom-profile-username', `@${username}`);
+    setText('bottom-profile-username', `@${schoolHandle}`);
     setText('settings-nav-name', username);
-    setText('settings-nav-username', `@${username}`);
+    setText('settings-nav-username', `@${schoolHandle}`);
     setText('settings-preview-username', `@${username}`);
-    avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url);
+    setText('settings-preview-school-handle', `@${schoolHandle}`);
+    avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
     avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
     avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
     if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
@@ -312,58 +373,53 @@
         sessionUser = result.data?.session?.user || null;
       }
       if (!sessionUser) throw new Error('No hay una sesión autenticada.');
+      if (!isSchoolEmail(sessionUser.email)) {
+        try { await supabase.auth.signOut(); } catch (signOutError) { console.warn('INVALID DOMAIN SIGNOUT', signOutError); }
+        currentUser = null;
+        appStarted = false;
+        showScreen('login');
+        setMessage('login-message', 'Necesitas un correo del dominio vedruna', 'error');
+        return false;
+      }
 
       currentUser = sessionUser;
       appStarted = true;
       applyTheme(currentTheme());
       showMain();
 
-      const results = await Promise.allSettled([
-        loadProfile(),
-        loadFriends(),
-        loadConversations()
-      ]);
-      results.forEach(result => {
-        if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
-      });
+      const results = await Promise.allSettled([loadProfile(), loadFriends(), loadConversations()]);
+      results.forEach(result => { if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason); });
 
       if (conversationListPoll) clearInterval(conversationListPoll);
       conversationListPoll = setInterval(() => { if (document.visibilityState === 'visible' && currentUser) loadConversations().catch(() => {}); }, 4000);
 
-      try {
-        await restoreConversation();
-      } catch (restoreError) {
-        console.warn('RESTORE CONVERSATION', restoreError);
-      }
+      try { await restoreConversation(); } catch (restoreError) { console.warn('RESTORE CONVERSATION', restoreError); }
       return true;
     })().catch(async error => {
       console.error('START APPLICATION', error);
       try {
         const { data } = await supabase.auth.getSession();
-        if (data?.session?.user) {
+        if (data?.session?.user && isSchoolEmail(data.session.user.email)) {
           currentUser = data.session.user;
           appStarted = true;
           showMain();
           return true;
         }
-      } catch (sessionError) {
-        console.warn('SESSION CHECK', sessionError);
-      }
+      } catch (sessionError) { console.warn('SESSION CHECK', sessionError); }
       appStarted = false;
       currentUser = null;
       return false;
-    }).finally(() => {
-      startPromise = null;
-    });
+    }).finally(() => { startPromise = null; });
     return startPromise;
   }
 
   async function logout() {
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error('LOGOUT', error);
-    } finally {
+    if (!currentUser) return;
+    const ok = await askConfirm('Cerrar sesión', '¿Seguro que quieres cerrar tu sesión en XIFRE?', 'Cerrar sesión');
+    if (!ok) return;
+    try { await supabase.auth.signOut(); }
+    catch (error) { console.error('LOGOUT', error); }
+    finally {
       stopChatRealtime();
       if (conversationListPoll) clearInterval(conversationListPoll);
       conversationListPoll = null;
@@ -372,7 +428,10 @@
       currentConversation = null;
       currentConversationData = null;
       currentMembers = [];
-      appStarted = false;
+      conversationFilter = '';
+      clearChatImages();
+      if ($('#conversation-search-input')) $('#conversation-search-input').value = '';
+      $('#conversation-search-clear')?.classList.add('hidden');
       sessionStorage.removeItem('xifre_current_conversation');
       closeAllModals();
       $('#settings-modal')?.classList.add('hidden');
@@ -394,7 +453,7 @@
     if (error) { console.warn('FRIENDS', error); friendCache = []; return; }
     const ids = [...new Set((data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
     if (!ids.length) { friendCache = []; return; }
-    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color').in('id', ids);
+    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,school_handle').in('id', ids);
     if (!result.error) friendCache = result.data || [];
   }
 
@@ -402,7 +461,7 @@
     const list = $('#friend-search-results');
     if (!list) return;
     if (peopleSearchTimer) clearTimeout(peopleSearchTimer);
-    const clean = normalizeUsername(query);
+    const clean = normalizeUsername(query).replace(/^@+/, '');
     if (!clean) {
       renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' })));
       return;
@@ -436,7 +495,7 @@
       row.className = 'search-result';
       row.innerHTML = `
         <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
-        <div class="result-copy"><strong>${esc(person.username)}</strong><small>${relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Solicitud recibida' : 'No conectado'}</small></div>`;
+        <div class="result-copy"><strong>${esc(person.username)}</strong><small>@${esc(person.school_handle || 'usuario')}</small></div>`;
       const action = document.createElement('button');
       action.type = 'button';
       action.className = `result-action ${relationship === 'friend' ? '' : 'secondary'}`;
@@ -478,7 +537,7 @@
     friendCache.forEach(friend => {
       const row = document.createElement('div');
       row.className = 'friend-item';
-      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
+      row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || 'usuario')}</small></div><button class="open-chat" type="button">Abrir</button>`;
       row.querySelector('button').addEventListener('click', async () => { closeModal('friends-modal'); await openPrivateChat(friend.id); });
       list.appendChild(row);
     });
@@ -491,7 +550,7 @@
     const ids = [...new Set((base.data || []).map(x => x.sender_id))];
     let profiles = [];
     if (ids.length) {
-      const result = await supabase.from('profiles').select('id,username,avatar_url,avatar_color').in('id', ids);
+      const result = await supabase.from('profiles').select('id,username,avatar_url,avatar_color,school_handle').in('id', ids);
       if (!result.error) profiles = result.data || [];
     }
     const map = new Map(profiles.map(p => [p.id, p]));
@@ -502,11 +561,11 @@
     const list = $('#friend-requests-list');
     if (!list) return;
     list.innerHTML = '';
-    if (!requests.length) { list.innerHTML = '<div class="empty-sidebar">No tienes solicitudes pendientes.</div>'; return; }
+    if (!requests.length) { list.innerHTML = '<div class="requests-empty">No hay solicitudes</div>'; return; }
     requests.forEach(req => {
       const row = document.createElement('div');
       row.className = 'request-item';
-      row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar')}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
+      row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar', req.sender.avatar_color)}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.school_handle || 'usuario')}</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
       const [accept, reject] = $$('.request-actions button', row);
       accept.addEventListener('click', () => acceptRequest(req, row));
       reject.addEventListener('click', () => rejectRequest(req, row));
@@ -558,16 +617,22 @@
     if (error) { console.warn('CONVERSATIONS', error); return conversationCache; }
     conversationCache = (data || []).map(row => ({ ...row, displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado') }));
     conversationCache.sort((a,b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
-    renderConversations();
+    renderConversations(conversationFilter);
     return conversationCache;
   }
 
-  function renderConversations(filter = '') {
+  function renderConversations(filter = conversationFilter) {
     const list = $('#conversation-list'); if (!list) return;
     list.innerHTML = '';
     setText('chat-count', conversationCache.length);
     const q = normalizeUsername(filter);
-    const visible = conversationCache.filter(c => !q || normalizeUsername(c.displayName || c.name).includes(q) || normalizeUsername(c.username).includes(q));
+    const visible = conversationCache.filter(c => {
+      if (!q) return true;
+      const label = normalizeUsername(c.displayName || c.name || '');
+      const user = normalizeUsername(c.username || '');
+      const preview = normalizeUsername(c.last_message || '');
+      return label.includes(q) || user.includes(q) || preview.includes(q);
+    });
     if (!visible.length) { list.innerHTML = `<div class="empty-sidebar">${q ? 'No se encontraron conversaciones.' : 'No tienes conversaciones todavía.'}</div>`; return; }
     visible.forEach(conversation => {
       const isGroup = conversation.type === 'group';
@@ -581,18 +646,6 @@
       row.addEventListener('contextmenu',e=>{e.preventDefault(); openConversationMenu(conversation,e.clientX,e.clientY);});
       list.appendChild(row);
     });
-  }
-
-  function openConversationSearch() {
-    openModal('conversation-search-modal');
-    const input=$('#conversation-search-input'); input.value=''; renderConversationSearch(''); setTimeout(()=>input.focus(),0);
-  }
-  function renderConversationSearch(query) {
-    const list=$('#conversation-search-results'); if(!list)return;
-    const q=normalizeUsername(query); const matches=conversationCache.filter(c=>!q||normalizeUsername(c.displayName||c.name).includes(q)||normalizeUsername(c.username).includes(q));
-    list.innerHTML='';
-    if(!matches.length){list.innerHTML='<div class="empty-sidebar">No se encontraron conversaciones.</div>';return;}
-    matches.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='friend-item';const group=c.type==='group';row.innerHTML=`${avatarHTML(c.displayName,c.avatar_url,group?'group':'private','friend-avatar')}<div class="friend-copy"><strong>${esc(c.displayName)}</strong><small>${group?'Grupo':'@'+esc(c.username||'')}</small></div><span class="open-chat">Abrir</span>`;row.addEventListener('click',()=>{closeModal('conversation-search-modal');openConversation(c.id,c);});list.appendChild(row);});
   }
 
   function openConversationMenu(conversation,x,y){
@@ -635,7 +688,7 @@
       updateChatHeader();
       renderRightPane();
       renderConversations();
-      await loadMessages(conversationId);
+      await loadMessages(conversationId, true);
       await supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId });
       const readRow = conversationCache.find(c => String(c.id) === conversationId); if (readRow) { readRow.unread_count = 0; readRow.has_mention = false; }
       renderConversations();
@@ -688,10 +741,11 @@
     return { ...row };
   }
 
-  async function loadMessages(conversationId) {
+  async function loadMessages(conversationId, forceBottom = false) {
     const { data, error } = await supabase.rpc('xifre_get_messages', { p_conversation_id: conversationId, p_limit: 500 });
     if (error) throw error;
-    renderMessages((data || []).map(messageObject), true);
+    if (String(currentConversation) !== String(conversationId)) return;
+    renderMessages((data || []).map(messageObject), forceBottom);
   }
 
   function renderMessageContent(content, message) {
@@ -699,9 +753,10 @@
     let html = esc(content || '');
     html = html.replace(/@everyone\b/g, '<span class="mention-token everyone">@everyone</span>');
     members.forEach(m => {
-      const u=String(m.username||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); if(!u)return;
-      const re=new RegExp(`@${u}\\b`,'gi');
-      html=html.replace(re, `<span class="mention-token ${String(m.user_id)===String(currentUser.id)?'self':''}">@${esc(m.username)}</span>`);
+      const u = String(m.username || '').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      if (!u) return;
+      const re = new RegExp(`@${u}\\b`, 'gi');
+      html = html.replace(re, `<span class="mention-token ${String(m.user_id)===String(currentUser.id)?'self':''}">@${esc(m.username)}</span>`);
     });
     return html;
   }
@@ -710,14 +765,56 @@
     return String(message.sender_id)!==String(currentUser.id) && (message.mention_everyone || (message.mentions||[]).some(id=>String(id)===String(currentUser.id)));
   }
 
+  function messagesSignature(messages){
+    return messages.map(m=>[String(m.id||''),String(m.created_at||''),String(m.content||''),JSON.stringify(m.attachments||[]),String(m.mentions||[]),!!m.mention_everyone,String(m.message_type||'')].join('¦')).join('\n');
+  }
+
   function renderMessages(messages, forceBottom=false) {
     const box=$('#messages'); if(!box)return;
-    const wasNearBottom=forceBottom || box.scrollHeight-box.scrollTop-box.clientHeight<140;
+    const signature=messagesSignature(messages);
+    if(!forceBottom && signature===lastMessagesSignature) return;
+
+    const previousScrollTop=box.scrollTop;
+    const previousDistance=box.scrollHeight-box.scrollTop-box.clientHeight;
+    const wasNearBottom=forceBottom || previousDistance<140;
+    let anchorId='';
+    let anchorOffset=0;
+    if(!wasNearBottom){
+      const boxRect=box.getBoundingClientRect();
+      const rows=[...box.querySelectorAll('.message-row,.system-message-row')];
+      const anchor=rows.find(row=>row.getBoundingClientRect().bottom>boxRect.top+8);
+      if(anchor){
+        anchorId=String(anchor.dataset.messageId||'');
+        anchorOffset=anchor.getBoundingClientRect().top-boxRect.top;
+      }
+    }
+
+    lastMessagesSignature=signature;
     box.innerHTML='';
-    if(!messages.length){box.innerHTML='<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';return;}
+    if(!messages.length){
+      box.innerHTML='<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
+      requestAnimationFrame(()=>{box.scrollTop=0;});
+      return;
+    }
     const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m]));
     messages.forEach(m=>renderOneMessage(m,profiles));
-    if(wasNearBottom) box.scrollTop=box.scrollHeight;
+    requestAnimationFrame(()=>{
+      if(forceBottom||wasNearBottom){
+        box.scrollTop=box.scrollHeight;
+        return;
+      }
+      if(anchorId){
+        const anchor=box.querySelector(`[data-message-id="${CSS.escape(anchorId)}"]`);
+        if(anchor){
+          const boxRect=box.getBoundingClientRect();
+          const newOffset=anchor.getBoundingClientRect().top-boxRect.top;
+          box.scrollTop += newOffset-anchorOffset;
+          return;
+        }
+      }
+      const max=Math.max(0,box.scrollHeight-box.clientHeight);
+      box.scrollTop=Math.min(previousScrollTop,max);
+    });
   }
 
   function renderOneMessage(message, profiles=new Map()) {
@@ -728,13 +825,16 @@
       const row=document.createElement('div');row.className='system-message-row';row.dataset.messageId=String(message.id);row.innerHTML=`<span>${esc(message.content||'')}</span>`;box.appendChild(row);return;
     }
     const mine=String(message.sender_id)===String(currentUser.id); const cached=profiles.get(String(message.sender_id))||{};
-    const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null};
+    const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null,avatar_color:message.sender_avatar_color||cached.avatar_color||randomAvatarColor(),school_handle:message.sender_school_handle||cached.school_handle||'usuario'};
     const mentioned=!mine && !!(message.mention_everyone || (message.mentions||[]).some(id=>String(id)===String(currentUser.id)));
     const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);
-    row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
+    const attachments=Array.isArray(message.attachments)?message.attachments.filter(a=>a&&a.url):[];
+    const attachmentsHTML=attachments.length?`<div class="message-attachments">${attachments.map((a,i)=>`<button type="button" class="message-attachment" data-image-url="${esc(a.url)}" data-image-name="${esc(a.name||`Imagen ${i+1}`)}"><img src="${esc(a.url)}" alt="${esc(a.name||'Imagen adjunta')}" loading="lazy"><span>${esc(a.name||'Imagen')}</span></button>`).join('')}</div>`:'';
+    row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',sender.avatar_color)}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div>${attachmentsHTML}</div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
     row.querySelector('[data-message-action="reply"]').addEventListener('click',e=>{e.stopPropagation();setReplyTo(message);highlightMessage(message.id);});
     row.querySelector('[data-message-action="more"]').addEventListener('click',e=>{e.stopPropagation();openMessageMenu(message,e.currentTarget);});
     row.querySelector('.message-reply-preview')?.addEventListener('click',()=>highlightMessage(message.reply_to));
+    $$('.message-attachment',row).forEach(button=>button.addEventListener('click',e=>{e.stopPropagation();openImageLightbox(button.dataset.imageUrl,button.dataset.imageName||'Imagen');}));
     row.addEventListener('contextmenu',e=>{e.preventDefault();openMessageMenu(message,row);});
     box.appendChild(row);
   }
@@ -799,32 +899,74 @@
     const input=$('#message-input'); const picker=$('#mention-picker'); if(!input||!picker)return;
     const value=input.value; const before=value.slice(0,input.selectionStart??value.length); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i);
     if(!currentConversation||!match){picker.classList.add('hidden');return;}
-    const query=match[2].toLowerCase(); let people=currentMembers.filter(m=>String(m.user_id)!==String(currentUser.id)&&String(m.username||'').toLowerCase().startsWith(query));
-    const items=[];
-    if(currentConversationData?.type==='group' && ('everyone'.startsWith(query))) items.push({everyone:true,username:'everyone'});
-    people.slice(0,8).forEach(p=>items.push(p));
-    picker.innerHTML=''; if(!items.length){picker.classList.add('hidden');return;}
-    items.forEach((p,i)=>{const row=document.createElement('div');row.className=`mention-item${i===mentionPickerIndex?' active':''}`;row.innerHTML=p.everyone?`<span class="mention-avatar">@</span><span class="mention-item-copy"><strong class="mention-everyone">@everyone</strong><small>Mencionar a todos</small></span>`:`${avatarHTML(p.username,p.avatar_url,'private','mention-avatar')}<span class="mention-item-copy"><strong>${esc(p.username)}</strong><small>@${esc(p.username)}</small></span>`;row.addEventListener('mousedown',e=>{e.preventDefault();selectMention(p);});picker.appendChild(row);});
+    const query=match[2].toLowerCase();
+    const people=currentMembers.filter(m=>String(m.user_id)!==String(currentUser.id)&&isUUID(m.user_id)&&String(m.username||'').toLowerCase().startsWith(query));
+    const items=people.slice(0,8);
+    mentionPickerIndex=0;
+    picker.innerHTML='';
+    if(!items.length){picker.classList.add('hidden');return;}
+    items.forEach((p,i)=>{
+      const row=document.createElement('div'); row.className=`mention-item${i===mentionPickerIndex?' active':''}`;
+      row.innerHTML=`${avatarHTML(p.username,p.avatar_url,'private','mention-avatar',p.avatar_color)}<span class="mention-item-copy"><strong>${esc(p.username)}</strong><small>@${esc(p.username)}</small></span>`;
+      row.addEventListener('mousedown',e=>{e.preventDefault();selectMention(p);});
+      picker.appendChild(row);
+    });
     picker.classList.remove('hidden');
   }
   function selectMention(person){
-    const input=$('#message-input'); const value=input.value; const pos=input.selectionStart??value.length; const before=value.slice(0,pos); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i); if(!match)return;
-    const start=pos-match[2].length-1; const token=person.everyone?'@everyone ':'@'+person.username+' '; input.value=value.slice(0,start)+token+value.slice(pos); input.focus(); const newPos=start+token.length; input.setSelectionRange(newPos,newPos); $('#mention-picker').classList.add('hidden'); if(person.everyone) mentionEverywhere=true; else currentMentionIds.add(String(person.id)); updateSendState(); scheduleTyping();
+    const input=$('#message-input');
+    const userId=String(person?.user_id||'');
+    if(!isUUID(userId)){toast('No se pudo identificar a ese usuario.','error');return;}
+    const username=String(person?.username||'').trim(); if(!username)return;
+    const value=input.value; const pos=input.selectionStart??value.length; const before=value.slice(0,pos); const match=before.match(/(^|\s)@([a-z0-9_]*)$/i); if(!match)return;
+    const start=pos-match[2].length-1; const token='@'+username+' '; input.value=value.slice(0,start)+token+value.slice(pos); input.focus(); const newPos=start+token.length; input.setSelectionRange(newPos,newPos);
+    $('#mention-picker').classList.add('hidden'); currentMentionIds.add(userId); updateSendState(); scheduleTyping();
   }
-  function updateSendState(){const input=$('#message-input');$('#send-button').disabled=true; if(input){} }
+  function updateSendState(){
+    const input=$('#message-input');
+    const hasText=!!String(input?.value||'').trim();
+    const hasImages=pendingChatImages.length>0;
+    if($('#send-button')) $('#send-button').disabled=!(hasText||hasImages)||!currentConversation;
+  }
   function deriveMentions(content){
-    const ids=[]; for(const m of currentMembers){if(new RegExp(`@${String(m.username||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i').test(content))ids.push(m.user_id);}
+    const ids=[];
+    for(const m of currentMembers){
+      const uid=String(m.user_id||''); if(!isUUID(uid)) continue;
+      const username=String(m.username||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); if(!username) continue;
+      if(new RegExp(`@${username}\\b`,'i').test(content)) ids.push(uid);
+    }
     return {ids:[...new Set(ids)],everyone:/@everyone\b/i.test(content)};
   }
 
   async function sendMessage() {
-    if(!currentUser||!currentConversation)return; const input=$('#message-input'); const content=String(input.value||'').trim(); if(!content)return;
+    if(!currentUser||!currentConversation)return;
+    const input=$('#message-input'); const content=String(input.value||'').trim();
+    if(!content && !pendingChatImages.length)return;
     const button=$('#send-button'); button.disabled=true;
+    const uploadedPaths=[];
     try{
-      const derived=deriveMentions(content); const mentions=[...new Set([...derived.ids,...currentMentionIds])];
-      const {data,error}=await supabase.rpc('xifre_send_message',{p_conversation_id:currentConversation,p_content:content,p_reply_to:replyTarget?.id||null,p_mentions:mentions,p_mention_everyone:derived.everyone||mentionEverywhere});
-      if(error)throw error; const sent=Array.isArray(data)?data[0]:data; const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m])); renderOneMessage(sent,profiles); input.value=''; clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker').classList.add('hidden'); stopTypingBroadcast(); $('#messages').scrollTop=$('#messages').scrollHeight; await loadConversations(); await supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation});
-    }catch(error){toast(friendlyError(error),'error');}finally{updateSendState();input.focus();}
+      const derived=deriveMentions(content);
+      const mentions=derived.ids;
+      const attachments=[];
+      for(const item of pendingChatImages){
+        const uploaded=await uploadChatImage(item.file); uploadedPaths.push(uploaded.path);
+        attachments.push({url:uploaded.url,type:item.file.type,name:item.file.name,size:item.file.size});
+      }
+      const {data,error}=await supabase.rpc('xifre_send_message',{p_conversation_id:currentConversation,p_content:content,p_reply_to:replyTarget?.id||null,p_mentions:mentions,p_mention_everyone:derived.everyone,p_attachments:attachments});
+      if(error)throw error;
+      const sent=Array.isArray(data)?data[0]:data;
+      const profiles=new Map(currentMembers.map(m=>[String(m.user_id),m]));
+      renderOneMessage(sent,profiles);
+      input.value=''; clearReply(); clearChatImages(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden'); stopTypingBroadcast();
+      $('#messages').scrollTop=$('#messages').scrollHeight;
+      await loadConversations();
+      await supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation}).catch(()=>{});
+      const c=conversationCache.find(x=>String(x.id)===String(currentConversation)); if(c){c.unread_count=0;c.has_mention=false;}
+      renderConversations(conversationFilter);
+    }catch(error){
+      if(uploadedPaths.length) await supabase.storage.from('xifre-chat').remove(uploadedPaths).catch(()=>{});
+      toast(friendlyError(error),'error');
+    }finally{updateSendState();input.focus();}
   }
 
   /* ------------------------------------------------------------------------ */
@@ -848,20 +990,20 @@
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async payload => {
         if (String(payload.new?.sender_id) === String(currentUser.id)) return;
         if (String(currentConversation) !== String(conversationId)) return;
-        await loadMessages(conversationId).catch(() => {});
+        await loadMessages(conversationId, false).catch(() => {});
         await loadConversations().catch(() => {});
         const box=$('#messages'); if(box && box.scrollHeight-box.scrollTop-box.clientHeight<80) { await supabase.rpc('xifre_mark_read',{p_conversation_id:conversationId}).catch(()=>{}); const c=conversationCache.find(x=>String(x.id)===String(conversationId)); if(c){c.unread_count=0;c.has_mention=false;} renderConversations(); }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async () => {
         if (String(currentConversation) !== String(conversationId)) return;
-        await loadMessages(conversationId).catch(() => {});
+        await loadMessages(conversationId, false).catch(() => {});
         await loadConversations().catch(() => {});
       })
       .subscribe();
     if (messagePoll) clearInterval(messagePoll);
     messagePoll = setInterval(() => {
       if (document.visibilityState === 'visible' && String(currentConversation) === String(conversationId)) {
-        loadMessages(conversationId).catch(() => {});
+        loadMessages(conversationId, false).catch(() => {});
       }
     }, 2500);
   }
@@ -931,6 +1073,7 @@
       const name = other?.username || 'Usuario';
       avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other?.avatar_color);
       setText('right-profile-name', name);
+      setText('right-profile-username', `@${other?.school_handle || 'usuario'}`);
     } else {
       const name = currentConversationData?.name || 'Grupo';
       avatarInto($('#right-group-avatar'), name, currentConversationData?.avatar_url, 'group');
@@ -950,7 +1093,15 @@
   }
 
   function showMemberProfile(member,anchor){
-    const pop=$('#member-profile-popover'); if(!pop)return; selectedMember=member; avatarInto($('#member-profile-avatar'),member.username,member.avatar_url,'private',member.avatar_color); setText('member-profile-name',member.username||'Usuario'); setText('member-profile-username','@'+(member.username||'usuario')); pop.classList.remove('hidden'); const r=anchor.getBoundingClientRect(); pop.style.left=`${Math.min(r.left,window.innerWidth-235)}px`; pop.style.top=`${Math.min(r.bottom+8,window.innerHeight-180)}px`;
+    const pop=$('#member-profile-popover'); if(!pop)return;
+    selectedMember=member;
+    avatarInto($('#member-profile-avatar'),member.username,member.avatar_url,'private',member.avatar_color);
+    setText('member-profile-name',member.username||'Usuario');
+    setText('member-profile-username',`@${member.school_handle || 'usuario'}`);
+    pop.classList.remove('hidden');
+    const r=anchor.getBoundingClientRect(); const width=246,height=220;
+    const left=Math.min(Math.max(10,r.left),window.innerWidth-width-10); const top=Math.min(r.bottom+10,window.innerHeight-height-10);
+    pop.style.left=`${left}px`; pop.style.top=`${Math.max(10,top)}px`;
   }
   function closeMemberProfile(){ $('#member-profile-popover')?.classList.add('hidden'); selectedMember=null; }
   function openMemberMenu(member,x,y){
@@ -961,7 +1112,7 @@
   async function memberAction(action){
     const member=selectedMember; closeMemberMenu(); if(!member||!currentConversation)return;
     let fn='',args={p_conversation_id:currentConversation,p_user_id:member.user_id}; if(action==='kick')fn='xifre_remove_group_member'; if(action==='grant')fn='xifre_grant_group_admin'; if(action==='revoke')fn='xifre_revoke_group_admin'; if(!fn)return;
-    const {error}=await supabase.rpc(fn,args); if(error)return toast(friendlyError(error),'error'); memberCache.delete(currentConversation); const r=await supabase.rpc('xifre_get_conversation_members',{p_conversation_id:currentConversation}); if(r.error)return toast(friendlyError(r.error),'error'); currentMembers=r.data||[]; memberCache.set(currentConversation,currentMembers); renderRightPane(); await openChatInfo(); await loadMessages(currentConversation); await loadConversations(); toast(action==='kick'?'Persona expulsada.':action==='grant'?'Administrador añadido.':'Administrador retirado.','success');
+    const {error}=await supabase.rpc(fn,args); if(error)return toast(friendlyError(error),'error'); memberCache.delete(currentConversation); const r=await supabase.rpc('xifre_get_conversation_members',{p_conversation_id:currentConversation}); if(r.error)return toast(friendlyError(r.error),'error'); currentMembers=r.data||[]; memberCache.set(currentConversation,currentMembers); renderRightPane(); await openChatInfo(); await loadMessages(currentConversation, false); await loadConversations(); toast(action==='kick'?'Persona expulsada.':action==='grant'?'Administrador añadido.':'Administrador retirado.','success');
   }
 
   /* ------------------------------------------------------------------------ */
@@ -974,7 +1125,7 @@
     friendCache.forEach(friend => {
       const row = document.createElement('label');
       row.className = 'selection-item';
-      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+      row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || 'usuario')}</small></span>`;
       list.appendChild(row);
     });
     updateGroupSelectedCount();
@@ -1037,7 +1188,7 @@
     members.forEach(member => {
       const row = document.createElement('div');
       row.className = 'friend-item';
-      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>${member.is_owner ? 'Creador' : member.is_admin ? 'Administrador' : '@'+esc(member.username||'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
+      row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>@${esc(member.school_handle || 'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
       row.addEventListener('click',()=>showMemberProfile(member,row));
       row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
       list.appendChild(row);
@@ -1053,7 +1204,7 @@
     candidates.forEach(friend => {
       const row = document.createElement('label');
       row.className = 'selection-item';
-      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+      row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.school_handle || 'usuario')}</small></span>`;
       list.appendChild(row);
     });
     updateGroupAddCount();
@@ -1145,66 +1296,103 @@
   /* Avatar upload / profile settings                                         */
   /* ------------------------------------------------------------------------ */
   function fileExt(file) {
-    const map = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+    const map = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif' };
     return map[file?.type] || 'png';
   }
 
   function validateImage(file) {
     if (!file) throw new Error('No se ha seleccionado ninguna imagen.');
     if (!/^image\/(png|jpeg|webp|gif)$/i.test(file.type)) throw new Error('Solo se permiten PNG, JPG, WEBP o GIF.');
-    if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB.');
+    if (file.size > 5*1024*1024) throw new Error('La imagen no puede superar 5 MB.');
   }
 
-  async function uploadAvatar(file, path) {
+  async function uploadAvatar(file,path) {
     validateImage(file);
-    const { error } = await supabase.storage.from('xifre-avatars').upload(path, file, { upsert: false, contentType: file.type, cacheControl: '31536000' });
-    if (error) throw error;
-    const result = supabase.storage.from('xifre-avatars').getPublicUrl(path);
-    if (result.error) throw result.error;
+    const {error}=await supabase.storage.from('xifre-avatars').upload(path,file,{upsert:false,contentType:file.type,cacheControl:'31536000'});
+    if(error)throw error;
+    const result=supabase.storage.from('xifre-avatars').getPublicUrl(path);
+    if(result.error)throw result.error;
     return `${result.data.publicUrl}?v=${Date.now()}`;
   }
 
-  function previewFile(file, target, name, kind) {
-    try { validateImage(file); } catch (error) { toast(error.message, 'error'); return; }
-    const url = URL.createObjectURL(file);
-    target.innerHTML = avatarHTML(name, url, kind);
-    target.dataset.objectUrl = url;
+  function previewFile(file,target,name,kind,color='') {
+    try{validateImage(file);}catch(error){toast(error.message,'error');return;}
+    if(!target)return;
+    const previous=target.dataset.objectUrl; if(previous)URL.revokeObjectURL(previous);
+    const url=URL.createObjectURL(file); target.innerHTML=avatarHTML(name,url,kind,'',color || currentProfile?.avatar_color || randomAvatarColor()); target.dataset.objectUrl=url;
   }
 
-  function openSettings() {
-    syncProfileUI();
-    applyTheme(currentTheme());
-    $('#settings-modal')?.classList.remove('hidden');
+  function clearPreviewObjectUrl(target){
+    if(!target)return; const url=target.dataset.objectUrl; if(url)URL.revokeObjectURL(url); delete target.dataset.objectUrl;
   }
 
-  async function saveProfileSettings() {
-    if (!currentUser) return;
-    const button = $('#save-profile-settings');
-    const username = normalizeUsername($('#settings-username').value);
-    if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
-    setLoading(button, true);
-    try {
-      let avatarUrl = null;
-      if (pendingProfileAvatarFile) {
-        const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;
-        avatarUrl = await uploadAvatar(pendingProfileAvatarFile, path);
-      }
-      const { data, error } = await supabase.rpc('xifre_update_profile', { p_username: username, p_display_name: username, p_avatar_url: avatarUrl });
-      if (error) throw error;
-      currentProfile = Array.isArray(data) ? data[0] : data;
-      pendingProfileAvatarFile = null;
-      pendingProfileAvatarURL = null;
-      syncProfileUI();
-      memberCache.clear();
-      await loadFriends();
-      await loadConversations();
-      if (currentConversation) await openConversation(currentConversation);
-      setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
-    } catch (error) {
-      setModalMessage('profile-settings-message', friendlyError(error), 'error');
-    } finally {
-      setLoading(button, false);
+  function validateChatImage(file){
+    if(!file)throw new Error('No se ha seleccionado ninguna imagen.');
+    if(!/^image\/(png|jpeg|webp|gif)$/i.test(file.type))throw new Error('Solo puedes adjuntar imágenes PNG, JPG, WEBP o GIF.');
+    if(file.size>10*1024*1024)throw new Error('Cada imagen puede pesar como máximo 10 MB.');
+  }
+
+  function clearChatImages(){
+    pendingChatImages.forEach(item=>{if(item?.previewUrl)URL.revokeObjectURL(item.previewUrl);}); pendingChatImages=[]; renderAttachmentPreview(); updateSendState();
+  }
+
+  function removeChatImage(index){
+    const item=pendingChatImages[index]; if(item?.previewUrl)URL.revokeObjectURL(item.previewUrl); pendingChatImages.splice(index,1); renderAttachmentPreview(); updateSendState();
+  }
+
+  function addChatImages(fileList){
+    if(!currentConversation)return;
+    const files=[...fileList||[]].filter(file=>String(file?.type||'').startsWith('image/'));
+    for(const file of files){
+      try{validateChatImage(file);}catch(error){toast(error.message,'error');continue;}
+      if(pendingChatImages.some(item=>item.file.name===file.name&&item.file.size===file.size&&item.file.lastModified===file.lastModified))continue;
+      if(pendingChatImages.length>=4){toast('Puedes adjuntar hasta 4 imágenes por mensaje.','error');break;}
+      pendingChatImages.push({file,previewUrl:URL.createObjectURL(file)});
     }
+    renderAttachmentPreview(); updateSendState();
+  }
+
+  function renderAttachmentPreview(){
+    const box=$('#attachment-preview'); if(!box)return; box.innerHTML='';
+    if(!pendingChatImages.length){box.classList.add('hidden');return;}
+    pendingChatImages.forEach((item,index)=>{
+      const card=document.createElement('div'); card.className='attachment-preview-item';
+      card.innerHTML=`<img src="${esc(item.previewUrl)}" alt="${esc(item.file.name)}"><div class="attachment-preview-copy"><strong>${esc(item.file.name)}</strong><small>${formatFileSize(item.file.size)}</small></div><button type="button" class="attachment-remove" aria-label="Quitar imagen">×</button>`;
+      card.querySelector('.attachment-remove').addEventListener('click',()=>removeChatImage(index)); box.appendChild(card);
+    });
+    box.classList.remove('hidden');
+  }
+
+  async function uploadChatImage(file){
+    validateChatImage(file);
+    const path=`${currentUser.id}/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${fileExt(file)}`;
+    const {error}=await supabase.storage.from('xifre-chat').upload(path,file,{upsert:false,contentType:file.type,cacheControl:'31536000'});
+    if(error)throw error;
+    const {data}=supabase.storage.from('xifre-chat').getPublicUrl(path);
+    if(!data?.publicUrl)throw new Error('No se pudo generar la URL de la imagen.');
+    return {path,url:`${data.publicUrl}?v=${Date.now()}`};
+  }
+
+  function openImageLightbox(url,name='Imagen'){const box=$('#image-lightbox'),img=$('#image-lightbox-img');if(!box||!img)return;img.src=url||'';img.alt=name;box.classList.remove('hidden');}
+  function closeImageLightbox(){const box=$('#image-lightbox'),img=$('#image-lightbox-img');box?.classList.add('hidden');if(img)img.src='';}
+
+  function openSettings(){syncProfileUI();applyTheme(currentTheme());$('#settings-modal')?.classList.remove('hidden');}
+
+  async function saveProfileSettings(){
+    if(!currentUser)return;
+    const button=$('#save-profile-settings'); const username=normalizeUsername($('#settings-username').value);
+    if(!/^[a-z0-9_]{3,20}$/.test(username))return setModalMessage('profile-settings-message','El username debe tener 3–20 caracteres y solo letras, números y _.','error');
+    setLoading(button,true);
+    try{
+      let avatarUrl=null;
+      if(pendingProfileAvatarFile){const path=`${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;avatarUrl=await uploadAvatar(pendingProfileAvatarFile,path);}
+      const {data,error}=await supabase.rpc('xifre_update_profile',{p_username:username,p_display_name:username,p_avatar_url:avatarUrl}); if(error)throw error;
+      currentProfile=Array.isArray(data)?data[0]:data; currentProfile.school_handle=schoolHandleForProfile(currentProfile);
+      pendingProfileAvatarFile=null; clearPreviewObjectUrl($('#settings-avatar-preview')); pendingProfileAvatarURL=null; syncProfileUI(); memberCache.clear();
+      await loadFriends(); await loadConversations(); if(currentConversation)await loadMessages(currentConversation,false);
+      setModalMessage('profile-settings-message','Cambios guardados.','success');
+    }catch(error){setModalMessage('profile-settings-message',friendlyError(error),'error');}
+    finally{setLoading(button,false);}
   }
 
   /* ------------------------------------------------------------------------ */
@@ -1247,7 +1435,7 @@
     $('#message-input').disabled = true;
     $('#message-input').value = '';
     $('#send-button').disabled = true;
-    clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden');
+    clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden'); clearChatImages();
     setTypingVisible(false);
     $('#messages').innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Bienvenido a XIFRE</h3><p>Selecciona un chat de la izquierda para empezar.</p></div>';
     $('.right-pane-empty')?.classList.remove('hidden');
@@ -1296,12 +1484,14 @@
         const type = action.dataset.action;
         if (type === 'open-settings') openSettings();
         else if (type === 'close-settings') $('#settings-modal')?.classList.add('hidden');
+        else if (type === 'close-member-profile') closeMemberProfile();
+        else if (type === 'close-image-lightbox') closeImageLightbox();
+        else if (type === 'open-chat-image') $('#chat-image-file')?.click();
         else if (type === 'logout') void logout();
         else if (type === 'open-friend') { openModal('people-modal'); showPeopleTab('add'); $('#friend-search').value=''; searchPeople(''); $('#friend-search').focus(); }
         else if (type === 'open-friends') { openModal('people-modal'); showPeopleTab('friends'); renderFriendsModal(); }
         else if (type === 'open-requests') { openModal('people-modal'); showPeopleTab('requests'); void loadFriendRequests(); }
         else if (type === 'open-people') { openModal('people-modal'); showPeopleTab('friends'); renderFriendsModal(); }
-        else if (type === 'open-conversation-search') openConversationSearch();
         else if (type === 'open-group') { openModal('group-modal'); renderGroupSelection(); $('#group-name').focus(); }
         else if (type === 'create-group') void createGroup();
         else if (type === 'open-chat-info') void openChatInfo();
@@ -1343,7 +1533,16 @@
     }, true);
 
     $('#friend-search')?.addEventListener('input', e => searchPeople(e.target.value));
-    $('#conversation-search-input')?.addEventListener('input',e=>{clearTimeout(conversationSearchTimer);conversationSearchTimer=setTimeout(()=>renderConversationSearch(e.target.value),120);});
+    $('#conversation-search-input')?.addEventListener('input', e => {
+      conversationFilter = String(e.target.value || '');
+      $('#conversation-search-clear')?.classList.toggle('hidden', !conversationFilter);
+      renderConversations(conversationFilter);
+    });
+    $('#conversation-search-clear')?.addEventListener('click', () => {
+      const input=$('#conversation-search-input'); conversationFilter='';
+      if(input){input.value='';input.focus();}
+      $('#conversation-search-clear')?.classList.add('hidden'); renderConversations('');
+    });
     document.addEventListener('click',event=>{const tab=event.target.closest('[data-people-tab]');if(tab)showPeopleTab(tab.dataset.peopleTab);});
     document.addEventListener('click',event=>{const a=event.target.closest('[data-member-menu]');if(a)void memberAction(a.dataset.memberMenu);});
     document.addEventListener('click',event=>{if(!event.target.closest('#member-menu'))closeMemberMenu();if(!event.target.closest('#member-profile-popover')&&!event.target.closest('.right-member')&&!event.target.closest('#info-members .friend-item'))closeMemberProfile();});
@@ -1356,7 +1555,7 @@
       if (!file) return;
       try { validateImage(file); } catch (error) { event.target.value = ''; toast(error.message, 'error'); return; }
       pendingProfileAvatarFile = file;
-      previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private');
+      previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private', currentProfile?.avatar_color || randomAvatarColor());
     });
 
     $('#group-avatar-file')?.addEventListener('change', event => {
@@ -1366,6 +1565,19 @@
       pendingGroupAvatarFile = file;
       previewFile(file, $('#group-edit-avatar-preview'), currentConversationData?.name || 'Grupo', 'group');
     });
+
+    $('#chat-image-file')?.addEventListener('change', event => { addChatImages(event.target.files); event.target.value=''; });
+    $('#message-input')?.addEventListener('paste', event => {
+      const files=[...(event.clipboardData?.files||[])].filter(file=>String(file.type||'').startsWith('image/'));
+      const itemFiles=[...((event.clipboardData?.items)||[])].map(item=>item.kind==='file'?item.getAsFile():null).filter(file=>file&&String(file.type||'').startsWith('image/'));
+      const images=files.length?files:itemFiles;
+      if(images.length){event.preventDefault();addChatImages(images);}
+    });
+    const centerPane=$('#center-pane');
+    centerPane?.addEventListener('dragenter',event=>{if(![...(event.dataTransfer?.items||[])].some(item=>item.kind==='file'))return;event.preventDefault();dragDepth++;centerPane.classList.add('drag-over');});
+    centerPane?.addEventListener('dragover',event=>{if(![...(event.dataTransfer?.items||[])].some(item=>item.kind==='file'))return;event.preventDefault();});
+    centerPane?.addEventListener('dragleave',event=>{event.preventDefault();dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)centerPane.classList.remove('drag-over');});
+    centerPane?.addEventListener('drop',event=>{const files=[...(event.dataTransfer?.files||[])].filter(file=>String(file.type||'').startsWith('image/'));if(!files.length)return;event.preventDefault();dragDepth=0;centerPane.classList.remove('drag-over');addChatImages(files);});
 
     $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
     $('#message-input')?.addEventListener('input', () => {
@@ -1389,6 +1601,8 @@
 
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
+        if (!$('#image-lightbox').classList.contains('hidden')) return closeImageLightbox();
+        if (!$('#member-profile-popover').classList.contains('hidden')) return closeMemberProfile();
         if (!$('#message-menu').classList.contains('hidden')) return closeMessageMenu();
         if (!$('#confirm-modal').classList.contains('hidden')) return finishConfirm(false);
         if (!$('#settings-modal').classList.contains('hidden')) return $('#settings-modal').classList.add('hidden');
@@ -1398,8 +1612,12 @@
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && currentUser) {
-        void loadConversations().then(() => {
-          if (currentConversation) return openConversation(currentConversation, conversationCache.find(c => String(c.id) === String(currentConversation)));
+        void loadConversations().then(async () => {
+          if (currentConversation) {
+            currentConversationData = conversationCache.find(c => String(c.id) === String(currentConversation)) || currentConversationData;
+            await loadMessages(currentConversation, false).catch(() => {});
+            updateChatHeader(); renderRightPane(); return;
+          }
           return restoreConversation();
         }).catch(() => {});
       }
