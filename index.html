@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-v10-authfix">
+<link rel="stylesheet" href="style.css?v=20261008-v11">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -63,23 +63,18 @@
       <aside class="left-pane">
         <div class="left-pane-head">
           <div class="brand-line"><span>XIFRE</span><i></i></div>
-          <button class="profile-strip" type="button" data-action="open-settings">
-            <span id="profile-avatar" class="profile-avatar">X</span>
-            <span class="profile-strip-copy"><strong id="profile-name">Usuario</strong><small id="profile-username">@usuario</small></span>
-            <span class="profile-strip-chevron">›</span>
-          </button>
+          <div class="brand-version">pre-alpha 1.1</div>
           <div class="nav-actions">
-            <button type="button" class="nav-action primary" data-action="open-friend"><span class="nav-icon">＋</span><span>Nuevo chat</span></button>
-            <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">▦</span><span>Nuevo grupo</span></button>
+            <button type="button" class="nav-action" data-action="open-conversation-search"><span class="nav-icon">⌕</span><span>Buscar conversaciones</span></button>
+            <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
+            <button type="button" class="nav-action" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
           </div>
         </div>
 
         <div class="left-pane-scroll">
           <div class="list-heading"><span>MENSAJES DIRECTOS</span><span id="chat-count">0</span></div>
           <div id="conversation-list" class="conversation-list"></div>
-          <div class="list-heading people-heading"><span>PERSONAS</span></div>
-          <button class="people-row" type="button" data-action="open-friends"><span class="people-row-icon">♙</span><span>Amigos</span></button>
-          <button class="people-row" type="button" data-action="open-requests"><span class="people-row-icon">◇</span><span>Solicitudes de amistad</span></button>
+          
         </div>
 
         <div class="left-pane-userbar">
@@ -107,6 +102,7 @@
           </div>
         </header>
 
+        <div id="mention-picker" class="mention-picker hidden"></div>
         <div id="messages" class="messages-scroll">
           <div class="chat-welcome">
             <div class="welcome-mark">X</div>
@@ -154,38 +150,6 @@
     </div>
   </section>
 
-  <!-- FRIEND SEARCH -->
-  <div id="friend-modal" class="modal hidden">
-    <div class="modal-card">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="friend-modal">×</button>
-      <div class="modal-kicker">PERSONAS</div>
-      <h2>Nuevo chat</h2>
-      <p>Busca por username. Si sois amigos podrás abrir el DM directamente; si no, podrás enviar una solicitud.</p>
-      <label class="modal-label" for="friend-search">Buscar username</label>
-      <input id="friend-search" class="modal-input" type="text" maxlength="20" autocomplete="off" placeholder="Escribe un username...">
-      <div id="friend-search-results" class="search-results"></div>
-      <div id="friend-message" class="modal-message"></div>
-    </div>
-  </div>
-
-  <!-- FRIENDS -->
-  <div id="friends-modal" class="modal hidden">
-    <div class="modal-card wide-modal">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="friends-modal">×</button>
-      <div class="modal-kicker">PERSONAS</div><h2>Amigos</h2><p>Abre una conversación privada.</p>
-      <div id="friends-modal-list" class="friends-list"></div>
-    </div>
-  </div>
-
-  <!-- REQUESTS -->
-  <div id="requests-modal" class="modal hidden">
-    <div class="modal-card wide-modal">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="requests-modal">×</button>
-      <div class="modal-kicker">PERSONAS</div><h2>Solicitudes de amistad</h2><p>Gestiona aquí tus solicitudes pendientes.</p>
-      <div id="requests-message" class="modal-message"></div>
-      <div id="friend-requests-list" class="friends-list"></div>
-    </div>
-  </div>
 
   <!-- CREATE GROUP -->
   <div id="group-modal" class="modal hidden">
@@ -225,6 +189,68 @@
         <div id="group-add-list" class="selection-list"></div>
         <button id="add-group-members-button" class="secondary-action" type="button" data-action="add-group-members">Añadir seleccionados</button>
       </div>
+    </div>
+  </div>
+
+  <!-- CONVERSATION CONTEXT MENU -->
+  <div id="conversation-menu" class="conversation-menu hidden">
+    <button type="button" data-conversation-menu="read">✓ <span>Marcar como leído</span></button>
+  </div>
+
+  <!-- MEMBER MENU -->
+  <div id="member-menu" class="member-menu hidden">
+    <button type="button" data-member-menu="profile">◉ <span>Ver perfil</span></button>
+    <button type="button" data-member-menu="kick">⌫ <span>Expulsar</span></button>
+    <button type="button" data-member-menu="grant">♛ <span>Dar administrador</span></button>
+    <button type="button" data-member-menu="revoke">♛ <span>Quitar administrador</span></button>
+  </div>
+
+  <!-- MEMBER MINI PROFILE -->
+  <div id="member-profile-popover" class="member-profile-popover hidden">
+    <button class="popover-close" type="button" data-action="close-member-profile">×</button>
+    <div id="member-profile-avatar" class="member-profile-avatar">X</div>
+    <strong id="member-profile-name">Usuario</strong>
+    <small id="member-profile-username">@usuario</small>
+  </div>
+
+  <!-- FRIENDS / REQUESTS / ADD FRIENDS -->
+  <div id="people-modal" class="modal hidden">
+    <div class="modal-card people-modal-card">
+      <button class="modal-close" type="button" data-action="close-modal" data-modal="people-modal">×</button>
+      <div class="modal-kicker">SOCIAL</div>
+      <div class="people-tabs">
+        <button type="button" class="people-tab active" data-people-tab="friends">Amigos</button>
+        <button type="button" class="people-tab" data-people-tab="requests">Solicitudes</button>
+        <button type="button" class="people-tab accent" data-people-tab="add">Añadir amigo</button>
+      </div>
+      <section id="people-friends-panel" class="people-panel active">
+        <h2>Amigos</h2><p>Abre una conversación privada con cualquiera de tus amigos.</p>
+        <div id="friends-modal-list" class="friends-list"></div>
+      </section>
+      <section id="people-requests-panel" class="people-panel">
+        <h2>Solicitudes</h2><p>Acepta o rechaza las solicitudes pendientes.</p>
+        <div id="requests-message" class="modal-message"></div>
+        <div id="friend-requests-list" class="friends-list"></div>
+      </section>
+      <section id="people-add-panel" class="people-panel">
+        <h2>Añadir amigo</h2><p>Busca a alguien por su username.</p>
+        <label class="modal-label" for="friend-search">Username</label>
+        <input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Escribe un username...">
+        <div id="friend-search-results" class="search-results"></div>
+        <div id="friend-message" class="modal-message"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- CONVERSATION SEARCH -->
+  <div id="conversation-search-modal" class="modal hidden">
+    <div class="modal-card wide-modal search-conversation-card">
+      <button class="modal-close" type="button" data-action="close-modal" data-modal="conversation-search-modal">×</button>
+      <div class="modal-kicker">CONVERSACIONES</div>
+      <h2>Buscar conversaciones</h2>
+      <p>Busca por nombre de usuario o nombre del grupo.</p>
+      <input id="conversation-search-input" class="modal-input" type="text" autocomplete="off" placeholder="Buscar conversaciones...">
+      <div id="conversation-search-results" class="friends-list"></div>
     </div>
   </div>
 
@@ -288,18 +314,9 @@
       </section>
     </div>
   </div>
+<div id="toast-container" class="toast-container"></div>
 </main>
 
-<script>
-(() => {
-  document.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-go]');
-    if (!button) return;
-    event.preventDefault();
-    window.XIFRE?.showScreen?.(button.dataset.go);
-  });
-})();
-</script>
-<script src="app.js?v=20261008-v10-authfix"></script>
+<script src="app.js?v=20261008-v11"></script>
 </body>
 </html>
