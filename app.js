@@ -637,33 +637,54 @@
   }
 
   async function acceptFriendRequest(requestId, senderId, button) {
-    if (!currentUser || !requestId || !senderId) return;
+    if (!currentUser || !requestId || !senderId) {
+      console.warn('ACCEPT FRIEND: datos incompletos', { requestId, senderId, currentUser });
+      return;
+    }
 
-    if (button) setLoading(button, true);
+    const row = button?.closest('.friend-request-item');
+    const rowButtons = row ? row.querySelectorAll('.request-action') : [];
+
+    if (button) {
+      setLoading(button, true);
+      button.innerHTML = '<span class="request-spinner"></span> Aceptando…';
+    }
+    rowButtons.forEach(control => {
+      control.disabled = true;
+    });
+
+    setModalMessage('requests-message', 'Aceptando solicitud…', '');
 
     try {
-      /*
-       * Evitamos duplicados aunque ya exista una amistad.
-       * El orden user1/user2 queda siempre estable.
-       */
-      const firstId = String(currentUser.id) < String(senderId)
-        ? currentUser.id
-        : senderId;
+      /* Primero comprobamos que la solicitud sigue siendo nuestra. */
+      const { data: request, error: requestLookupError } = await supabase
+        .from('friend_requests')
+        .select('id,sender_id,receiver_id')
+        .eq('id', requestId)
+        .eq('receiver_id', currentUser.id)
+        .maybeSingle();
 
-      const secondId = String(currentUser.id) < String(senderId)
-        ? senderId
-        : currentUser.id;
+      if (requestLookupError) throw requestLookupError;
 
-      const existing = await supabase
+      if (!request) {
+        throw new Error('La solicitud ya no existe o no tienes permiso para aceptarla.');
+      }
+
+      /* Mantener siempre el mismo orden evita amistades duplicadas. */
+      const ids = [String(currentUser.id), String(request.sender_id || senderId)].sort();
+      const firstId = ids[0];
+      const secondId = ids[1];
+
+      const { data: existing, error: existingError } = await supabase
         .from('friendships')
         .select('id')
         .eq('user1_id', firstId)
         .eq('user2_id', secondId)
         .maybeSingle();
 
-      if (existing.error) throw existing.error;
+      if (existingError) throw existingError;
 
-      if (!existing.data) {
+      if (!existing) {
         const { error: friendshipError } = await supabase
           .from('friendships')
           .insert({
@@ -682,18 +703,36 @@
 
       if (deleteError) throw deleteError;
 
-      toast('Solicitud aceptada. Ahora sois amigos.', 'success');
+      if (row) {
+        row.classList.add('request-accepted');
+        row.querySelector('.friend-request-info')?.classList.add('request-user-success');
+      }
 
-      await Promise.allSettled([
+      toast('Solicitud aceptada. Ahora sois amigos.', 'success');
+      setModalMessage('requests-message', 'Solicitud aceptada. Ahora sois amigos.', 'success');
+
+      /* Actualizamos inmediatamente la interfaz. */
+      await Promise.all([
         loadFriends(),
         loadFriendRequests()
       ]);
 
     } catch (error) {
       console.error('ACCEPT FRIEND REQUEST:', error);
+      const detail = error?.message || error?.details || 'Error desconocido.';
+      setModalMessage('requests-message', `No se pudo aceptar: ${detail}`, 'error');
       toast('No se pudo aceptar la solicitud.', 'error');
+      rowButtons.forEach(control => {
+        control.disabled = false;
+      });
+      if (button) {
+        button.innerHTML = 'Aceptar';
+        setLoading(button, false);
+      }
     } finally {
-      if (button) setLoading(button, false);
+      if (button && !button.classList.contains('loading')) {
+        setLoading(button, false);
+      }
     }
   }
 
@@ -913,6 +952,25 @@
         return;
       }
 
+      /* Las acciones de solicitudes tienen su propio atributo y deben
+         procesarse ANTES de buscar data-action. */
+      const requestAction = event.target.closest('[data-request-action]');
+      if (requestAction && !requestAction.disabled) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const actionType = requestAction.dataset.requestAction;
+        const requestId = requestAction.dataset.requestId;
+        const senderId = requestAction.dataset.senderId;
+
+        if (actionType === 'accept') {
+          void acceptFriendRequest(requestId, senderId, requestAction);
+        } else if (actionType === 'reject') {
+          void rejectFriendRequest(requestId, requestAction);
+        }
+        return;
+      }
+
       const action = event.target.closest('[data-action]');
       if (!action) return;
       const type = action.dataset.action;
@@ -930,23 +988,6 @@
       if (type === 'send-friend') sendFriendRequest();
       if (type === 'create-group') createGroup();
       if (type === 'open-requests') openFriendRequests();
-
-      const requestAction = event.target.closest('[data-request-action]');
-      if (requestAction) {
-        event.preventDefault();
-
-        const actionType = requestAction.dataset.requestAction;
-        const requestId = requestAction.dataset.requestId;
-        const senderId = requestAction.dataset.senderId;
-
-        if (actionType === 'accept') {
-          acceptFriendRequest(requestId, senderId, requestAction);
-        }
-
-        if (actionType === 'reject') {
-          rejectFriendRequest(requestId, requestAction);
-        }
-      }
     });
 
     $('#login-form')?.addEventListener('submit', event => { event.preventDefault(); login(); });
