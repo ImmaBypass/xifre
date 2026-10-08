@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-auth-v62">
+<link rel="stylesheet" href="style.css?v=20261008-v8">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -61,10 +61,10 @@
   <aside class="sidebar">
     <div class="sidebar-scroll">
       <div class="sidebar-brand"><div class="sidebar-logo">XIFRE</div><div class="brand-dot"></div></div>
-      <div class="profile-mini">
+      <button class="profile-mini profile-mini-button" type="button" data-action="open-settings" aria-label="Abrir configuración">
         <div id="profile-avatar" class="profile-avatar">?</div>
         <div class="profile-info"><div id="profile-name" class="profile-name">Usuario</div><div id="profile-username" class="profile-username">@usuario</div></div>
-      </div>
+      </button>
 
       <div class="quick-actions">
         <button class="quick-button primary-quick" type="button" data-action="open-friend"><span class="quick-icon">＋</span><span>Nuevo chat</span></button>
@@ -80,7 +80,11 @@
         <button class="people-button" type="button" data-action="open-requests"><span>◇</span><span>Solicitudes de amistad</span></button>
       </div>
     </div>
-    <button class="logout-button" type="button" data-action="logout">Cerrar sesión</button>
+    <div class="sidebar-userbar">
+      <div class="sidebar-userbar-copy"><span class="sidebar-userbar-name" id="bottom-profile-name">Usuario</span><span class="sidebar-userbar-tag" id="bottom-profile-username">@usuario</span></div>
+      <button class="sidebar-userbar-button" type="button" data-action="open-settings" aria-label="Configuración">⚙</button>
+      <button class="sidebar-userbar-button danger" type="button" data-action="logout" aria-label="Cerrar sesión">⇥</button>
+    </div>
   </aside>
 
   <section class="chat-area">
@@ -105,7 +109,19 @@
         </div>
         <button id="cancel-reply" type="button" class="reply-cancel" aria-label="Cancelar respuesta">×</button>
       </div>
-      <div class="composer"><input id="message-input" type="text" placeholder="Escribe un mensaje..." autocomplete="off" maxlength="2000" disabled><button id="send-button" class="send-button" type="submit" disabled aria-label="Enviar mensaje">↑</button></div>
+      <div class="composer-shell">
+        <button class="composer-icon-button" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
+        <div class="composer-main">
+          <input id="message-input" type="text" placeholder="Enviar mensaje..." autocomplete="off" maxlength="2000" disabled>
+          <div class="composer-tools">
+            <button type="button" class="composer-tool" data-action="composer-placeholder" title="Regalo">🎁</button>
+            <button type="button" class="composer-tool" data-action="composer-placeholder" title="GIF">GIF</button>
+            <button type="button" class="composer-tool" data-action="composer-placeholder" title="Stickers">☺</button>
+            <button type="button" class="composer-tool" data-action="composer-placeholder" title="Emoji">☺</button>
+          </div>
+        </div>
+        <button id="send-button" class="send-button" type="submit" disabled aria-label="Enviar mensaje">➤</button>
+      </div>
       <div class="composer-hint"><span>Enter para enviar · Shift+Enter no envía</span><span id="message-status"></span></div>
     </form>
   </section>
@@ -147,6 +163,19 @@
   <div id="chat-members" class="chat-members"></div>
 
   <div id="group-management" class="group-management hidden">
+    <div id="group-edit-section" class="group-edit-section">
+      <div class="group-manage-title">Personalizar grupo</div>
+      <div class="group-edit-preview-row">
+        <div id="group-edit-avatar-preview" class="group-edit-avatar-preview">◈</div>
+        <div class="group-edit-avatar-copy"><strong>Foto del grupo</strong><span>PNG, JPG, WEBP o GIF · máximo 5 MB</span></div>
+        <label class="upload-button small-upload">Cambiar<input id="group-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+      </div>
+      <label class="modal-label" for="group-edit-name">Nombre del grupo</label>
+      <input id="group-edit-name" class="settings-input" type="text" maxlength="50" placeholder="Nombre del grupo">
+      <button id="save-group-settings" class="auth-button compact-auth-button" type="button" data-action="save-group-settings">Guardar cambios</button>
+      <div id="group-settings-message" class="modal-message"></div>
+    </div>
+
     <div class="group-manage-title">Añadir personas al grupo</div>
     <div class="group-manage-subtitle">Solo el administrador puede añadir amigos.</div>
     <div class="group-members-heading"><span>Amigos disponibles</span><span id="group-add-selected-count">0 seleccionados</span></div>
@@ -155,6 +184,46 @@
     <button id="delete-group-button" class="danger-button" type="button" data-action="delete-group">Eliminar grupo</button>
   </div>
 </div></div>
+
+<div id="settings-modal" class="settings-overlay hidden">
+  <div class="settings-window">
+    <aside class="settings-nav">
+      <div class="settings-nav-title">AJUSTES DE USUARIO</div>
+      <button class="settings-nav-item active" type="button" data-settings-tab="profile">Mi cuenta</button>
+      <button class="settings-nav-item" type="button" data-settings-tab="appearance">Personalización</button>
+      <div class="settings-nav-spacer"></div>
+      <button class="settings-nav-item settings-close-nav" type="button" data-action="close-settings">Esc</button>
+    </aside>
+    <section class="settings-content">
+      <button class="settings-close" type="button" data-action="close-settings" aria-label="Cerrar configuración">×</button>
+      <div id="settings-profile-tab" class="settings-tab active">
+        <div class="settings-title">Mi cuenta</div>
+        <div class="settings-subtitle">Gestiona tu identidad en XIFRE.</div>
+        <div class="settings-profile-card">
+          <div id="settings-avatar-preview" class="settings-avatar-preview">?</div>
+          <div class="settings-profile-copy"><strong id="settings-preview-name">Usuario</strong><span id="settings-preview-username">@usuario</span><label class="upload-button">Cambiar avatar<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label></div>
+        </div>
+        <div class="settings-form-grid">
+          <div class="settings-field"><label for="settings-display-name">Nombre para mostrar</label><input id="settings-display-name" class="settings-input" type="text" maxlength="32" placeholder="Tu nombre"></div>
+          <div class="settings-field"><label for="settings-username">Username</label><input id="settings-username" class="settings-input" type="text" maxlength="20" placeholder="username"><small>3–20 caracteres: letras, números y _</small></div>
+        </div>
+        <div id="profile-settings-message" class="modal-message"></div>
+        <button id="save-profile-settings" class="auth-button settings-save" type="button" data-action="save-profile-settings">Guardar cambios</button>
+      </div>
+      <div id="settings-appearance-tab" class="settings-tab">
+        <div class="settings-title">Personalización</div>
+        <div class="settings-subtitle">Cambia el aspecto de XIFRE cuando quieras.</div>
+        <div class="theme-section">
+          <div class="theme-section-title">Tema</div>
+          <div class="theme-options">
+            <button class="theme-option active" type="button" data-theme-choice="dark"><span class="theme-preview dark-preview"><i></i><i></i><i></i></span><strong>Oscuro</strong><small>El estilo inspirado en Discord</small></button>
+            <button class="theme-option" type="button" data-theme-choice="light"><span class="theme-preview light-preview"><i></i><i></i><i></i></span><strong>Claro</strong><small>Fondo claro y texto oscuro</small></button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
 
 <div id="toast-container" aria-live="polite"></div>
 </main>
@@ -173,6 +242,6 @@
   });
 })();
 </script>
-<script src="app.js?v=20261008-auth-v62"></script>
+<script src="app.js?v=20261008-v8"></script>
 </body>
 </html>
