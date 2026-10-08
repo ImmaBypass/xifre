@@ -23,7 +23,7 @@
 <section id="login-screen" class="screen">
   <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
     <h2>Iniciar sesión</h2><p class="auth-description">Entra en tu cuenta de Xifre</p>
-    <form id="login-form" autocomplete="on" onsubmit="event.preventDefault(); window.XIFRE && window.XIFRE.login(); return false;">
+    <form id="login-form" autocomplete="on">
       <div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
       <div class="input-group"><label for="login-password">Contraseña</label><input id="login-password" type="password" placeholder="Tu contraseña" autocomplete="current-password" required></div>
       <button id="login-button" class="auth-button" type="submit"><span class="button-text">Iniciar sesión</span><span class="button-loader"></span></button>
@@ -37,7 +37,7 @@
 <section id="register-screen" class="screen">
   <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
     <h2>Crear cuenta</h2><p class="auth-description">Elige tu username y crea tu cuenta</p>
-    <form id="register-form" autocomplete="on" onsubmit="event.preventDefault(); window.XIFRE && window.XIFRE.register(); return false;">
+    <form id="register-form" autocomplete="on">
       <div class="input-group"><label for="register-username">Username</label><input id="register-username" type="text" placeholder="sam" maxlength="20" autocomplete="username" required><small class="input-help">3–20 caracteres: letras, números y _</small></div>
       <div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
       <div class="input-group"><label for="register-password">Contraseña</label><input id="register-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" minlength="6" required></div>
@@ -97,8 +97,16 @@
     </div>
 
     <form id="message-form" class="message-form">
+      <div id="reply-bar" class="reply-bar hidden">
+        <div class="reply-bar-main">
+          <span class="reply-bar-label">RESPONDIENDO A</span>
+          <strong id="replying-name">Usuario</strong>
+          <span id="replying-content"></span>
+        </div>
+        <button id="cancel-reply" type="button" class="reply-cancel" aria-label="Cancelar respuesta">×</button>
+      </div>
       <div class="composer"><input id="message-input" type="text" placeholder="Escribe un mensaje..." autocomplete="off" maxlength="2000" disabled><button id="send-button" class="send-button" type="submit" disabled aria-label="Enviar mensaje">↑</button></div>
-      <div class="composer-hint"><span>Enter para enviar</span><span id="message-status"></span></div>
+      <div class="composer-hint"><span>Enter para enviar · Shift+Enter no envía</span><span id="message-status"></span></div>
     </form>
   </section>
 </section>
@@ -106,9 +114,9 @@
 <div id="friend-modal" class="modal hidden"><div class="modal-card wide-modal">
   <button class="modal-close" type="button" data-action="close-modal" data-modal="friend-modal">×</button>
   <div class="modal-kicker">PERSONAS</div><h2>Nuevo chat</h2><p>Selecciona un amigo para abrir una conversación privada o busca su username para enviarle una solicitud.</p>
-  <div class="friend-search-row"><input id="friend-search" type="text" placeholder="Buscar amigo..." autocomplete="off"><button class="small-action-button" type="button" data-action="focus-friend-request">Añadir</button></div>
-  <div id="new-chat-friends" class="new-chat-friends"></div>
-  <div class="friend-request-box"><label class="modal-label" for="friend-username">Username para añadir</label><div class="inline-form"><input id="friend-username" type="text" placeholder="username" maxlength="20" autocomplete="off"><button id="send-friend-button" class="secondary-button compact" type="button" data-action="send-friend">Enviar solicitud</button></div></div>
+  <label class="modal-label friend-search-label" for="friend-search">Buscar por username</label>
+  <div class="friend-search-box"><input id="friend-search" type="text" placeholder="Escribe un username..." maxlength="20" autocomplete="off"></div>
+  <div id="friend-search-results" class="friend-search-results"></div>
   <div id="friend-message" class="modal-message"></div>
 </div></div>
 
@@ -135,7 +143,17 @@
 
 <div id="chat-info-modal" class="modal hidden"><div class="modal-card wide-modal">
   <button class="modal-close" type="button" data-action="close-modal" data-modal="chat-info-modal">×</button>
-  <div class="modal-kicker">CONVERSACIÓN</div><h2 id="info-title">Chat</h2><p id="info-subtitle">Información</p><div id="chat-members" class="chat-members"></div>
+  <div class="modal-kicker">CONVERSACIÓN</div><h2 id="info-title">Chat</h2><p id="info-subtitle">Información</p>
+  <div id="chat-members" class="chat-members"></div>
+
+  <div id="group-management" class="group-management hidden">
+    <div class="group-manage-title">Añadir personas al grupo</div>
+    <div class="group-manage-subtitle">Solo el administrador puede añadir amigos.</div>
+    <div class="group-members-heading"><span>Amigos disponibles</span><span id="group-add-selected-count">0 seleccionados</span></div>
+    <div id="group-add-list" class="group-friends-list"></div>
+    <button id="add-group-members-button" class="auth-button group-add-button" type="button" data-action="add-group-members">Añadir seleccionados</button>
+    <button id="delete-group-button" class="danger-button" type="button" data-action="delete-group">Eliminar grupo</button>
+  </div>
 </div></div>
 
 <div id="toast-container" aria-live="polite"></div>
