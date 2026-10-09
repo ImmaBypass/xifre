@@ -5,318 +5,322 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261008-v11">
+<link rel="stylesheet" href="style.css?v=20261009-scroll-mentions">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="background-effects"><div class="background-glow glow-one"></div><div class="background-glow glow-two"></div><div class="background-glow glow-three"></div></div>
 <main id="app">
 <section id="landing-screen" class="screen active">
-  <div class="landing-content">
-    <h1 class="xifre-logo">XIFRE</h1>
-    <p class="landing-description">xifre es un servicio web de mensajeria<br>jaumico basado en xifre</p>
-    <button class="primary-button" type="button" data-go="login">Entrar</button>
-    <p class="landing-note">(cuando le das a entrar si no tienes cuenta registrate gilipollas)</p>
-  </div>
+<div class="landing-content">
+<h1 class="xifre-logo">XIFRE</h1>
+<p class="landing-description">xifre es un servicio web de mensajeria<br>jaumico basado en xifre</p>
+<button class="primary-button" type="button" data-go="login">Entrar</button>
+<p class="landing-note">(cuando le das a entrar si no tienes cuenta registrate gilipollas)</p>
+</div>
 </section>
 
 <section id="login-screen" class="screen">
-  <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
-    <h2>Iniciar sesión</h2><p class="auth-description">Entra en tu cuenta de Xifre</p>
-    <form id="login-form" autocomplete="on">
-      <div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
-      <div class="input-group"><label for="login-password">Contraseña</label><input id="login-password" type="password" placeholder="Tu contraseña" autocomplete="current-password" required></div>
-      <button id="login-button" class="auth-button" type="submit"><span class="button-text">Iniciar sesión</span><span class="button-loader"></span></button>
-    </form>
-    <div id="login-message" class="auth-message"></div>
-    <div class="auth-switch"><span>¿No tienes cuenta?</span><button class="text-button" type="button" data-go="register">Regístrate</button></div>
-    <button class="back-button" type="button" data-go="landing">← Volver</button>
-  </div></div>
+<div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
+<h2>Iniciar sesión</h2><p class="auth-description">Entra en tu cuenta de Xifre</p>
+<form id="login-form" autocomplete="on">
+<div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
+<div class="input-group"><label for="login-password">Contraseña</label><input id="login-password" type="password" placeholder="Tu contraseña" autocomplete="current-password" required></div>
+<button id="login-button" class="auth-button" type="submit"><span class="button-text">Iniciar sesión</span><span class="button-loader"></span></button>
+</form>
+<div id="login-message" class="auth-message"></div>
+<div class="auth-switch"><span>¿No tienes cuenta?</span><button class="text-button" type="button" data-go="register">Regístrate</button></div>
+<button class="back-button" type="button" data-go="landing">← Volver</button>
+</div></div>
 </section>
 
 <section id="register-screen" class="screen">
-  <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
-    <h2>Crear cuenta</h2><p class="auth-description">Elige tu username y crea tu cuenta</p>
-    <form id="register-form" autocomplete="on">
-      <div class="input-group"><label for="register-username">Username</label><input id="register-username" type="text" placeholder="sam" maxlength="20" autocomplete="username" required><small class="input-help">3–20 caracteres: letras, números y _</small></div>
-      <div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
-      <div class="input-group"><label for="register-password">Contraseña</label><input id="register-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" minlength="6" required></div>
-      <button id="register-button" class="auth-button" type="submit"><span class="button-text">Crear cuenta</span><span class="button-loader"></span></button>
-    </form>
-    <div id="register-message" class="auth-message"></div>
-    <div class="auth-switch"><span>¿Ya tienes cuenta?</span><button class="text-button" type="button" data-go="login">Inicia sesión</button></div>
-    <button class="back-button" type="button" data-go="landing">← Volver</button>
-  </div></div>
+<div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
+<h2>Crear cuenta</h2><p class="auth-description">Elige tu username y crea tu cuenta</p>
+<form id="register-form" autocomplete="on">
+<div class="input-group"><label for="register-username">Username</label><input id="register-username" type="text" placeholder="sam" maxlength="20" autocomplete="username" required><small class="input-help">3–20 caracteres: letras, números y _</small></div>
+<div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
+<div class="input-group"><label for="register-password">Contraseña</label><input id="register-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" minlength="6" required></div>
+<button id="register-button" class="auth-button" type="submit"><span class="button-text">Crear cuenta</span><span class="button-loader"></span></button>
+</form>
+<div id="register-message" class="auth-message"></div>
+<div class="auth-switch"><span>¿Ya tienes cuenta?</span><button class="text-button" type="button" data-go="login">Inicia sesión</button></div>
+<button class="back-button" type="button" data-go="landing">← Volver</button>
+</div></div>
 </section>
 
 <section id="email-screen" class="screen">
-  <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card email-card">
-    <div class="email-icon">@</div><h2>Revisa tu correo</h2><p class="auth-description">Te hemos enviado un correo para confirmar tu cuenta.</p><p id="confirmation-email" class="confirmation-email"></p><p class="email-small">Después de confirmar tu correo podrás iniciar sesión con tu email y contraseña.</p>
-    <button id="resend-confirmation" class="secondary-button" type="button" data-action="resend">Reenviar correo</button>
-    <button class="auth-button" type="button" data-go="login">Volver al inicio de sesión</button>
-  </div></div>
+<div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card email-card">
+<div class="email-icon">@</div><h2>Revisa tu correo</h2><p class="auth-description">Te hemos enviado un correo para confirmar tu cuenta.</p><p id="confirmation-email" class="confirmation-email"></p><p class="email-small">Después de confirmar tu correo podrás iniciar sesión con tu email y contraseña.</p>
+<button id="resend-confirmation" class="secondary-button" type="button" data-action="resend">Reenviar correo</button>
+<button class="auth-button" type="button" data-go="login">Volver al inicio de sesión</button>
+</div></div>
 </section>
 
 <section id="main-screen" class="main-screen">
-    <div class="app-shell">
-      <!-- LEFT: navigation / conversations -->
-      <aside class="left-pane">
-        <div class="left-pane-head">
-          <div class="brand-line"><span>XIFRE</span><i></i></div>
-          <div class="brand-version">pre-alpha 1.1</div>
-          <div class="nav-actions">
-            <button type="button" class="nav-action" data-action="open-conversation-search"><span class="nav-icon">⌕</span><span>Buscar conversaciones</span></button>
-            <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
-            <button type="button" class="nav-action" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
-          </div>
-        </div>
+<div class="app-shell">
+<!-- LEFT: navigation / conversations -->
+<aside class="left-pane">
+<div class="left-pane-head">
+<div class="brand-line"><span>XIFRE</span><i></i></div>
+<div class="brand-version">pre-alpha 1.1</div>
+<div class="nav-actions">
+<button type="button" class="nav-action" data-action="open-conversation-search"><span class="nav-icon">⌕</span><span>Buscar conversaciones</span></button>
+<button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
+<button type="button" class="nav-action" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
+</div>
+</div>
 
-        <div class="left-pane-scroll">
-          <div class="list-heading"><span>MENSAJES DIRECTOS</span><span id="chat-count">0</span></div>
-          <div id="conversation-list" class="conversation-list"></div>
-          
-        </div>
+<div class="left-pane-scroll">
+<div class="list-heading"><span>MENSAJES DIRECTOS</span><span id="chat-count">0</span></div>
+<div id="conversation-list" class="conversation-list"></div>
 
-        <div class="left-pane-userbar">
-          <div class="userbar-profile" data-action="open-settings" role="button" tabindex="0">
-            <span id="bottom-profile-avatar" class="userbar-avatar">X</span>
-            <span class="userbar-copy"><strong id="bottom-profile-name">Usuario</strong><small id="bottom-profile-username">@usuario</small></span>
-          </div>
-          <button type="button" class="userbar-button" data-action="open-settings" aria-label="Configuración">⚙</button>
-          <button type="button" class="userbar-button logout" data-action="logout" aria-label="Cerrar sesión">⇥</button>
-        </div>
-      </aside>
+</div>
 
-      <!-- CENTER: chat -->
-      <section class="center-pane">
-        <header class="chat-topbar">
-          <div class="chat-topbar-left">
-            <span id="chat-avatar" class="chat-header-avatar">X</span>
-            <div class="chat-header-copy">
-              <h2 id="chat-title">XIFRE</h2>
-              <p id="chat-subtitle">Selecciona una conversación</p>
-            </div>
-          </div>
-          <div class="chat-topbar-actions">
-            <button id="chat-info-button" class="topbar-button hidden" type="button" data-action="open-chat-info" aria-label="Información">ⓘ</button>
-          </div>
-        </header>
+<div class="left-pane-userbar">
+<div class="userbar-profile" data-action="open-settings" role="button" tabindex="0">
+<span id="bottom-profile-avatar" class="userbar-avatar">X</span>
+<span class="userbar-copy"><strong id="bottom-profile-name">Usuario</strong><small id="bottom-profile-username">@usuario</small></span>
+</div>
+<button type="button" class="userbar-button" data-action="open-settings" aria-label="Configuración">⚙</button>
+<button type="button" class="userbar-button logout" data-action="logout" aria-label="Cerrar sesión">⇥</button>
+</div>
+</aside>
 
-        <div id="mention-picker" class="mention-picker hidden"></div>
-        <div id="messages" class="messages-scroll">
-          <div class="chat-welcome">
-            <div class="welcome-mark">X</div>
-            <h3>Bienvenido a XIFRE</h3>
-            <p>Selecciona un chat de la izquierda para empezar.</p>
-          </div>
-        </div>
+<!-- CENTER: chat -->
+<section class="center-pane">
+<header class="chat-topbar">
+<div class="chat-topbar-left">
+<span id="chat-avatar" class="chat-header-avatar">X</span>
+<div class="chat-header-copy">
+<h2 id="chat-title">XIFRE</h2>
+<p id="chat-subtitle">Selecciona una conversación</p>
+</div>
+</div>
+<div class="chat-topbar-actions">
+<button id="chat-info-button" class="topbar-button hidden" type="button" data-action="open-chat-info" aria-label="Información">ⓘ</button>
+</div>
+</header>
 
-        <div id="typing-indicator" class="typing-indicator hidden" aria-live="polite">
-          <span class="typing-dots"><i></i><i></i><i></i></span>
-          <span id="typing-text">Alguien está escribiendo...</span>
-        </div>
+<div id="mention-picker" class="mention-picker hidden"></div>
+<div id="messages" class="messages-scroll">
+<div class="chat-welcome">
+<div class="welcome-mark">X</div>
+<h3>Bienvenido a XIFRE</h3>
+<p>Selecciona un chat de la izquierda para empezar.</p>
+</div>
+</div>
 
-        <form id="message-form" class="composer-area">
-          <div id="reply-bar" class="reply-bar hidden">
-            <div class="reply-bar-accent"></div>
-            <div class="reply-bar-copy"><span class="reply-label">RESPONDIENDO A</span><strong id="replying-name">Usuario</strong><span id="replying-content"></span></div>
-            <button id="cancel-reply" class="reply-close" type="button" aria-label="Cancelar respuesta">×</button>
-          </div>
-          <div class="composer-box">
-            <button class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
-            <input id="message-input" type="text" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled>
-            <button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
-          </div>
-        </form>
-      </section>
+<div id="typing-indicator" class="typing-indicator hidden" aria-live="polite">
+<span class="typing-dots"><i></i><i></i><i></i></span>
+<span id="typing-text">Alguien está escribiendo...</span>
+</div>
 
-      <!-- RIGHT: DM profile / group info -->
-      <aside id="right-pane" class="right-pane">
-        <div class="right-pane-empty">
-          <div class="right-empty-mark">X</div>
-          <span>Selecciona una conversación</span>
-        </div>
-        <div id="right-dm-content" class="right-profile hidden">
-          <div class="right-cover"></div>
-          <div class="right-profile-avatar-wrap"><span id="right-profile-avatar" class="right-profile-avatar">X</span></div>
-          <div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3></div>
-        </div>
-        <div id="right-group-content" class="right-group hidden">
-          <div class="right-group-head"><span id="right-group-avatar" class="right-group-avatar">#</span><div><h3 id="right-group-name">Grupo</h3><p id="right-group-count">0 miembros</p></div></div>
-          <div class="right-group-section-title">MIEMBROS</div>
-          <div id="right-group-members" class="right-group-members"></div>
-        </div>
-      </aside>
-    </div>
-  </section>
+<form id="message-form" class="composer-area">
+<div id="reply-bar" class="reply-bar hidden">
+<div class="reply-bar-accent"></div>
+<div class="reply-bar-copy"><span class="reply-label">RESPONDIENDO A</span><strong id="replying-name">Usuario</strong><span id="replying-content"></span></div>
+<button id="cancel-reply" class="reply-close" type="button" aria-label="Cancelar respuesta">×</button>
+</div>
+<div class="composer-box">
+<button class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
+<input id="message-input" type="text" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled>
+<button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
+</div>
+</form>
+</section>
+
+<!-- RIGHT: DM profile / group info -->
+<aside id="right-pane" class="right-pane">
+<div class="right-pane-empty">
+<div class="right-empty-mark">X</div>
+<span>Selecciona una conversación</span>
+</div>
+<div id="right-dm-content" class="right-profile hidden">
+<div class="right-cover"></div>
+<div class="right-profile-avatar-wrap"><span id="right-profile-avatar" class="right-profile-avatar">X</span></div>
+<div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3></div>
+</div>
+<div id="right-group-content" class="right-group hidden">
+<div class="right-group-head"><span id="right-group-avatar" class="right-group-avatar">#</span><div><h3 id="right-group-name">Grupo</h3><p id="right-group-count">0 miembros</p></div></div>
+<div class="right-group-section-title">MIEMBROS</div>
+<div id="right-group-members" class="right-group-members"></div>
+</div>
+</aside>
+</div>
+</section>
 
 
-  <!-- CREATE GROUP -->
-  <div id="group-modal" class="modal hidden">
-    <div class="modal-card wide-modal">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="group-modal">×</button>
-      <div class="modal-kicker">CONVERSACIONES</div><h2>Crear grupo</h2><p>Elige un nombre y añade a tus amigos.</p>
-      <label class="modal-label" for="group-name">Nombre del grupo</label>
-      <input id="group-name" class="modal-input" type="text" maxlength="50" placeholder="Mi grupo">
-      <div class="selection-heading"><span>Amigos</span><small id="group-selected-count">0 seleccionados</small></div>
-      <div id="group-friends-list" class="selection-list"></div>
-      <div id="group-message" class="modal-message"></div>
-      <button id="create-group-submit" class="primary-action" type="button" data-action="create-group">Crear grupo</button>
-    </div>
-  </div>
+<!-- CREATE GROUP -->
+<div id="group-modal" class="modal hidden">
+<div class="modal-card wide-modal">
+<button class="modal-close" type="button" data-action="close-modal" data-modal="group-modal">×</button>
+<div class="modal-kicker">CONVERSACIONES</div><h2>Crear grupo</h2><p>Elige un nombre y añade a tus amigos.</p>
+<label class="modal-label" for="group-name">Nombre del grupo</label>
+<input id="group-name" class="modal-input" type="text" maxlength="50" placeholder="Mi grupo">
+<div class="selection-heading"><span>Amigos</span><small id="group-selected-count">0 seleccionados</small></div>
+<div id="group-friends-list" class="selection-list"></div>
+<div id="group-message" class="modal-message"></div>
+<button id="create-group-submit" class="primary-action" type="button" data-action="create-group">Crear grupo</button>
+</div>
+</div>
 
-  <!-- CHAT INFO / GROUP EDIT -->
-  <div id="chat-info-modal" class="modal hidden">
-    <div class="modal-card wide-modal">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="chat-info-modal">×</button>
-      <div class="modal-kicker">CONVERSACIÓN</div>
-      <h2 id="info-title">Información</h2>
-      <p id="info-subtitle">Conversación</p>
-      <div id="info-members" class="friends-list compact-list"></div>
-      <div id="group-edit-section" class="group-editor hidden">
-        <div class="editor-divider"></div>
-        <div class="editor-heading">Personalizar grupo</div>
-        <div class="group-photo-editor">
-          <div id="group-edit-avatar-preview" class="group-edit-preview">#</div>
-          <div class="group-photo-copy"><strong>Foto del grupo</strong><small>PNG, JPG, WEBP o GIF · máximo 5 MB</small><label class="file-button">Elegir imagen<input id="group-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label></div>
-        </div>
-        <label class="modal-label" for="group-edit-name">Nombre</label>
-        <input id="group-edit-name" class="modal-input" type="text" maxlength="50" placeholder="Nombre del grupo">
-        <button id="save-group-settings" class="primary-action" type="button" data-action="save-group-settings">Guardar cambios</button>
-        <button id="delete-group-button" class="danger-action" type="button" data-action="request-delete-group">Eliminar grupo</button>
-        <div id="group-settings-message" class="modal-message"></div>
-        <div class="selection-heading"><span>Añadir personas</span><small id="group-add-selected-count">0 seleccionados</small></div>
-        <div id="group-add-list" class="selection-list"></div>
-        <button id="add-group-members-button" class="secondary-action" type="button" data-action="add-group-members">Añadir seleccionados</button>
-      </div>
-    </div>
-  </div>
+<!-- CHAT INFO / GROUP EDIT -->
+<div id="chat-info-modal" class="modal hidden">
+<div class="modal-card wide-modal">
+<button class="modal-close" type="button" data-action="close-modal" data-modal="chat-info-modal">×</button>
+<div class="modal-kicker">CONVERSACIÓN</div>
+<h2 id="info-title">Información</h2>
+<p id="info-subtitle">Conversación</p>
+<div id="info-members" class="friends-list compact-list"></div>
+<div id="group-edit-section" class="group-editor hidden">
+<div class="editor-divider"></div>
+<div class="editor-heading">Personalizar grupo</div>
+<div class="group-photo-editor">
+<div id="group-edit-avatar-preview" class="group-edit-preview">#</div>
+<div class="group-photo-copy"><strong>Foto del grupo</strong><small>PNG, JPG, WEBP o GIF · máximo 5 MB</small><label class="file-button">Elegir imagen<input id="group-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label></div>
+</div>
+<label class="modal-label" for="group-edit-name">Nombre</label>
+<input id="group-edit-name" class="modal-input" type="text" maxlength="50" placeholder="Nombre del grupo">
+<button id="save-group-settings" class="primary-action" type="button" data-action="save-group-settings">Guardar cambios</button>
+<button id="delete-group-button" class="danger-action" type="button" data-action="request-delete-group">Eliminar grupo</button>
+<div id="group-settings-message" class="modal-message"></div>
+<div class="selection-heading"><span>Añadir personas</span><small id="group-add-selected-count">0 seleccionados</small></div>
+<div id="group-add-list" class="selection-list"></div>
+<button id="add-group-members-button" class="secondary-action" type="button" data-action="add-group-members">Añadir seleccionados</button>
+</div>
+</div>
+</div>
 
-  <!-- CONVERSATION CONTEXT MENU -->
-  <div id="conversation-menu" class="conversation-menu hidden">
-    <button type="button" data-conversation-menu="read">✓ <span>Marcar como leído</span></button>
-  </div>
+<!-- CONVERSATION CONTEXT MENU -->
+<div id="conversation-menu" class="conversation-menu hidden">
+<button type="button" data-conversation-menu="read">✓ <span>Marcar como leído</span></button>
+</div>
 
-  <!-- MEMBER MENU -->
-  <div id="member-menu" class="member-menu hidden">
-    <button type="button" data-member-menu="profile">◉ <span>Ver perfil</span></button>
-    <button type="button" data-member-menu="kick">⌫ <span>Expulsar</span></button>
-    <button type="button" data-member-menu="grant">♛ <span>Dar administrador</span></button>
-    <button type="button" data-member-menu="revoke">♛ <span>Quitar administrador</span></button>
-  </div>
+<!-- MEMBER MENU -->
+<div id="member-menu" class="member-menu hidden">
+<button type="button" data-member-menu="kick">⌫ <span>Expulsar</span></button>
+<button type="button" data-member-menu="grant">♛ <span>Dar administrador</span></button>
+<button type="button" data-member-menu="revoke">♛ <span>Quitar administrador</span></button>
+</div>
 
-  <!-- MEMBER MINI PROFILE -->
-  <div id="member-profile-popover" class="member-profile-popover hidden">
-    <button class="popover-close" type="button" data-action="close-member-profile">×</button>
-    <div id="member-profile-avatar" class="member-profile-avatar">X</div>
-    <strong id="member-profile-name">Usuario</strong>
-    <small id="member-profile-username">@usuario</small>
-  </div>
+<!-- MEMBER MINI PROFILE -->
+<div id="member-profile-popover" class="member-profile-popover hidden" role="dialog" aria-label="Perfil del miembro">
+<button class="popover-close" type="button" data-action="close-member-profile" aria-label="Cerrar perfil">×</button>
+<div class="member-profile-cover"></div>
+<div class="member-profile-main">
+  <div id="member-profile-avatar" class="member-profile-avatar">X</div>
+  <strong id="member-profile-name">Usuario</strong>
+  <small id="member-profile-username">@usuario</small>
+  <div class="member-profile-divider"></div>
+  <span id="member-profile-role" class="member-profile-role">Miembro del grupo</span>
+</div>
+</div>
 
-  <!-- FRIENDS / REQUESTS / ADD FRIENDS -->
-  <div id="people-modal" class="modal hidden">
-    <div class="modal-card people-modal-card">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="people-modal">×</button>
-      <div class="modal-kicker">SOCIAL</div>
-      <div class="people-tabs">
-        <button type="button" class="people-tab active" data-people-tab="friends">Amigos</button>
-        <button type="button" class="people-tab" data-people-tab="requests">Solicitudes</button>
-        <button type="button" class="people-tab accent" data-people-tab="add">Añadir amigo</button>
-      </div>
-      <section id="people-friends-panel" class="people-panel active">
-        <h2>Amigos</h2><p>Abre una conversación privada con cualquiera de tus amigos.</p>
-        <div id="friends-modal-list" class="friends-list"></div>
-      </section>
-      <section id="people-requests-panel" class="people-panel">
-        <h2>Solicitudes</h2><p>Acepta o rechaza las solicitudes pendientes.</p>
-        <div id="requests-message" class="modal-message"></div>
-        <div id="friend-requests-list" class="friends-list"></div>
-      </section>
-      <section id="people-add-panel" class="people-panel">
-        <h2>Añadir amigo</h2><p>Busca a alguien por su username.</p>
-        <label class="modal-label" for="friend-search">Username</label>
-        <input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Escribe un username...">
-        <div id="friend-search-results" class="search-results"></div>
-        <div id="friend-message" class="modal-message"></div>
-      </section>
-    </div>
-  </div>
+<!-- FRIENDS / REQUESTS / ADD FRIENDS -->
+<div id="people-modal" class="modal hidden">
+<div class="modal-card people-modal-card">
+<button class="modal-close" type="button" data-action="close-modal" data-modal="people-modal">×</button>
+<div class="modal-kicker">SOCIAL</div>
+<div class="people-tabs">
+<button type="button" class="people-tab active" data-people-tab="friends">Amigos</button>
+<button type="button" class="people-tab" data-people-tab="requests">Solicitudes</button>
+<button type="button" class="people-tab accent" data-people-tab="add">Añadir amigo</button>
+</div>
+<section id="people-friends-panel" class="people-panel active">
+<h2>Amigos</h2><p>Abre una conversación privada con cualquiera de tus amigos.</p>
+<div id="friends-modal-list" class="friends-list"></div>
+</section>
+<section id="people-requests-panel" class="people-panel">
+<h2>Solicitudes</h2><p>Acepta o rechaza las solicitudes pendientes.</p>
+<div id="requests-message" class="modal-message"></div>
+<div id="friend-requests-list" class="friends-list"></div>
+</section>
+<section id="people-add-panel" class="people-panel">
+<h2>Añadir amigo</h2><p>Busca a alguien por su username.</p>
+<label class="modal-label" for="friend-search">Username</label>
+<input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Escribe un username...">
+<div id="friend-search-results" class="search-results"></div>
+<div id="friend-message" class="modal-message"></div>
+</section>
+</div>
+</div>
 
-  <!-- CONVERSATION SEARCH -->
-  <div id="conversation-search-modal" class="modal hidden">
-    <div class="modal-card wide-modal search-conversation-card">
-      <button class="modal-close" type="button" data-action="close-modal" data-modal="conversation-search-modal">×</button>
-      <div class="modal-kicker">CONVERSACIONES</div>
-      <h2>Buscar conversaciones</h2>
-      <p>Busca por nombre de usuario o nombre del grupo.</p>
-      <input id="conversation-search-input" class="modal-input" type="text" autocomplete="off" placeholder="Buscar conversaciones...">
-      <div id="conversation-search-results" class="friends-list"></div>
-    </div>
-  </div>
+<!-- CONVERSATION SEARCH -->
+<div id="conversation-search-modal" class="modal hidden">
+<div class="modal-card wide-modal search-conversation-card">
+<button class="modal-close" type="button" data-action="close-modal" data-modal="conversation-search-modal">×</button>
+<div class="modal-kicker">CONVERSACIONES</div>
+<h2>Buscar conversaciones</h2>
+<p>Busca por nombre de usuario o nombre del grupo.</p>
+<input id="conversation-search-input" class="modal-input" type="text" autocomplete="off" placeholder="Buscar conversaciones...">
+<div id="conversation-search-results" class="friends-list"></div>
+</div>
+</div>
 
-  <!-- MESSAGE MENU -->
-  <div id="message-menu" class="message-menu hidden">
-    <button type="button" data-message-menu="reply">↩ <span>Responder</span></button>
-    <button id="delete-message-menu" type="button" class="message-menu-danger" data-message-menu="delete">⌫ <span>Eliminar mensaje</span></button>
-  </div>
+<!-- MESSAGE MENU -->
+<div id="message-menu" class="message-menu hidden">
+<button type="button" data-message-menu="reply">↩ <span>Responder</span></button>
+<button id="delete-message-menu" type="button" class="message-menu-danger" data-message-menu="delete">⌫ <span>Eliminar mensaje</span></button>
+</div>
 
-  <!-- CUSTOM CONFIRM -->
-  <div id="confirm-modal" class="modal hidden">
-    <div class="modal-card confirm-card">
-      <div class="confirm-symbol">!</div>
-      <div class="modal-kicker" id="confirm-kicker">CONFIRMAR</div>
-      <h2 id="confirm-title">¿Continuar?</h2>
-      <p id="confirm-text">Esta acción no se puede deshacer.</p>
-      <div class="confirm-actions"><button id="confirm-cancel" class="secondary-action" type="button">Cancelar</button><button id="confirm-ok" class="danger-action" type="button">Confirmar</button></div>
-    </div>
-  </div>
+<!-- CUSTOM CONFIRM -->
+<div id="confirm-modal" class="modal hidden">
+<div class="modal-card confirm-card">
+<div class="confirm-symbol">!</div>
+<div class="modal-kicker" id="confirm-kicker">CONFIRMAR</div>
+<h2 id="confirm-title">¿Continuar?</h2>
+<p id="confirm-text">Esta acción no se puede deshacer.</p>
+<div class="confirm-actions"><button id="confirm-cancel" class="secondary-action" type="button">Cancelar</button><button id="confirm-ok" class="danger-action" type="button">Confirmar</button></div>
+</div>
+</div>
 
-  <!-- SETTINGS -->
-  <div id="settings-modal" class="settings-overlay hidden">
-    <div class="settings-shell">
-      <aside class="settings-sidebar">
-        <div class="settings-brand">XIFRE</div>
-        <div class="settings-user-card"><span id="settings-nav-avatar" class="settings-nav-avatar">X</span><div><strong id="settings-nav-name">Usuario</strong><small id="settings-nav-username">@usuario</small></div></div>
-        <div class="settings-caption">AJUSTES DE USUARIO</div>
-        <button class="settings-tab-button active" type="button" data-settings-tab="profile">Mi cuenta</button>
-        <button class="settings-tab-button" type="button" data-settings-tab="appearance">Personalización</button>
-        <div class="settings-spacer"></div>
-        <button class="settings-back" type="button" data-action="close-settings">← Volver a XIFRE</button>
-      </aside>
-      <section class="settings-main">
-        <button class="settings-close" type="button" data-action="close-settings">×</button>
-        <div id="settings-profile-tab" class="settings-pane active">
-          <div class="settings-title-block"><h2>Mi cuenta</h2><p>Cambia el username y la foto que verán los demás.</p></div>
-          <div class="settings-profile-banner">
-            <div class="settings-banner-bg"></div>
-            <span id="settings-avatar-preview" class="settings-avatar-preview">X</span>
-            <label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
-          </div>
-          <div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong><span>Tu username es el que usarán para encontrarte y añadirse como amigo.</span></div>
-          <div class="settings-field-block">
-            <label for="settings-username">Username</label>
-            <input id="settings-username" class="settings-field-input" type="text" maxlength="20" placeholder="username">
-            <small>3–20 caracteres: letras, números y _</small>
-          </div>
-          <div id="profile-settings-message" class="modal-message"></div>
-          <button id="save-profile-settings" class="primary-action settings-save" type="button" data-action="save-profile-settings">Guardar cambios</button>
-        </div>
-        <div id="settings-appearance-tab" class="settings-pane">
-          <div class="settings-title-block"><h2>Personalización</h2><p>Elige cómo quieres ver XIFRE.</p></div>
-          <div class="appearance-section">
-            <div class="appearance-section-title">TEMA</div>
-            <div class="theme-grid">
-              <button class="theme-card active" type="button" data-theme-choice="dark"><span class="theme-thumb dark-thumb"><i></i><i></i><i></i></span><strong>Oscuro</strong><small>Gris carbón, alto contraste.</small></button>
-              <button class="theme-card" type="button" data-theme-choice="light"><span class="theme-thumb light-thumb"><i></i><i></i><i></i></span><strong>Claro</strong><small>Fondo claro y texto oscuro.</small></button>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
-  </div>
+<!-- SETTINGS -->
+<div id="settings-modal" class="settings-overlay hidden">
+<div class="settings-shell">
+<aside class="settings-sidebar">
+<div class="settings-brand">XIFRE</div>
+<div class="settings-user-card"><span id="settings-nav-avatar" class="settings-nav-avatar">X</span><div><strong id="settings-nav-name">Usuario</strong><small id="settings-nav-username">@usuario</small></div></div>
+<div class="settings-caption">AJUSTES DE USUARIO</div>
+<button class="settings-tab-button active" type="button" data-settings-tab="profile">Mi cuenta</button>
+<button class="settings-tab-button" type="button" data-settings-tab="appearance">Personalización</button>
+<div class="settings-spacer"></div>
+<button class="settings-back" type="button" data-action="close-settings">← Volver a XIFRE</button>
+</aside>
+<section class="settings-main">
+<button class="settings-close" type="button" data-action="close-settings">×</button>
+<div id="settings-profile-tab" class="settings-pane active">
+<div class="settings-title-block"><h2>Mi cuenta</h2><p>Cambia el username y la foto que verán los demás.</p></div>
+<div class="settings-profile-banner">
+<div class="settings-banner-bg"></div>
+<span id="settings-avatar-preview" class="settings-avatar-preview">X</span>
+<label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+</div>
+<div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong><span>Tu username es el que usarán para encontrarte y añadirse como amigo.</span></div>
+<div class="settings-field-block">
+<label for="settings-username">Username</label>
+<input id="settings-username" class="settings-field-input" type="text" maxlength="20" placeholder="username">
+<small>3–20 caracteres: letras, números y _</small>
+</div>
+<div id="profile-settings-message" class="modal-message"></div>
+<button id="save-profile-settings" class="primary-action settings-save" type="button" data-action="save-profile-settings">Guardar cambios</button>
+</div>
+<div id="settings-appearance-tab" class="settings-pane">
+<div class="settings-title-block"><h2>Personalización</h2><p>Elige cómo quieres ver XIFRE.</p></div>
+<div class="appearance-section">
+<div class="appearance-section-title">TEMA</div>
+<div class="theme-grid">
+<button class="theme-card active" type="button" data-theme-choice="dark"><span class="theme-thumb dark-thumb"><i></i><i></i><i></i></span><strong>Oscuro</strong><small>Gris carbón, alto contraste.</small></button>
+<button class="theme-card" type="button" data-theme-choice="light"><span class="theme-thumb light-thumb"><i></i><i></i><i></i></span><strong>Claro</strong><small>Fondo claro y texto oscuro.</small></button>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261008-v11"></script>
+<script src="app.js?v=20261009-scroll-mentions"></script>
 </body>
 </html>
