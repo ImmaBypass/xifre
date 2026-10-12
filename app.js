@@ -30,6 +30,7 @@ let pendingGroupAvatarURL = null;
 let authActionInFlight = false;
 let startPromise = null;
 let appStarted = false;
+let domainSessionSignOut = false;
 let conversationCache = [];
 let friendCache = [];
 let memberCache = new Map();
@@ -40,11 +41,27 @@ let selectedMember = null;
 let selectedConversationForMenu = null;
 let conversationSearchTimer = null;
 let conversationListPoll = null;
+let conversationFilter = '';
+let emojiPickerMode = 'compose';
+let emojiPickerMessageId = null;
 
 const screens = ['landing', 'login', 'register', 'email'];
 
 function normalizeUsername(value) {
 return String(value || '').trim().toLowerCase();
+}
+
+const ALLOWED_EMAIL_DOMAIN = 'vedrunaimmaculada.cat';
+function isAllowedEmailDomain(value) {
+  const email = String(value || '').trim().toLowerCase();
+  return /^[^@\s]+@vedrunaimmaculada\.cat$/.test(email);
+}
+function emailHandle(value) {
+  const email = String(value || '').trim().toLowerCase();
+  return isAllowedEmailDomain(email) ? email.split('@')[0] : '';
+}
+function profileHandle(profile = {}) {
+  return String(profile.email_handle || emailHandle(profile.email) || emailHandle(currentUser?.email) || 'usuario').replace(/^@/, '');
 }
 
 function esc(value) {
@@ -134,6 +151,7 @@ const lower = message.toLowerCase();
 if (lower.includes('invalid login credentials')) return 'El correo o la contraseña no son correctos.';
 if (lower.includes('email not confirmed')) return 'Primero confirma tu correo electrónico.';
 if (lower.includes('user already registered')) return 'Ese correo ya está registrado.';
+if (lower.includes('solo se permiten cuentas del dominio vedruna') || lower.includes('vedrunaimmaculada.cat')) return 'Solo se permiten cuentas del dominio vedruna';
 if (lower.includes('rate limit') || lower.includes('too many requests') || Number(error?.status) === 429) return 'Se ha alcanzado temporalmente el límite de peticiones de Supabase. Espera un poco antes de volver a intentarlo.';
 return message || 'No se pudo completar la operación.';
 }
@@ -198,6 +216,7 @@ const password = String($('#register-password')?.value || '');
 setMessage('register-message', '');
 
 if (!/^[a-z0-9_]{3,20}$/.test(username)) return setMessage('register-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+if (!isAllowedEmailDomain(email)) return setMessage('register-message', 'Solo se permiten cuentas del dominio vedruna', 'error');
 if (password.length < 6) return setMessage('register-message', 'La contraseña debe tener al menos 6 caracteres.', 'error');
 
 authActionInFlight = true;
@@ -241,6 +260,10 @@ if (!email || !password) {
 setMessage('login-message', 'Introduce el correo y la contraseña.', 'error');
 return;
 }
+if (!isAllowedEmailDomain(email)) {
+setMessage('login-message', 'Solo se permiten cuentas del dominio vedruna', 'error');
+return;
+}
 
 authActionInFlight = true;
 setLoading(button, true);
@@ -275,6 +298,7 @@ authActionInFlight = false;
 async function resendConfirmation() {
 const email = sessionStorage.getItem('xifre_pending_email') || '';
 if (!email) return showScreen('register');
+if (!isAllowedEmailDomain(email)) return toast('Solo se permiten cuentas del dominio vedruna', 'error');
 const button = $('#resend-confirmation');
 setLoading(button, true);
 try {
@@ -290,14 +314,15 @@ setLoading(button, false);
 
 async function loadProfile() {
 if (!currentUser) return;
-const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color').eq('id', currentUser.id).maybeSingle();
+const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,email_handle').eq('id', currentUser.id).maybeSingle();
 if (error) console.warn('PROFILE LOAD', error);
 currentProfile = data || {
 id: currentUser.id,
 username: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
 display_name: normalizeUsername(currentUser.user_metadata?.username) || 'usuario',
 avatar_url: null,
-avatar_color: 'avatar-blue'
+avatar_color: 'avatar-blue',
+email_handle: emailHandle(currentUser.email)
 };
 currentProfile.display_name = currentProfile.username;
 syncProfileUI();
@@ -305,14 +330,15 @@ syncProfileUI();
 
 function syncProfileUI() {
 const username = currentProfile?.username || 'usuario';
+const handle = profileHandle({ ...(currentProfile || {}), email: currentUser?.email });
 setText('profile-name', username);
-setText('profile-username', `@${username}`);
+setText('profile-username', `@${handle}`);
 setText('bottom-profile-name', username);
-setText('bottom-profile-username', `@${username}`);
+setText('bottom-profile-username', `@${handle}`);
 setText('settings-nav-name', username);
-setText('settings-nav-username', `@${username}`);
-setText('settings-preview-username', `@${username}`);
-avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url);
+setText('settings-nav-username', `@${handle}`);
+setText('settings-preview-username', `@${handle}`);
+avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
 avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
 avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
 if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
@@ -331,6 +357,17 @@ const result = await supabase.auth.getSession();
 sessionUser = result.data?.session?.user || null;
 }
 if (!sessionUser) throw new Error('No hay una sesión autenticada.');
+if (!isAllowedEmailDomain(sessionUser.email)) {
+  // Marcar el sign-out para que el listener de Auth no nos mande a la landing.
+  domainSessionSignOut = true;
+  currentUser = null;
+  currentProfile = null;
+  appStarted = false;
+  try { await supabase.auth.signOut({ scope: 'local' }); } catch (signOutError) { console.warn('DOMAIN SESSION SIGNOUT', signOutError); }
+  showScreen('login');
+  setMessage('login-message', 'Solo se permiten cuentas del dominio vedruna', 'error');
+  return false;
+}
 
 currentUser = sessionUser;
 appStarted = true;
@@ -413,7 +450,7 @@ const { data, error } = await supabase.from('friendships').select('user1_id,user
 if (error) { console.warn('FRIENDS', error); friendCache = []; return; }
 const ids = [...new Set((data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
 if (!ids.length) { friendCache = []; return; }
-const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color').in('id', ids);
+const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,email_handle').in('id', ids);
 if (!result.error) friendCache = result.data || [];
 }
 
@@ -426,8 +463,8 @@ if (!clean) {
 renderPeople(friendCache.map(f => ({ ...f, relationship: 'friend' })));
 return;
 }
-if (clean.length < 2) {
-list.innerHTML = '<div class="empty-sidebar">Escribe al menos 2 caracteres.</div>';
+if (clean.replace(/^@+|@+$/g, '').length < 1) {
+list.innerHTML = '<div class="empty-sidebar">Escribe un username o @.</div>';
 return;
 }
 list.innerHTML = '<div class="empty-sidebar">Buscando...</div>';
@@ -446,46 +483,47 @@ const list = $('#friend-search-results');
 if (!list) return;
 list.innerHTML = '';
 if (!results.length) {
-list.innerHTML = '<div class="empty-sidebar">No se ha encontrado a nadie.</div>';
-return;
+  list.innerHTML = '<div class="empty-sidebar">No se ha encontrado a nadie.</div>';
+  return;
 }
 results.forEach(person => {
-const relationship = person.relationship || 'none';
-const row = document.createElement('div');
-row.className = 'search-result';
-row.innerHTML = `
-<span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
-<div class="result-copy"><strong>${esc(person.username)}</strong><small>${relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Solicitud recibida' : 'No conectado'}</small></div>`;
-const action = document.createElement('button');
-action.type = 'button';
-action.className = `result-action ${relationship === 'friend' ? '' : 'secondary'}`;
-if (relationship === 'friend') {
-action.textContent = 'Abrir';
-action.addEventListener('click', async () => { closeModal('friend-modal'); await openPrivateChat(person.id); });
-} else if (relationship === 'outgoing_pending' || relationship === 'incoming_pending') {
-action.textContent = 'Pendiente';
-action.disabled = true;
-} else {
-action.textContent = 'Añadir';
-action.addEventListener('click', async () => {
-action.disabled = true;
-try {
-const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: person.id });
-if (error) throw error;
-action.textContent = 'Pendiente';
-toast('Solicitud enviada.', 'success');
-} catch (error) {
-action.disabled = false;
-action.textContent = 'Añadir';
-toast(friendlyError(error), 'error');
-}
+  const relationship = person.relationship || 'none';
+  const row = document.createElement('div');
+  row.className = 'search-result';
+  const handle = String(person.email_handle || '').trim();
+  const status = relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Solicitud recibida' : 'No conectado';
+  row.innerHTML = `
+    <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
+    <div class="result-copy"><strong>${esc(person.username)}</strong><small>@${esc(handle || person.username || 'usuario')}</small><small class="relationship-status">${esc(status)}</small></div>`;
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = `result-action ${relationship === 'friend' ? '' : 'secondary'}`;
+  if (relationship === 'friend') {
+    action.textContent = 'Abrir';
+    action.addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(person.id); });
+  } else if (relationship === 'outgoing_pending' || relationship === 'incoming_pending') {
+    action.textContent = 'Pendiente';
+    action.disabled = true;
+  } else {
+    action.textContent = 'Añadir';
+    action.addEventListener('click', async () => {
+      action.disabled = true;
+      try {
+        const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: person.id });
+        if (error) throw error;
+        action.textContent = 'Pendiente';
+        toast('Solicitud enviada.', 'success');
+      } catch (error) {
+        action.disabled = false;
+        action.textContent = 'Añadir';
+        toast(friendlyError(error), 'error');
+      }
+    });
+  }
+  row.appendChild(action);
+  list.appendChild(row);
 });
 }
-row.appendChild(action);
-list.appendChild(row);
-});
-}
-
 function renderFriendsModal() {
 const list = $('#friends-modal-list');
 if (!list) return;
@@ -497,8 +535,8 @@ return;
 friendCache.forEach(friend => {
 const row = document.createElement('div');
 row.className = 'friend-item';
-row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
-row.querySelector('button').addEventListener('click', async () => { closeModal('friends-modal'); await openPrivateChat(friend.id); });
+row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
+row.querySelector('button').addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(friend.id); });
 list.appendChild(row);
 });
 }
@@ -510,7 +548,7 @@ if (base.error) return renderRequests([]);
 const ids = [...new Set((base.data || []).map(x => x.sender_id))];
 let profiles = [];
 if (ids.length) {
-const result = await supabase.from('profiles').select('id,username,avatar_url,avatar_color').in('id', ids);
+const result = await supabase.from('profiles').select('id,username,avatar_url,avatar_color,email_handle').in('id', ids);
 if (!result.error) profiles = result.data || [];
 }
 const map = new Map(profiles.map(p => [p.id, p]));
@@ -525,7 +563,7 @@ if (!requests.length) { list.innerHTML = '<div class="empty-sidebar">No tienes s
 requests.forEach(req => {
 const row = document.createElement('div');
 row.className = 'request-item';
-row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar')}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
+row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar')}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.email_handle || req.sender.username || 'usuario')}</small><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
 const [accept, reject] = $$('.request-actions button', row);
 accept.addEventListener('click', () => acceptRequest(req, row));
 reject.addEventListener('click', () => rejectRequest(req, row));
@@ -581,7 +619,7 @@ renderConversations();
 return conversationCache;
 }
 
-function renderConversations(filter = '') {
+function renderConversations(filter = conversationFilter) {
 const list = $('#conversation-list'); if (!list) return;
 list.innerHTML = '';
 setText('chat-count', conversationCache.length);
@@ -594,7 +632,7 @@ const label = conversation.displayName || conversation.name || (isGroup ? 'Grupo
 const row = document.createElement('button'); row.type='button';
 const unread = Number(conversation.unread_count || 0);
 const mentioned = !!conversation.has_mention;
-row.className = `conversation${String(currentConversation)===String(conversation.id)?' active':''}${unread?' unread':''}`;
+row.className = `conversation${String(currentConversation)===String(conversation.id)?' active':''}${unread?' unread':''}${isGroup?' group-conversation':''}`;
 row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color)}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
 row.addEventListener('click',()=>openConversation(conversation.id,conversation));
 row.addEventListener('contextmenu',e=>{e.preventDefault(); openConversationMenu(conversation,e.clientX,e.clientY);});
@@ -632,6 +670,24 @@ toast(friendlyError(error), 'error');
 }
 }
 
+async function hydrateMemberProfiles(members) {
+  const list = Array.isArray(members) ? members : [];
+  const ids = [...new Set(list.map(getMemberId).filter(isValidUuid))];
+  if (!ids.length) return list;
+  try {
+    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,email_handle').in('id', ids);
+    if (error) throw error;
+    const profiles = new Map((data || []).map(profile => [String(profile.id), profile]));
+    return list.map(member => {
+      const p = profiles.get(getMemberId(member)) || {};
+      return { ...member, username: member.username || p.username, display_name: member.display_name || p.display_name, avatar_url: member.avatar_url || p.avatar_url, avatar_color: member.avatar_color || p.avatar_color, email_handle: member.email_handle || p.email_handle || '' };
+    });
+  } catch (error) {
+    console.warn('MEMBER PROFILE DETAILS', error);
+    return list;
+  }
+}
+
 async function openConversation(id, cached = null) {
 if (!id || !currentUser) return false;
 const conversationId = String(id);
@@ -649,7 +705,7 @@ currentConversationData = conversation;
 sessionStorage.setItem('xifre_current_conversation', conversationId);
 const { data: members, error } = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: conversationId });
 if (error) throw error;
-currentMembers = members || [];
+currentMembers = await hydrateMemberProfiles(members || []);
 memberCache.set(conversationId, currentMembers);
 
 updateChatHeader();
@@ -719,6 +775,7 @@ async function loadMessages(conversationId, scrollToBottom = false) {
   // An earlier request may finish after the user has switched to another chat.
   if (String(currentConversation || '') !== requestedId) return;
   renderMessages((data || []).map(messageObject), scrollToBottom);
+  void loadMessageReactions(requestedId).catch(error => console.debug('REACTIONS LOAD', error));
 }
 
 function renderMessageContent(content, message) {
@@ -858,8 +915,9 @@ const mine=String(message.sender_id)===String(currentUser.id); const cached=prof
 const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null};
 const mentioned = !mine && messageMentionsMe(message);
 const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);
-row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
+row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div><div class="message-reactions" data-reactions-for="${esc(message.id)}"></div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action" type="button" data-message-action="react" title="Añadir reacción">☺</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
 row.querySelector('[data-message-action="reply"]').addEventListener('click',e=>{e.stopPropagation();setReplyTo(message);highlightMessage(message.id);});
+row.querySelector('[data-message-action="react"]').addEventListener('click',e=>{e.stopPropagation();openEmojiPicker(e.currentTarget,'reaction',String(message.id));});
 row.querySelector('[data-message-action="more"]').addEventListener('click',e=>{e.stopPropagation();openMessageMenu(message,e.currentTarget);});
 row.querySelector('.message-reply-preview')?.addEventListener('click',()=>highlightMessage(message.reply_to));
 row.addEventListener('contextmenu',e=>{e.preventDefault();openMessageMenu(message,row);});
@@ -1060,6 +1118,189 @@ async function sendMessage() {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Emoji picker and message reactions */
+/* ------------------------------------------------------------------------ */
+function closeEmojiPicker() {
+  $('#emoji-picker-popover')?.classList.add('hidden');
+  $('#composer-emoji-button')?.setAttribute('aria-expanded', 'false');
+  emojiPickerMessageId = null;
+}
+
+function openEmojiPicker(anchor, mode = 'compose', messageId = null) {
+  const popover = $('#emoji-picker-popover');
+  const picker = $('#emoji-picker');
+  if (!popover || !picker || !anchor) return;
+  emojiPickerMode = mode;
+  emojiPickerMessageId = messageId ? String(messageId) : null;
+  popover.classList.remove('hidden');
+  $('#composer-emoji-button')?.setAttribute('aria-expanded', mode === 'compose' ? 'true' : 'false');
+  const rect = anchor.getBoundingClientRect();
+  const width = Math.min(360, window.innerWidth - 24);
+  const height = Math.min(445, window.innerHeight - 24);
+  let left = rect.right - width;
+  let top = rect.top - height - 8;
+  if (left < 12) left = 12;
+  if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+  if (top < 12) top = rect.bottom + 8;
+  if (top + height > window.innerHeight - 12) top = Math.max(12, window.innerHeight - height - 12);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+  popover.style.width = `${width}px`;
+  popover.style.height = `${height}px`;
+}
+
+function insertEmojiAtCursor(emoji) {
+  const input = $('#message-input');
+  if (!input || input.disabled || !emoji) return;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? start;
+  input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+  const cursor = start + emoji.length;
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
+  updateMentionPicker();
+  updateSendState();
+  scheduleTyping();
+}
+
+function setupEmojiPicker() {
+  const picker = $('#emoji-picker');
+  if (!picker || picker.dataset.xifreBound === 'true') return;
+  picker.dataset.xifreBound = 'true';
+  const configureI18n = () => {
+    picker.i18n = {
+      categories: {
+        custom: 'Personalizados',
+        'smileys-emotion': 'Caras y emociones',
+        'people-body': 'Personas y cuerpo',
+        'animals-nature': 'Animales y naturaleza',
+        'food-drink': 'Comida y bebida',
+        'travel-places': 'Viajes y lugares',
+        activities: 'Actividades',
+        objects: 'Objetos',
+        symbols: 'Símbolos',
+        flags: 'Banderas'
+      },
+      categoriesLabel: 'Categorías',
+      emojiUnsupportedMessage: 'Este navegador no admite emojis en color.',
+      favoritesLabel: 'Frecuentes',
+      loadingMessage: 'Cargando emojis…',
+      networkErrorMessage: 'No se pudieron cargar los emojis. Comprueba la conexión.',
+      regionLabel: 'Selector de emojis',
+      searchDescription: 'Escribe para buscar emojis.',
+      searchLabel: 'Buscar emojis',
+      searchResultsLabel: 'Resultados de búsqueda',
+      skinToneDescription: 'Selecciona el tono de piel.',
+      skinToneLabel: 'Elegir tono de piel',
+      skinTones: ['Predeterminado', 'Claro', 'Claro medio', 'Medio', 'Oscuro medio', 'Oscuro'],
+      skinTonesLabel: 'Tonos de piel'
+    };
+  };
+  if (window.customElements?.whenDefined) customElements.whenDefined('emoji-picker').then(configureI18n).catch(() => {});
+  picker.addEventListener('emoji-click', async event => {
+    const emoji = String(event.detail?.unicode || event.detail?.emoji?.unicode || '');
+    if (!emoji) return;
+    const mode = emojiPickerMode;
+    const messageId = emojiPickerMessageId;
+    closeEmojiPicker();
+    if (mode === 'reaction') {
+      if (messageId) await toggleMessageReaction(messageId, emoji);
+    } else {
+      insertEmojiAtCursor(emoji);
+    }
+  });
+}
+
+function renderMessageReactions(messageRow, reactionRows) {
+  const container = $('.message-reactions', messageRow);
+  if (!container) return false;
+  const emojiMap = new Map();
+  for (const reaction of reactionRows || []) {
+    const emoji = String(reaction.emoji || '');
+    const uid = String(reaction.user_id || '');
+    if (!emoji) continue;
+    if (!emojiMap.has(emoji)) emojiMap.set(emoji, { emoji, users: new Set() });
+    if (uid) emojiMap.get(emoji).users.add(uid);
+  }
+  const groups = [...emojiMap.values()].sort((a,b) => a.emoji.localeCompare(b.emoji));
+  const signature = groups.map(group => `${group.emoji}:${group.users.size}:${group.users.has(String(currentUser?.id)) ? 1 : 0}`).join('|');
+  if (container.dataset.reactionSignature === signature) return false;
+  if (container.dataset.reactionSignature === undefined && groups.length === 0) {
+    container.dataset.reactionSignature = '';
+    return false;
+  }
+  container.dataset.reactionSignature = signature;
+  container.innerHTML = '';
+  groups.forEach(group => {
+    const button = document.createElement('button');
+    const mine = group.users.has(String(currentUser?.id));
+    button.type = 'button';
+    button.className = `message-reaction${mine ? ' active' : ''}`;
+    button.dataset.emoji = group.emoji;
+    button.title = `${group.users.size} reacción${group.users.size === 1 ? '' : 'es'} · ${mine ? 'Quitar tu reacción' : 'Reaccionar'}`;
+    button.setAttribute('aria-label', button.title);
+    const face = document.createElement('span'); face.textContent = group.emoji;
+    const count = document.createElement('span'); count.className = 'message-reaction-count'; count.textContent = String(group.users.size);
+    button.append(face, count);
+    button.addEventListener('click', () => void toggleMessageReaction(messageRow.dataset.messageId, group.emoji));
+    container.appendChild(button);
+  });
+  if (groups.length) {
+    const add = document.createElement('button');
+    add.type = 'button'; add.className = 'message-reaction-add'; add.textContent = '+';
+    add.title = 'Añadir reacción'; add.setAttribute('aria-label', 'Añadir reacción');
+    add.addEventListener('click', () => openEmojiPicker(add, 'reaction', messageRow.dataset.messageId));
+    container.appendChild(add);
+  }
+  return true;
+}
+
+async function loadMessageReactions(conversationId = currentConversation) {
+  const id = String(conversationId || '');
+  if (!id || !currentUser || String(currentConversation) !== id) return;
+  const { data, error } = await supabase.rpc('xifre_get_message_reactions', { p_conversation_id: id });
+  if (error) throw error;
+  if (String(currentConversation) !== id) return;
+  const rows = data || [];
+  const byMessage = new Map();
+  rows.forEach(reaction => {
+    const messageId = String(reaction.message_id || '');
+    if (!byMessage.has(messageId)) byMessage.set(messageId, []);
+    byMessage.get(messageId).push(reaction);
+  });
+  const box = $('#messages');
+  if (!box) return;
+  const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  const originalScrollTop = box.scrollTop;
+  const boxTop = box.getBoundingClientRect().top;
+  const anchor = [...box.querySelectorAll('[data-message-id]')].find(node => node.getBoundingClientRect().bottom > boxTop + 1);
+  const anchorTop = anchor?.getBoundingClientRect().top || 0;
+  let changed = false;
+  $$('.message-row[data-message-id]', box).forEach(row => {
+    if (renderMessageReactions(row, byMessage.get(String(row.dataset.messageId)) || [])) changed = true;
+  });
+  if (!changed) return;
+  if (wasNearBottom) box.scrollTop = box.scrollHeight;
+  else if (anchor) {
+    const newAnchorTop = anchor.getBoundingClientRect().top;
+    box.scrollTop = Math.max(0, originalScrollTop + newAnchorTop - anchorTop);
+  } else box.scrollTop = originalScrollTop;
+}
+
+async function toggleMessageReaction(messageId, emoji) {
+  const cleanId = String(messageId || '');
+  const cleanEmoji = String(emoji || '');
+  if (!isValidUuid(cleanId) || !cleanEmoji || !currentConversation) return;
+  try {
+    const { error } = await supabase.rpc('xifre_toggle_message_reaction', { p_message_id: cleanId, p_emoji: cleanEmoji });
+    if (error) throw error;
+    await loadMessageReactions(currentConversation);
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+  }
+}
+
+/* ------------------------------------------------------------------------ */
 /* Realtime typing + messages */
 /* ------------------------------------------------------------------------ */
 function stopChatRealtime() {
@@ -1088,6 +1329,10 @@ const box=$('#messages'); if(box && box.scrollHeight-box.scrollTop-box.clientHei
 if (String(currentConversation) !== String(conversationId)) return;
 await loadMessages(conversationId).catch(() => {});
 await loadConversations().catch(() => {});
+})
+.on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, async () => {
+if (String(currentConversation) !== String(conversationId)) return;
+await loadMessageReactions(conversationId).catch(() => {});
 })
 .subscribe();
 if (messagePoll) clearInterval(messagePoll);
@@ -1163,6 +1408,7 @@ const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.
 const name = other?.username || 'Usuario';
 avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other?.avatar_color);
 setText('right-profile-name', name);
+setText('right-profile-handle', `@${other?.email_handle || other?.username || 'usuario'}`);
 } else {
 const name = currentConversationData?.name || 'Grupo';
 avatarInto($('#right-group-avatar'), name, currentConversationData?.avatar_url, 'group');
@@ -1187,9 +1433,12 @@ function showMemberProfile(member, anchor) {
   selectedMember = member;
   avatarInto($('#member-profile-avatar'), member.username, member.avatar_url, 'private', member.avatar_color || '');
   setText('member-profile-name', member.username || 'Usuario');
-  setText('member-profile-username', `@${member.username || 'usuario'}`);
-  setText('member-profile-role', member.is_owner ? 'Creador del grupo' : member.is_admin ? 'Administrador' : 'Miembro del grupo');
-
+  setText('member-profile-username', `@${member.email_handle || member.username || 'usuario'}`);
+  const role = $('#member-profile-role');
+  const roleName = member.is_owner ? 'Creador del grupo' : member.is_admin ? 'Administrador del grupo' : 'Miembro del grupo';
+  setText('member-profile-role', roleName);
+  role?.classList.remove('role-owner', 'role-admin', 'role-member');
+  role?.classList.add(member.is_owner ? 'role-owner' : member.is_admin ? 'role-admin' : 'role-member');
   popover.classList.remove('hidden');
   const anchorRect = anchor?.getBoundingClientRect();
   const popRect = popover.getBoundingClientRect();
@@ -1198,14 +1447,53 @@ function showMemberProfile(member, anchor) {
   let top = anchorRect ? anchorRect.bottom + 8 : margin;
   if (left + popRect.width > window.innerWidth - margin) left = window.innerWidth - popRect.width - margin;
   if (left < margin) left = margin;
-  if (top + popRect.height > window.innerHeight - margin) {
-    top = anchorRect ? anchorRect.top - popRect.height - 8 : window.innerHeight - popRect.height - margin;
-  }
+  if (top + popRect.height > window.innerHeight - margin) top = anchorRect ? anchorRect.top - popRect.height - 8 : window.innerHeight - popRect.height - margin;
   if (top < margin) top = margin;
   popover.style.left = `${left}px`;
   popover.style.top = `${top}px`;
+  updateMemberProfileFriendAction(member);
 }
 
+async function updateMemberProfileFriendAction(member) {
+  const button = $('#member-profile-add-friend');
+  if (!button || !member) return;
+  const id = getMemberId(member);
+  const alreadyFriend = friendCache.some(friend => String(friend.id) === id);
+  if (!id || id === String(currentUser?.id) || alreadyFriend) {
+    button.classList.add('hidden');
+    return;
+  }
+  button.classList.remove('hidden');
+  button.disabled = false;
+  button.textContent = 'Añadir amigo';
+  try {
+    const { data, error } = await supabase.from('friend_requests').select('id,sender_id,receiver_id')
+      .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${id}),and(sender_id.eq.${id},receiver_id.eq.${currentUser.id})`).limit(1);
+    if (error) return;
+    if (String(getMemberId(selectedMember)) !== id) return;
+    if ((data || []).length) {
+      button.disabled = true;
+      button.textContent = String(data[0].sender_id) === String(currentUser.id) ? 'Solicitud enviada' : 'Solicitud recibida';
+    }
+  } catch (_) { /* The action remains available; the RPC validates requests. */ }
+}
+
+async function sendFriendRequestFromMemberProfile() {
+  const member = selectedMember;
+  const button = $('#member-profile-add-friend');
+  const id = getMemberId(member);
+  if (!member || !button || !isValidUuid(id) || id === String(currentUser?.id)) return;
+  button.disabled = true;
+  try {
+    const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: id });
+    if (error) throw error;
+    button.textContent = 'Solicitud enviada';
+    toast('Solicitud de amistad enviada.', 'success');
+  } catch (error) {
+    button.disabled = false;
+    toast(friendlyError(error), 'error');
+  }
+}
 function closeMemberProfile(){ $('#member-profile-popover')?.classList.add('hidden'); selectedMember=null; }
 function openMemberMenu(member,x,y){
 selectedMember=member; const menu=$('#member-menu'); if(!menu)return; const me=currentMembers.find(m=>String(m.user_id)===String(currentUser.id)); const creator=!!me?.is_owner, admin=!!me?.is_admin;
@@ -1215,7 +1503,7 @@ function closeMemberMenu(){ $('#member-menu')?.classList.add('hidden'); selected
 async function memberAction(action){
 const member=selectedMember; closeMemberMenu(); if(!member||!currentConversation)return;
 let fn='',args={p_conversation_id:currentConversation,p_user_id:member.user_id}; if(action==='kick')fn='xifre_remove_group_member'; if(action==='grant')fn='xifre_grant_group_admin'; if(action==='revoke')fn='xifre_revoke_group_admin'; if(!fn)return;
-const {error}=await supabase.rpc(fn,args); if(error)return toast(friendlyError(error),'error'); memberCache.delete(currentConversation); const r=await supabase.rpc('xifre_get_conversation_members',{p_conversation_id:currentConversation}); if(r.error)return toast(friendlyError(r.error),'error'); currentMembers=r.data||[]; memberCache.set(currentConversation,currentMembers); renderRightPane(); await openChatInfo(); await loadMessages(currentConversation); await loadConversations(); toast(action==='kick'?'Persona expulsada.':action==='grant'?'Administrador añadido.':'Administrador retirado.','success');
+const {error}=await supabase.rpc(fn,args); if(error)return toast(friendlyError(error),'error'); memberCache.delete(currentConversation); const r=await supabase.rpc('xifre_get_conversation_members',{p_conversation_id:currentConversation}); if(r.error)return toast(friendlyError(r.error),'error'); currentMembers=await hydrateMemberProfiles(r.data||[]); memberCache.set(currentConversation,currentMembers); renderRightPane(); await openChatInfo(); await loadMessages(currentConversation); await loadConversations(); toast(action==='kick'?'Persona expulsada.':action==='grant'?'Administrador añadido.':'Administrador retirado.','success');
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1228,7 +1516,7 @@ list.innerHTML = '';
 friendCache.forEach(friend => {
 const row = document.createElement('label');
 row.className = 'selection-item';
-row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></span>`;
 list.appendChild(row);
 });
 updateGroupSelectedCount();
@@ -1291,7 +1579,7 @@ list.innerHTML = '';
 members.forEach(member => {
 const row = document.createElement('div');
 row.className = 'friend-item';
-row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>${member.is_owner ? 'Creador' : member.is_admin ? 'Administrador' : '@'+esc(member.username||'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
+row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>@${esc(member.email_handle || member.username || 'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
 row.addEventListener('click',()=>showMemberProfile(member,row));
 row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
 list.appendChild(row);
@@ -1307,7 +1595,7 @@ list.innerHTML = '';
 candidates.forEach(friend => {
 const row = document.createElement('label');
 row.className = 'selection-item';
-row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.username)}</small></span>`;
+row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></span>`;
 list.appendChild(row);
 });
 updateGroupAddCount();
@@ -1329,7 +1617,7 @@ if (error) throw error;
 memberCache.delete(currentConversation);
 const result = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: currentConversation });
 if (result.error) throw result.error;
-currentMembers = result.data || [];
+currentMembers = await hydrateMemberProfiles(result.data || []);
 memberCache.set(currentConversation, currentMembers);
 updateChatHeader();
 renderRightPane();
@@ -1446,6 +1734,7 @@ avatarUrl = await uploadAvatar(pendingProfileAvatarFile, path);
 const { data, error } = await supabase.rpc('xifre_update_profile', { p_username: username, p_display_name: username, p_avatar_url: avatarUrl });
 if (error) throw error;
 currentProfile = Array.isArray(data) ? data[0] : data;
+if (currentProfile && !currentProfile.email_handle) currentProfile.email_handle = emailHandle(currentUser?.email);
 pendingProfileAvatarFile = null;
 pendingProfileAvatarURL = null;
 syncProfileUI();
@@ -1560,6 +1849,8 @@ else if (type === 'open-group') { openModal('group-modal'); renderGroupSelection
 else if (type === 'create-group') void createGroup();
 else if (type === 'open-chat-info') void openChatInfo();
 else if (type === 'close-member-profile') closeMemberProfile();
+else if (type === 'send-member-friend-request') void sendFriendRequestFromMemberProfile();
+else if (type === 'close-emoji-picker') closeEmojiPicker();
 else if (type === 'save-group-settings') void saveGroupSettings();
 else if (type === 'add-group-members') void addGroupMembers();
 else if (type === 'request-delete-group') void deleteGroup();
@@ -1595,9 +1886,29 @@ if (event.target.closest('#cancel-reply')) clearReply();
 document.addEventListener('click', event => {
 if (!event.target.closest('#message-menu')) closeMessageMenu();
 if (!event.target.closest('#conversation-menu')) closeConversationMenu();
+if (!event.target.closest('#emoji-picker-popover') && !event.target.closest('#composer-emoji-button') && !event.target.closest('[data-message-action="react"]') && !event.target.closest('.message-reaction-add')) closeEmojiPicker();
 }, true);
 
 $('#friend-search')?.addEventListener('input', e => searchPeople(e.target.value));
+$('#conversation-filter-input')?.addEventListener('input', event => {
+  conversationFilter = String(event.target.value || '');
+  $('#conversation-filter-clear')?.classList.toggle('hidden', !conversationFilter);
+  renderConversations();
+});
+$('#conversation-filter-clear')?.addEventListener('click', () => {
+  const input = $('#conversation-filter-input');
+  if (input) { input.value = ''; input.focus(); }
+  conversationFilter = '';
+  $('#conversation-filter-clear')?.classList.add('hidden');
+  renderConversations();
+});
+$('#composer-emoji-button')?.addEventListener('click', event => {
+  event.stopPropagation();
+  const popover = $('#emoji-picker-popover');
+  if (popover && !popover.classList.contains('hidden') && emojiPickerMode === 'compose') closeEmojiPicker();
+  else openEmojiPicker(event.currentTarget, 'compose');
+});
+setupEmojiPicker();
 $('#conversation-search-input')?.addEventListener('input',e=>{clearTimeout(conversationSearchTimer);conversationSearchTimer=setTimeout(()=>renderConversationSearch(e.target.value),120);});
 document.addEventListener('click',event=>{const tab=event.target.closest('[data-people-tab]');if(tab)showPeopleTab(tab.dataset.peopleTab);});
 document.addEventListener('click',event=>{const a=event.target.closest('[data-member-menu]');if(a)void memberAction(a.dataset.memberMenu);});
@@ -1647,6 +1958,7 @@ $('#messages')?.addEventListener('scroll',()=>{const box=$('#messages');if(!curr
 
 document.addEventListener('keydown', event => {
 if (event.key === 'Escape') {
+if (!$('#emoji-picker-popover')?.classList.contains('hidden')) return closeEmojiPicker();
 if (!$('#message-menu').classList.contains('hidden')) return closeMessageMenu();
 if (!$('#confirm-modal').classList.contains('hidden')) return finishConfirm(false);
 if (!$('#settings-modal').classList.contains('hidden')) return $('#settings-modal').classList.add('hidden');
@@ -1706,6 +2018,12 @@ currentProfile = null;
 appStarted = false;
 resetChatView();
 closeAllModals();
+if (domainSessionSignOut) {
+  domainSessionSignOut = false;
+  showScreen('login');
+  setMessage('login-message', 'Solo se permiten cuentas del dominio vedruna', 'error');
+  return;
+}
 showScreen('landing');
 }
 }, 0);
