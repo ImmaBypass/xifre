@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261009-scroll-mentions">
+<link rel="stylesheet" href="style.css?v=20261012-v15">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
 </head>
 <body>
 <div class="background-effects"><div class="background-glow glow-one"></div><div class="background-glow glow-two"></div><div class="background-glow glow-three"></div></div>
@@ -24,7 +25,7 @@
 <div class="auth-container"><div class="auth-logo">XIFRE</div><div class="auth-card">
 <h2>Iniciar sesión</h2><p class="auth-description">Entra en tu cuenta de Xifre</p>
 <form id="login-form" autocomplete="on">
-<div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
+<div class="input-group"><label for="login-email">Correo electrónico</label><input id="login-email" type="email" placeholder="nombre@vedrunaimmaculada.cat" autocomplete="email" required></div>
 <div class="input-group"><label for="login-password">Contraseña</label><input id="login-password" type="password" placeholder="Tu contraseña" autocomplete="current-password" required></div>
 <button id="login-button" class="auth-button" type="submit"><span class="button-text">Iniciar sesión</span><span class="button-loader"></span></button>
 </form>
@@ -39,7 +40,7 @@
 <h2>Crear cuenta</h2><p class="auth-description">Elige tu username y crea tu cuenta</p>
 <form id="register-form" autocomplete="on">
 <div class="input-group"><label for="register-username">Username</label><input id="register-username" type="text" placeholder="sam" maxlength="20" autocomplete="username" required><small class="input-help">3–20 caracteres: letras, números y _</small></div>
-<div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="tu@email.com" autocomplete="email" required></div>
+<div class="input-group"><label for="register-email">Correo electrónico</label><input id="register-email" type="email" placeholder="nombre@vedrunaimmaculada.cat" autocomplete="email" required></div>
 <div class="input-group"><label for="register-password">Contraseña</label><input id="register-password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" minlength="6" required></div>
 <button id="register-button" class="auth-button" type="submit"><span class="button-text">Crear cuenta</span><span class="button-loader"></span></button>
 </form>
@@ -63,11 +64,15 @@
 <aside class="left-pane">
 <div class="left-pane-head">
 <div class="brand-line"><span>XIFRE</span><i></i></div>
-<div class="brand-version">pre-alpha 1.1</div>
+<div class="brand-version">pre-alpha 1.2</div>
 <div class="nav-actions">
-<button type="button" class="nav-action" data-action="open-conversation-search"><span class="nav-icon">⌕</span><span>Buscar conversaciones</span></button>
+<div class="conversation-searchbar">
+  <span class="conversation-search-icon" aria-hidden="true">⌕</span>
+  <input id="conversation-filter-input" type="search" autocomplete="off" placeholder="Buscar" aria-label="Buscar conversaciones">
+  <button id="conversation-filter-clear" type="button" class="conversation-filter-clear hidden" aria-label="Borrar búsqueda">×</button>
+</div>
 <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
-<button type="button" class="nav-action" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
+<button type="button" class="nav-action primary" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
 </div>
 </div>
 
@@ -126,6 +131,7 @@
 <button class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
 <input id="message-input" type="text" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled>
 <button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
+<button id="composer-emoji-button" class="composer-emoji-button" type="button" aria-label="Abrir selector de emojis" title="Emojis">☺</button>
 </div>
 </form>
 </section>
@@ -139,7 +145,7 @@
 <div id="right-dm-content" class="right-profile hidden">
 <div class="right-cover"></div>
 <div class="right-profile-avatar-wrap"><span id="right-profile-avatar" class="right-profile-avatar">X</span></div>
-<div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3></div>
+<div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3><p id="right-profile-handle">@usuario</p></div>
 </div>
 <div id="right-group-content" class="right-group hidden">
 <div class="right-group-head"><span id="right-group-avatar" class="right-group-avatar">#</span><div><h3 id="right-group-name">Grupo</h3><p id="right-group-count">0 miembros</p></div></div>
@@ -214,6 +220,7 @@
   <small id="member-profile-username">@usuario</small>
   <div class="member-profile-divider"></div>
   <span id="member-profile-role" class="member-profile-role">Miembro del grupo</span>
+  <button id="member-profile-add-friend" class="member-profile-add-friend hidden" type="button" data-action="send-member-friend-request">Añadir amigo</button>
 </div>
 </div>
 
@@ -237,9 +244,9 @@
 <div id="friend-requests-list" class="friends-list"></div>
 </section>
 <section id="people-add-panel" class="people-panel">
-<h2>Añadir amigo</h2><p>Busca a alguien por su username.</p>
+<h2>Añadir amigo</h2><p>Busca a alguien por su username o @</p>
 <label class="modal-label" for="friend-search">Username</label>
-<input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Escribe un username...">
+<input id="friend-search" class="modal-input friend-search-large" type="text" maxlength="20" autocomplete="off" placeholder="Username o @...">
 <div id="friend-search-results" class="search-results"></div>
 <div id="friend-message" class="modal-message"></div>
 </section>
@@ -256,6 +263,12 @@
 <input id="conversation-search-input" class="modal-input" type="text" autocomplete="off" placeholder="Buscar conversaciones...">
 <div id="conversation-search-results" class="friends-list"></div>
 </div>
+</div>
+
+<!-- EMOJI PICKER: composer and message reactions share the same accessible picker -->
+<div id="emoji-picker-popover" class="emoji-picker-popover hidden" role="dialog" aria-label="Selector de emojis">
+  <div class="emoji-picker-titlebar"><strong>Emojis</strong><button id="emoji-picker-close" type="button" data-action="close-emoji-picker" aria-label="Cerrar selector">×</button></div>
+  <emoji-picker id="emoji-picker" class="dark" locale="es" data-source="https://cdn.jsdelivr.net/npm/emoji-picker-element-data@^1/es/emojibase/data.json"></emoji-picker>
 </div>
 
 <!-- MESSAGE MENU -->
@@ -296,7 +309,7 @@
 <span id="settings-avatar-preview" class="settings-avatar-preview">X</span>
 <label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
 </div>
-<div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong><span>Tu username es el que usarán para encontrarte y añadirse como amigo.</span></div>
+<div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong><span>Tu username sirve para menciones. También pueden encontrarte por tu @.</span></div>
 <div class="settings-field-block">
 <label for="settings-username">Username</label>
 <input id="settings-username" class="settings-field-input" type="text" maxlength="20" placeholder="username">
@@ -321,6 +334,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261009-scroll-mentions"></script>
+<script src="app.js?v=20261012-v15"></script>
 </body>
 </html>
