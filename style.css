@@ -696,3 +696,74 @@ html[data-theme="light"] .member-profile-avatar { border-color: #fff; }
 html[data-theme="light"] .member-profile-main > strong { color: #2e3338; }
 html[data-theme="light"] .member-profile-main > small { color: #686f78; }
 html[data-theme="light"] .member-profile-divider { background: rgba(0,0,0,.10); }
+
+
+/* ===================== XIFRE V15: search, fixed handles and emojis ===================== */
+.brand-version { margin-top: -9px; margin-left: 7px; margin-bottom: 5px; }
+.nav-actions { display: flex !important; flex-direction: column !important; align-items: stretch; gap: 6px !important; margin-top: 7px; }
+.nav-actions > .nav-action { width: 100%; min-height: 36px; justify-content: flex-start; padding: 0 12px; }
+.conversation-searchbar { height: 38px; display: grid; grid-template-columns: 22px minmax(0,1fr) 24px; align-items: center; gap: 4px; width: 100%; padding: 0 7px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text-faint); transition: border-color .18s, background .18s, box-shadow .18s; }
+.conversation-searchbar:focus-within { border-color: rgba(88,101,242,.72); box-shadow: 0 0 0 3px rgba(88,101,242,.13); background: var(--composer); }
+.conversation-search-icon { font-size: 20px; text-align: center; line-height: 1; }
+.conversation-searchbar input { min-width: 0; width: 100%; height: 100%; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 11px; }
+.conversation-searchbar input::placeholder { color: var(--text-faint); }
+.conversation-searchbar input::-webkit-search-cancel-button { display: none; }
+.conversation-filter-clear { width: 23px; height: 23px; border-radius: 6px; background: transparent; color: var(--text-faint); font-size: 18px; cursor: pointer; }
+.conversation-filter-clear:hover { color: var(--text); background: var(--panel-hover); }
+.nav-action.primary { color: #fff; border-color: rgba(88,101,242,.65); background: #5865f2; box-shadow: 0 5px 14px rgba(88,101,242,.18); }
+.nav-action.primary:hover { background: #4752c4; color: #fff; }
+.conversation.group-conversation .conversation-name { color: #dce0ff; -webkit-text-stroke: .12px rgba(125,137,255,.95); text-shadow: 0 0 5px rgba(88,101,242,.22); }
+.conversation.group-conversation .conversation-avatar-image { box-shadow: 0 0 0 1.5px rgba(88,101,242,.86); }
+.settings-avatar-change { bottom: 8px !important; }
+.member-profile-role.role-member { background: rgba(88,101,242,.16); color: #c9cdfb; }
+.member-profile-role.role-owner { background: rgba(237,66,69,.16); color: #ff777a; box-shadow: inset 0 0 0 1px rgba(237,66,69,.24); }
+.member-profile-role.role-admin { background: rgba(250,166,26,.16); color: #ffd16a; box-shadow: inset 0 0 0 1px rgba(250,166,26,.26); }
+.member-profile-add-friend { display: block; width: 100%; min-height: 34px; margin-top: 12px; border-radius: 7px; background: #5865f2; color: #fff; font-size: 11px; font-weight: 750; cursor: pointer; transition: background .16s, transform .16s; }
+.member-profile-add-friend:hover:not(:disabled) { background: #4752c4; transform: translateY(-1px); }
+.member-profile-add-friend:disabled { cursor: default; opacity: .72; }
+.right-profile-handle, #right-profile-handle { margin-top: 4px; color: var(--text-faint); font-size: 11px; }
+
+/* Discord-inspired emoji picker. The picker provides categories, searching and skin tones. */
+.composer-box { grid-template-columns: 42px minmax(0,1fr) 36px !important; }
+.composer-send { display: none !important; }
+.composer-emoji-button { width: 30px; height: 30px; margin: auto; display: grid; place-items: center; border-radius: 7px; background: transparent; color: var(--text-faint); font-size: 22px; line-height: 1; cursor: pointer; transition: background .16s, color .16s, transform .16s; }
+.composer-emoji-button:hover, .composer-emoji-button[aria-expanded="true"] { background: var(--panel-hover); color: #f2c94c; transform: scale(1.05); }
+.emoji-picker-popover { position: fixed; z-index: 1600; width: min(360px, calc(100vw - 24px)); height: min(445px, calc(100vh - 24px)); overflow: hidden; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: #232428; box-shadow: 0 24px 70px rgba(0,0,0,.5); animation: emojiPickerIn .14s cubic-bezier(.2,.8,.2,1) both; }
+.emoji-picker-popover.hidden { display: none !important; }
+.emoji-picker-titlebar { min-height: 39px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 14px; border-bottom: 1px solid rgba(255,255,255,.07); color: #f2f3f5; font-size: 11px; }
+.emoji-picker-titlebar button { width: 26px; height: 26px; border-radius: 6px; background: transparent; color: #b5bac1; font-size: 20px; cursor: pointer; }
+.emoji-picker-titlebar button:hover { background: rgba(255,255,255,.08); color: #fff; }
+emoji-picker { display: block; flex: 1; width: 100%; height: 100%; min-height: 0; --num-columns: 8; --emoji-size: 1.45rem; --category-emoji-size: 1.05rem; --background: #232428; --border-color: rgba(255,255,255,.08); --input-border-color: rgba(255,255,255,.10); --input-font-color: #f2f3f5; --input-placeholder-color: #949ba4; --outline-color: #5865f2; --button-hover-background: #35373d; --indicator-color: #5865f2; --category-font-color: #b5bac1; --preview-font-color: #f2f3f5; --preview-background: #2b2d31; }
+.message-reactions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; min-height: 0; }
+.message-reaction { min-height: 27px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 2px 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 8px; background: rgba(255,255,255,.045); color: var(--text); font-size: 12px; line-height: 1; cursor: pointer; transition: border-color .13s, background .13s, transform .13s; }
+.message-reaction:hover { background: rgba(255,255,255,.09); transform: translateY(-1px); }
+.message-reaction.active { border-color: rgba(88,101,242,.85); background: rgba(88,101,242,.22); }
+.message-reaction-count { min-width: 6px; color: var(--text-muted); font-size: 10px; font-weight: 750; }
+.message-reaction.active .message-reaction-count { color: #dce0ff; }
+.message-reaction-add { width: 27px; height: 27px; display: inline-grid; place-items: center; border: 1px dashed rgba(255,255,255,.15); border-radius: 8px; background: transparent; color: var(--text-faint); font-size: 15px; cursor: pointer; opacity: .85; transition: border-color .13s, color .13s, background .13s; }
+.message-reaction-add:hover { border-color: var(--brand); color: #dce0ff; background: rgba(88,101,242,.15); }
+.message-action[data-message-action="react"] { font-size: 18px; }
+[data-theme="light"] .conversation-searchbar { background: #f1f2f4; border-color: #d5d7dc; }
+[data-theme="light"] .conversation-searchbar input { color: #2e3338; }
+[data-theme="light"] .conversation.group-conversation .conversation-name { color: #424db8; -webkit-text-stroke: .08px #5865f2; }
+[data-theme="light"] .emoji-picker-popover { background: #fff; border-color: #d5d7dc; }
+[data-theme="light"] .emoji-picker-titlebar { background: #f2f3f5; color: #2e3338; border-color: #e1e3e6; }
+[data-theme="light"] .emoji-picker-titlebar button { color: #686f78; }
+[data-theme="light"] emoji-picker { --background: #fff; --border-color: #d5d7dc; --input-border-color: #d5d7dc; --input-font-color: #2e3338; --input-placeholder-color: #747b84; --button-hover-background: #f2f3f5; --category-font-color: #5f666f; --preview-font-color: #2e3338; --preview-background: #f2f3f5; }
+[data-theme="light"] .message-reaction { background: rgba(0,0,0,.03); border-color: rgba(0,0,0,.12); color: #2e3338; }
+[data-theme="light"] .message-reaction.active { background: rgba(88,101,242,.12); border-color: #5865f2; }
+@keyframes emojiPickerIn { from { opacity: 0; transform: translateY(5px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (max-width: 520px) { .emoji-picker-popover { width: min(340px, calc(100vw - 20px)); height: min(410px, calc(100vh - 20px)); } emoji-picker { --num-columns: 7; --emoji-size: 1.3rem; } }
+
+/* A thin blue outline around the group title itself, not only its avatar. */
+.conversation.group-conversation .conversation-name {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 5px;
+  border: 1px solid rgba(88, 101, 242, .56);
+  border-radius: 4px;
+}
+[data-theme="light"] .conversation.group-conversation .conversation-name {
+  border-color: rgba(88, 101, 242, .62);
+}
