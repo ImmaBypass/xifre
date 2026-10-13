@@ -5,9 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261012-v15">
+<link rel="stylesheet" href="style.css?v=20261013-v16">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
 </head>
 <body>
 <div class="background-effects"><div class="background-glow glow-one"></div><div class="background-glow glow-two"></div><div class="background-glow glow-three"></div></div>
@@ -129,7 +128,7 @@
 </div>
 <div class="composer-box">
 <button class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
-<input id="message-input" type="text" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled>
+<textarea id="message-input" rows="1" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled></textarea>
 <button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
 <button id="composer-emoji-button" class="composer-emoji-button" type="button" aria-label="Abrir selector de emojis" title="Emojis">☺</button>
 </div>
@@ -265,10 +264,12 @@
 </div>
 </div>
 
-<!-- EMOJI PICKER: composer and message reactions share the same accessible picker -->
+<!-- Emoji picker integrado: no necesita descargar catálogos externos -->
 <div id="emoji-picker-popover" class="emoji-picker-popover hidden" role="dialog" aria-label="Selector de emojis">
   <div class="emoji-picker-titlebar"><strong>Emojis</strong><button id="emoji-picker-close" type="button" data-action="close-emoji-picker" aria-label="Cerrar selector">×</button></div>
-  <emoji-picker id="emoji-picker" class="dark" locale="es" data-source="https://cdn.jsdelivr.net/npm/emoji-picker-element-data@^1/es/emojibase/data.json"></emoji-picker>
+  <label class="emoji-search-wrap"><span aria-hidden="true">⌕</span><input id="emoji-search" type="search" autocomplete="off" placeholder="Buscar emoji..." aria-label="Buscar emoji"></label>
+  <div id="emoji-categories" class="emoji-category-bar" aria-label="Categorías de emojis"></div>
+  <div id="emoji-grid" class="emoji-grid" role="listbox" aria-label="Emojis disponibles"></div>
 </div>
 
 <!-- MESSAGE MENU -->
@@ -334,6 +335,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261012-v15"></script>
+<script src="app.js?v=20261013-v16"></script>
 </body>
 </html>
