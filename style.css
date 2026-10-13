@@ -713,7 +713,7 @@ html[data-theme="light"] .member-profile-divider { background: rgba(0,0,0,.10); 
 .nav-action.primary { color: #fff; border-color: rgba(88,101,242,.65); background: #5865f2; box-shadow: 0 5px 14px rgba(88,101,242,.18); }
 .nav-action.primary:hover { background: #4752c4; color: #fff; }
 .conversation.group-conversation .conversation-name { color: #dce0ff; -webkit-text-stroke: .12px rgba(125,137,255,.95); text-shadow: 0 0 5px rgba(88,101,242,.22); }
-.conversation.group-conversation .conversation-avatar-image { box-shadow: none !important; border: 0 !important; outline: none !important; }
+.conversation.group-conversation .conversation-avatar-image { box-shadow: 0 0 0 1.5px rgba(88,101,242,.86); }
 .settings-avatar-change { bottom: 8px !important; }
 .member-profile-role.role-member { background: rgba(88,101,242,.16); color: #c9cdfb; }
 .member-profile-role.role-owner { background: rgba(237,66,69,.16); color: #ff777a; box-shadow: inset 0 0 0 1px rgba(237,66,69,.24); }
@@ -723,7 +723,7 @@ html[data-theme="light"] .member-profile-divider { background: rgba(0,0,0,.10); 
 .member-profile-add-friend:disabled { cursor: default; opacity: .72; }
 .right-profile-handle, #right-profile-handle { margin-top: 4px; color: var(--text-faint); font-size: 11px; }
 
-/* Discord-inspired emoji picker. The picker provides categories, searching and skin tones. */
+/* Emoji picker is rendered locally by app.js. */
 .composer-box { grid-template-columns: 42px minmax(0,1fr) 36px !important; }
 .composer-send { display: none !important; }
 .composer-emoji-button { width: 30px; height: 30px; margin: auto; display: grid; place-items: center; border-radius: 7px; background: transparent; color: var(--text-faint); font-size: 22px; line-height: 1; cursor: pointer; transition: background .16s, color .16s, transform .16s; }
@@ -733,7 +733,6 @@ html[data-theme="light"] .member-profile-divider { background: rgba(0,0,0,.10); 
 .emoji-picker-titlebar { min-height: 39px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 14px; border-bottom: 1px solid rgba(255,255,255,.07); color: #f2f3f5; font-size: 11px; }
 .emoji-picker-titlebar button { width: 26px; height: 26px; border-radius: 6px; background: transparent; color: #b5bac1; font-size: 20px; cursor: pointer; }
 .emoji-picker-titlebar button:hover { background: rgba(255,255,255,.08); color: #fff; }
-emoji-picker { display: block; flex: 1; width: 100%; height: 100%; min-height: 0; --num-columns: 8; --emoji-size: 1.45rem; --category-emoji-size: 1.05rem; --background: #232428; --border-color: rgba(255,255,255,.08); --input-border-color: rgba(255,255,255,.10); --input-font-color: #f2f3f5; --input-placeholder-color: #949ba4; --outline-color: #5865f2; --button-hover-background: #35373d; --indicator-color: #5865f2; --category-font-color: #b5bac1; --preview-font-color: #f2f3f5; --preview-background: #2b2d31; }
 .message-reactions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; min-height: 0; }
 .message-reaction { min-height: 27px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 2px 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 8px; background: rgba(255,255,255,.045); color: var(--text); font-size: 12px; line-height: 1; cursor: pointer; transition: border-color .13s, background .13s, transform .13s; }
 .message-reaction:hover { background: rgba(255,255,255,.09); transform: translateY(-1px); }
@@ -749,30 +748,58 @@ emoji-picker { display: block; flex: 1; width: 100%; height: 100%; min-height: 0
 [data-theme="light"] .emoji-picker-popover { background: #fff; border-color: #d5d7dc; }
 [data-theme="light"] .emoji-picker-titlebar { background: #f2f3f5; color: #2e3338; border-color: #e1e3e6; }
 [data-theme="light"] .emoji-picker-titlebar button { color: #686f78; }
-[data-theme="light"] emoji-picker { --background: #fff; --border-color: #d5d7dc; --input-border-color: #d5d7dc; --input-font-color: #2e3338; --input-placeholder-color: #747b84; --button-hover-background: #f2f3f5; --category-font-color: #5f666f; --preview-font-color: #2e3338; --preview-background: #f2f3f5; }
 [data-theme="light"] .message-reaction { background: rgba(0,0,0,.03); border-color: rgba(0,0,0,.12); color: #2e3338; }
 [data-theme="light"] .message-reaction.active { background: rgba(88,101,242,.12); border-color: #5865f2; }
 @keyframes emojiPickerIn { from { opacity: 0; transform: translateY(5px) scale(.985); } to { opacity: 1; transform: none; } }
-@media (max-width: 520px) { .emoji-picker-popover { width: min(340px, calc(100vw - 20px)); height: min(410px, calc(100vh - 20px)); } emoji-picker { --num-columns: 7; --emoji-size: 1.3rem; } }
 
-/* Solo un reborde sutil en las letras del nombre del grupo; sin caja ni marco en el avatar. */
-.conversation.group-conversation .conversation-avatar-image {
-  box-shadow: none !important;
-  border: 0 !important;
-  outline: none !important;
-}
+/* A thin blue outline around the group title itself, not only its avatar. */
 .conversation.group-conversation .conversation-name {
   box-sizing: border-box;
   width: fit-content;
   max-width: 100%;
-  padding: 0;
-  border: 0 !important;
-  border-radius: 0;
-  -webkit-text-stroke: .32px rgba(125, 137, 255, .95);
-  text-shadow: 0 0 5px rgba(88, 101, 242, .22);
+  padding: 2px 5px;
+  border: 1px solid rgba(88, 101, 242, .56);
+  border-radius: 4px;
 }
 [data-theme="light"] .conversation.group-conversation .conversation-name {
-  border: 0 !important;
-  -webkit-text-stroke: .28px #5865f2;
-  text-shadow: 0 0 4px rgba(88, 101, 242, .16);
+  border-color: rgba(88, 101, 242, .62);
 }
+
+
+/* ===================== XIFRE V16: agrupación de mensajes + editor multilínea ===================== */
+.center-pane { grid-template-rows: 52px minmax(0,1fr) auto auto !important; }
+.composer-area { min-height: 68px; }
+.composer-box { height: auto !important; min-height: 46px; padding: 5px 0; align-items: center; grid-template-columns: 42px minmax(0,1fr) 36px !important; }
+.composer-box textarea#message-input { display: block; grid-column: 2; width: 100%; min-width: 0; min-height: 28px; max-height: 128px; height: 28px; margin: 0; padding: 4px 0; border: 0; outline: 0; resize: none; overflow-x: hidden; overflow-y: hidden; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer-box textarea#message-input:focus { outline: 0; }
+.composer-box textarea#message-input::placeholder { color: var(--text-faint); }
+.composer-plus, .composer-emoji-button { align-self: center; }
+.message-row.grouped-message { min-height: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+.message-row.grouped-message .message-avatar { visibility: hidden; height: 0 !important; min-height: 0 !important; margin-top: 0 !important; }
+.message-row.grouped-message .message-meta { display: none !important; }
+.message-row.grouped-message .message-body { padding-top: 0 !important; padding-bottom: 2px !important; }
+.message-row.grouped-message .message-content { margin-top: 0 !important; }
+.message-grouped-time { display: none; }
+.message-row.grouped-message .message-grouped-time { display: block; position: absolute; top: 3px; left: 9px; width: 34px; color: var(--text-faint); text-align: right; font-size: 9px; line-height: 16px; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.message-row.grouped-message:hover .message-grouped-time { opacity: 1; }
+
+/* Emoji picker local: all catalog entries are shipped in app.js, no network request needed. */
+.emoji-picker-popover { gap: 0; }
+.emoji-search-wrap { display: grid; grid-template-columns: 28px minmax(0,1fr); align-items: center; margin: 10px 11px 8px; height: 34px; padding: 0 7px; border: 1px solid rgba(255,255,255,.10); border-radius: 7px; color: #949ba4; background: #1b1c20; }
+.emoji-search-wrap > span { text-align: center; font-size: 19px; line-height: 1; }
+.emoji-search-wrap input { width: 100%; height: 100%; border: 0; outline: 0; color: #f2f3f5; background: transparent; font: inherit; font-size: 11px; }
+.emoji-search-wrap input::placeholder { color: #949ba4; }
+.emoji-category-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; padding: 0 8px 8px; overflow-x: auto; scrollbar-width: none; }
+.emoji-category-bar::-webkit-scrollbar { display: none; }
+.emoji-category { flex: 0 0 31px; width: 31px; height: 31px; border-radius: 6px; display: grid; place-items: center; background: transparent; color: var(--text); font-size: 17px; cursor: pointer; transition: background .12s, transform .12s; }
+.emoji-category:hover { background: #35373d; transform: translateY(-1px); }
+.emoji-category.active { background: rgba(88,101,242,.25); box-shadow: inset 0 -2px 0 #5865f2; }
+.emoji-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(8,minmax(0,1fr)); align-content: start; gap: 3px; padding: 2px 10px 12px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.14) transparent; }
+.emoji-choice { aspect-ratio: 1; min-width: 0; border-radius: 6px; display: grid; place-items: center; padding: 1px; background: transparent; font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; font-size: 24px; line-height: 1; cursor: pointer; transition: background .1s, transform .1s; }
+.emoji-choice:hover, .emoji-choice:focus-visible { background: #35373d; transform: scale(1.08); outline: 0; }
+.emoji-grid-empty { grid-column: 1/-1; padding: 25px 8px; color: #949ba4; text-align: center; font-size: 11px; }
+[data-theme="light"] .emoji-search-wrap { background: #f2f3f5; border-color: #d5d7dc; color: #747b84; }
+[data-theme="light"] .emoji-search-wrap input { color: #2e3338; }
+[data-theme="light"] .emoji-category:hover, [data-theme="light"] .emoji-choice:hover, [data-theme="light"] .emoji-choice:focus-visible { background: #e3e5e8; }
+@media (max-width: 520px) { .emoji-grid { grid-template-columns: repeat(7,minmax(0,1fr)); } .emoji-choice { font-size: 22px; } .composer-box textarea#message-input { font-size: 14px; } }
+@media (prefers-reduced-motion: reduce) { .emoji-category, .emoji-choice, .message-grouped-time { transition: none !important; } }
