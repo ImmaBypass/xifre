@@ -719,6 +719,7 @@ setupTypingChannel(conversationId);
 setupMessageChannel(conversationId);
 $('#message-input').disabled = false;
 $('#send-button').disabled = true;
+resizeMessageInput();
 $('#message-input').focus();
 return true;
 } catch (error) {
@@ -886,6 +887,10 @@ function renderMessages(messages, forceBottom = false) {
     addedAny = true;
   }
 
+  // Recompute contiguous message groups after inserts/deletes. Grouping changes
+  // the layout, so do it before restoring the scroll anchor below.
+  if (changed) applyMessageGrouping();
+
   // Opening a conversation intentionally starts at its latest message. Polling
   // does not: it only follows new messages if the viewer was already at bottom.
   if (forceBottom || (wasNearBottom && addedAny)) {
@@ -904,18 +909,39 @@ function renderMessages(messages, forceBottom = false) {
   }
 }
 
+function applyMessageGrouping() {
+  const box = $('#messages');
+  if (!box) return;
+  const rows = [...box.children].filter(node => node.dataset?.messageId);
+  let previous = null;
+  for (const row of rows) {
+    row.classList.remove('grouped-message');
+    if (!row.classList.contains('message-row') || !row.dataset.senderId) {
+      previous = null;
+      continue;
+    }
+    const senderId = String(row.dataset.senderId || '');
+    const time = Date.parse(row.dataset.createdAt || '');
+    if (previous && senderId === previous.senderId && Number.isFinite(time) && Number.isFinite(previous.time)) {
+      const delta = time - previous.time;
+      if (delta >= 0 && delta < 60_000) row.classList.add('grouped-message');
+    }
+    previous = { senderId, time };
+  }
+}
+
 function renderOneMessage(message, profiles=new Map()) {
 const box=$('#messages'); if(!box||!message?.id)return;
 const existing = box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`); if (existing) return existing;
 $('.chat-welcome',box)?.remove();
 if(message.message_type==='system'){
-const row=document.createElement('div');row.className='system-message-row';row.dataset.messageId=String(message.id);row.innerHTML=`<span>${esc(message.content||'')}</span>`;box.appendChild(row);return row;
+const row=document.createElement('div');row.className='system-message-row';row.dataset.messageId=String(message.id);row.dataset.messageType='system';row.innerHTML=`<span>${esc(message.content||'')}</span>`;box.appendChild(row);return row;
 }
 const mine=String(message.sender_id)===String(currentUser.id); const cached=profiles.get(String(message.sender_id))||currentMembers.find(m => getMemberId(m) === String(message.sender_id))||{};
 const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null};
 const mentioned = !mine && messageMentionsMe(message);
-const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);
-row.innerHTML=`<span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div><div class="message-reactions" data-reactions-for="${esc(message.id)}"></div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action" type="button" data-message-action="react" title="Añadir reacción">☺</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
+const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);row.dataset.senderId=String(message.sender_id||'');row.dataset.createdAt=String(message.created_at||'');
+row.innerHTML=`<span class="message-grouped-time" aria-hidden="true">${esc(formatTime(message.created_at))}</span><span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div><div class="message-reactions" data-reactions-for="${esc(message.id)}"></div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action" type="button" data-message-action="react" title="Añadir reacción">☺</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
 row.querySelector('[data-message-action="reply"]').addEventListener('click',e=>{e.stopPropagation();setReplyTo(message);highlightMessage(message.id);});
 row.querySelector('[data-message-action="react"]').addEventListener('click',e=>{e.stopPropagation();openEmojiPicker(e.currentTarget,'reaction',String(message.id));});
 row.querySelector('[data-message-action="more"]').addEventListener('click',e=>{e.stopPropagation();openMessageMenu(message,e.currentTarget);});
@@ -1098,8 +1124,10 @@ async function sendMessage() {
     if (sent?.id) {
       const profiles = new Map((currentMembers || []).map(member => [getMemberId(member), member]));
       renderOneMessage(sent, profiles);
+      applyMessageGrouping();
     }
     input.value = '';
+    resizeMessageInput();
     clearReply();
     currentMentionIds.clear();
     mentionEverywhere = false;
@@ -1128,15 +1156,19 @@ function closeEmojiPicker() {
 
 function openEmojiPicker(anchor, mode = 'compose', messageId = null) {
   const popover = $('#emoji-picker-popover');
-  const picker = $('#emoji-picker');
-  if (!popover || !picker || !anchor) return;
+  const grid = $('#emoji-grid');
+  if (!popover || !grid || !anchor) return;
   emojiPickerMode = mode;
   emojiPickerMessageId = messageId ? String(messageId) : null;
+  const search = $('#emoji-search');
+  if (search) search.value = '';
   popover.classList.remove('hidden');
   $('#composer-emoji-button')?.setAttribute('aria-expanded', mode === 'compose' ? 'true' : 'false');
+  renderEmojiCategories();
+  renderEmojiGrid('');
   const rect = anchor.getBoundingClientRect();
   const width = Math.min(360, window.innerWidth - 24);
-  const height = Math.min(445, window.innerHeight - 24);
+  const height = Math.min(460, window.innerHeight - 24);
   let left = rect.right - width;
   let top = rect.top - height - 8;
   if (left < 12) left = 12;
@@ -1147,6 +1179,17 @@ function openEmojiPicker(anchor, mode = 'compose', messageId = null) {
   popover.style.top = `${top}px`;
   popover.style.width = `${width}px`;
   popover.style.height = `${height}px`;
+  if (search) search.focus({ preventScroll: true });
+}
+
+function resizeMessageInput() {
+  const input = $('#message-input');
+  if (!input || input.tagName !== 'TEXTAREA') return;
+  input.style.height = 'auto';
+  const maxHeight = 128;
+  const nextHeight = Math.min(Math.max(input.scrollHeight, 28), maxHeight);
+  input.style.height = `${nextHeight}px`;
+  input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
 function insertEmojiAtCursor(emoji) {
@@ -1158,56 +1201,114 @@ function insertEmojiAtCursor(emoji) {
   const cursor = start + emoji.length;
   input.focus();
   input.setSelectionRange(cursor, cursor);
+  resizeMessageInput();
   updateMentionPicker();
   updateSendState();
   scheduleTyping();
 }
 
+function makeEmojiItems(source) {
+  return source.split(',').map(item => {
+    const [emoji, name = 'emoji'] = item.trim().split('|');
+    return { emoji, name };
+  }).filter(item => item.emoji);
+}
+
+// Built-in catalog: no external JSON, CDN fetch or IndexedDB dependency.
+const EMOJI_CATEGORIES = [
+  { id:'smileys', label:'Caras', icon:'😀', items: makeEmojiItems('😀|cara feliz,😃|sonrisa grande,😄|sonrisa ojos cerrados,😁|sonrisa dientes,😆|reír,😅|risa nerviosa,😂|llorar de risa,🤣|rodar de risa,🥲|sonrisa emocionada,😊|sonrisa tímida,😇|inocente,🙂|sonrisa,🙃|cara al revés,😉|guiño,😌|aliviado,😍|enamorado,🥰|sonrisas con corazones,😘|beso,😗|beso,😋|delicioso,😛|lengua,😜|guiño lengua,🤪|loco,😝|lengua ojos cerrados,🤑|dinero,🤗|abrazo,🤭|mano en la boca,🫢|sorpresa mano,🫣|mirar entre dedos,🤫|silencio,🤔|pensando,🫡|saludo,🤐|boca cerrada,🤨|ceja levantada,😐|neutral,😑|sin expresión,😶|sin boca,🫥|línea de puntos,😏|sonrisa pícara,😒|molesto,🙄|ojos en blanco,😬|mueca,🤥|mentiroso,😔|triste,😪|somnoliento,🤤|babear,😴|dormido,😷|mascarilla,🤒|enfermo,🤕|herido,🤢|asco,🤮|vomitar,🥵|calor,🥶|frío,🥴|mareado,😵|mareado,🤯|cabeza explotando,🥳|fiesta,🥸|disfraz,😎|gafas de sol,🤓|empollón,🧐|investigar,😕|confundido,🫤|escéptico,😟|preocupado,🙁|triste,☹️|cara triste,😮|boca abierta,😯|sorprendido,😲|asombrado,😳|avergonzado,🥺|suplicar,🥹|emocionado,😦|angustiado,😧|angustia,😨|asustado,😰|sudor frío,😥|aliviado triste,😢|llorar,😭|llorar mucho,😱|gritar,😖|frustrado,😣|sufrir,😞|decepcionado,😓|sudando,😩|cansado,😫|agotado,🥱|bostezo,😤|resoplar,😡|enfadado,😠|enojado,🤬|insulto,😈|diablillo,👿|diablo,💀|calavera,☠️|calavera huesos,💩|caca,🤡|payaso,👻|fantasma,👽|alien,🤖|robot,🎃|calabaza,😺|gato feliz,😸|gato sonrisa,😹|gato risa,😻|gato enamorado,🙀|gato asustado,😿|gato llorando,😾|gato enfadado,💯|cien puntos,💥|explosión,💫|mareo,💦|gotas,💨|viento,💤|dormir') },
+  { id:'people', label:'Personas', icon:'👋', items: makeEmojiItems('👋|saludar,🤚|mano levantada,🖐️|mano abierta,✋|alto,🖖|vulcano,🫱|mano derecha,🫲|mano izquierda,🫳|palma abajo,🫴|palma arriba,👌|ok,🤌|dedos juntos,🤏|pequeño,✌️|victoria,🤞|suerte,🫰|corazón dedos,🤟|te quiero,🤘|rock,🤙|llámame,👈|izquierda,👉|derecha,👆|arriba,👇|abajo,☝️|índice arriba,👍|pulgar arriba,👎|pulgar abajo,✊|puño,👊|puñetazo,🤛|puño izquierda,🤜|puño derecha,👏|aplaudir,🙌|manos arriba,🫶|corazón manos,🤝|apretón manos,🙏|rezar gracias,✍️|escribir,💅|pintar uñas,💪|fuerza,🦾|brazo mecánico,🦿|pierna mecánica,🦵|pierna,🦶|pie,👂|oreja,🦻|audífono,👃|nariz,🧠|cerebro,🫀|corazón anatómico,🫁|pulmones,🦷|diente,🦴|hueso,👀|ojos,👁️|ojo,👅|lengua,👄|boca,💋|beso marca,🩸|sangre,👶|bebé,🧒|niño,👦|chico,👧|chica,🧑|persona,👨|hombre,👩|mujer,🧔|barba,👴|anciano,👵|anciana,🙍|persona enfadada,🙋|levantar mano,🙆|ok persona,🙅|no persona,💁|información,🙇|reverencia,🤦|facepalm,🤷|encogerse de hombros,🧏|persona sorda,🧑‍💻|tecnólogo,👨‍🎓|estudiante,👩‍🎓|estudiante mujer,🧑‍🚀|astronauta,🧑‍🎨|artista') },
+  { id:'animals', label:'Animales', icon:'🐻', items: makeEmojiItems('🐶|perro,🐱|gato,🐭|ratón,🐹|hámster,🐰|conejo,🦊|zorro,🐻|oso,🐼|panda,🐨|koala,🐯|tigre,🦁|león,🐮|vaca,🐷|cerdo,🐸|rana,🐵|mono,🙈|mono no ver,🙉|mono no oír,🙊|mono no hablar,🐒|mono,🐔|gallina,🐧|pingüino,🐦|pájaro,🐤|pollito,🦆|pato,🦅|águila,🦉|búho,🦇|murciélago,🐺|lobo,🐗|jabalí,🐴|caballo,🦄|unicornio,🐝|abeja,🪱|gusano,🦋|mariposa,🐌|caracol,🐞|mariquita,🐜|hormiga,🪰|mosca,🦟|mosquito,🪳|cucaracha,🕷️|araña,🦂|escorpión,🐢|tortuga,🐍|serpiente,🦎|lagarto,🦖|tirano saurio,🦕|dinosaurio,🐙|pulpo,🦑|calamar,🦐|gamba,🦞|langosta,🦀|cangrejo,🐡|pez globo,🐠|pez tropical,🐟|pez,🐬|delfín,🐳|ballena,🦈|tiburón,🐊|cocodrilo,🐅|tigre,🐆|leopardo,🦓|cebra,🦍|gorila,🦧|orangután,🦣|mamut,🐘|elefante,🦛|hipopótamo,🦏|rinoceronte,🐪|camello,🦒|jirafa,🦘|canguro,🦬|bisonte,🐃|búfalo,🐂|buey,🐄|vaca,🐎|caballo carreras,🐖|cerdo,🐏|carnero,🐑|oveja,🦙|llama,🐐|cabra,🦌|ciervo,🐕|perro,🐩|caniche,🦮|perro guía,🐈|gato,🪶|pluma,🦚|pavo real,🦜|loro,🦢|cisne,🦩|flamenco,🕊️|paloma,🐇|liebre,🦝|mapache,🦨|mofeta,🦡|tejón,🦦|nutria,🦥|perezoso,🐁|ratón,🐿️|ardilla,🦔|erizo,🌵|cactus,🌲|árbol,🌳|árbol frondoso,🌴|palmera,🌱|brote,🌿|hierba,☘️|trébol,🍀|trébol suerte,🍁|hoja otoño,🍂|hojas caídas,🍃|hoja al viento,🌷|tulipán,🌹|rosa,🌺|hibisco,🌸|flor cerezo,🌼|flor,🌻|girasol,🌞|sol cara,🌝|luna cara,🌚|luna oscura,🌈|arcoíris,☀️|sol,⛅|nubes y sol,🌧️|lluvia,⛈️|tormenta,❄️|nieve,🔥|fuego,💧|gota agua,🌊|ola') },
+  { id:'food', label:'Comida', icon:'🍕', items: makeEmojiItems('🍏|manzana verde,🍎|manzana,🍐|pera,🍊|mandarina,🍋|limón,🍌|plátano,🍉|sandía,🍇|uvas,🍓|fresa,🫐|arándanos,🍈|melón,🍒|cerezas,🍑|melocotón,🥭|mango,🍍|piña,🥥|coco,🥝|kiwi,🍅|tomate,🍆|berenjena,🥑|aguacate,🥦|brócoli,🥬|lechuga,🥒|pepino,🌶️|chile,🫑|pimiento,🌽|maíz,🥕|zanahoria,🫒|aceituna,🧄|ajo,🧅|cebolla,🥔|patata,🍠|boniato,🥐|croissant,🥯|bagel,🍞|pan,🥖|barra pan,🥨|pretzel,🧀|queso,🥚|huevo,🍳|huevo frito,🧈|mantequilla,🥞|tortitas,🧇|gofre,🥓|bacon,🥩|carne,🍗|pollo,🍖|carne hueso,🌭|perrito caliente,🍔|hamburguesa,🍟|patatas fritas,🍕|pizza,🫓|pan plano,🥪|bocadillo,🥙|falafel,🧆|falafel,🌮|taco,🌯|burrito,🫔|tamal,🥗|ensalada,🥘|paella,🫕|fondue,🥫|conserva,🍝|espaguetis,🍜|ramen,🍲|sopa,🍛|curry,🍣|sushi,🍱|bento,🥟|dumplings,🦪|ostra,🍤|gamba frita,🍙|onigiri,🍚|arroz,🍘|galleta arroz,🍥|pastel pescado,🥠|galleta fortuna,🥮|pastel luna,🍢|brocheta,🍡|dango,🍧|hielo raspado,🍨|helado,🍦|helado cono,🥧|tarta,🧁|cupcake,🍰|pastel,🎂|cumpleaños,🍮|flan,🍭|piruleta,🍬|caramelo,🍫|chocolate,🍿|palomitas,🍩|donut,🍪|galleta,🌰|castaña,🥜|cacahuetes,🍯|miel,🥛|leche,🍼|biberón,☕|café,🫖|tetera,🍵|té,🧃|zumo,🥤|refresco,🧋|bubble tea,🍶|sake,🍺|cerveza,🍻|brindis cervezas,🥂|brindis copas,🍷|vino,🥃|whisky,🍸|cóctel,🍹|bebida tropical,🧉|mate,🍾|champán,🧊|hielo') },
+  { id:'activity', label:'Actividades', icon:'⚽', items: makeEmojiItems('⚽|fútbol,🏀|baloncesto,🏈|fútbol americano,⚾|béisbol,🥎|softbol,🎾|tenis,🏐|voleibol,🏉|rugby,🥏|disco,🎱|bola ocho,🪀|yoyó,🏓|ping pong,🏸|bádminton,🏒|hockey,🏑|hockey hierba,🥍|lacrosse,🏏|críquet,🪃|bumerán,🥅|portería,⛳|golf,🪁|cometa,🏹|arco,🎣|pesca,🤿|buceo,🥊|boxeo,🥋|artes marciales,🎽|camiseta deportiva,🛹|monopatín,🛼|patines,🛷|trineo,⛸️|patinaje,🥌|curling,🎿|esquí,⛷️|esquiador,🏂|snowboard,🪂|paracaídas,🏋️|pesas,🤼|lucha,🤸|gimnasia,⛹️|baloncesto persona,🤺|esgrima,🤾|balonmano,🏌️|golfista,🏇|carreras caballos,🧘|meditación,🏄|surf,🏊|natación,🤽|waterpolo,🚣|remo,🧗|escalada,🚵|bicicleta montaña,🚴|ciclismo,🏆|trofeo,🥇|medalla oro,🥈|medalla plata,🥉|medalla bronce,🏅|medalla,🎖️|condecoración,🏵️|roseta,🎗️|lazo,🎫|entrada,🎟️|ticket,🎪|circo,🤹|malabares,🎭|teatro,🩰|ballet,🎨|arte,🎬|cine,🎤|micrófono,🎧|auriculares,🎼|partitura,🎹|piano,🥁|tambor,🪘|percusión,🎷|saxofón,🎺|trompeta,🪗|acordeón,🎸|guitarra,🪕|banjo,🎻|violín,🪈|flauta,🎲|dado,♟️|ajedrez,🎯|diana,🎳|bolos,🎮|videojuegos,🕹️|joystick,🧩|puzzle,🪅|piñata,🪩|bola disco,🎰|tragaperras') },
+  { id:'travel', label:'Lugares', icon:'🚀', items: makeEmojiItems('🚗|coche,🚕|taxi,🚙|todoterreno,🚌|autobús,🚎|trolebús,🏎️|coche carreras,🚓|policía,🚑|ambulancia,🚒|bomberos,🚐|furgoneta,🛻|pickup,🚚|camión,🚛|tráiler,🚜|tractor,🛵|scooter,🏍️|moto,🛺|rickshaw,🚲|bicicleta,🛴|patinete,🛹|monopatín,🛼|patines,🚨|sirena,🚔|coche policía,🚍|bus acercándose,🚘|coche frontal,🚖|taxi frontal,🚡|teleférico,🚠|funicular,🚟|tren suspendido,🚃|vagón,🚋|tranvía,🚞|tren montaña,🚝|monorraíl,🚄|tren rápido,🚅|tren bala,🚈|metro ligero,🚇|metro,🚊|tranvía,🚉|estación,✈️|avión,🛫|despegue,🛬|aterrizaje,🛩️|avioneta,💺|asiento,🚁|helicóptero,🛸|ovni,🚀|cohete,🛰️|satélite,🛶|canoa,⛵|velero,🚤|lancha,🛥️|barco,🛳️|crucero,⛴️|ferry,🚢|barco,⚓|ancla,🛟|salvavidas,🗺️|mapa,🗿|moái,🗽|estatua libertad,🗼|torre Tokio,🏰|castillo,🏯|castillo japonés,🏟️|estadio,🎡|noria,🎢|montaña rusa,🎠|carrusel,⛲|fuente,⛱️|sombrilla,🏖️|playa,🏝️|isla,🏜️|desierto,🌋|volcán,⛰️|montaña,🏔️|montaña nevada,🗻|monte Fuji,🏕️|camping,⛺|tienda campaña,🛖|cabaña,🏠|casa,🏡|casa jardín,🏢|oficina,🏬|centro comercial,🏣|oficina postal,🏥|hospital,🏦|banco,🏨|hotel,🏪|tienda,🏫|escuela,🏛️|edificio clásico,⛪|iglesia,🕌|mezquita,🛕|templo,🕍|sinagoga,🕋|kaaba,⛩️|santuario,🌃|noche ciudad,🌆|atardecer ciudad,🌇|puesta de sol,🌉|puente noche,🎑|luna cosecha,🌌|vía láctea,🌠|estrella fugaz') },
+  { id:'objects', label:'Objetos', icon:'💡', items: makeEmojiItems('⌚|reloj,📱|móvil,📲|móvil flecha,💻|portátil,🖥️|ordenador,🖨️|impresora,⌨️|teclado,🖱️|ratón ordenador,🖲️|trackball,💽|disco,💾|disquete,💿|cd,📀|dvd,📼|videocinta,📷|cámara,📸|flash cámara,📹|videocámara,🎥|cine cámara,📽️|proyector,📺|televisión,📻|radio,🎙️|micrófono estudio,🎚️|controles audio,🎛️|perillas,🧭|brújula,⏱️|cronómetro,⏰|despertador,⌛|reloj arena,⏳|arena corriendo,🔋|batería,🪫|batería baja,🔌|enchufe,💡|bombilla,🔦|linterna,🕯️|vela,🪔|lámpara,🧯|extintor,🛢️|barril,💸|dinero volando,💵|billetes,💴|yen,💶|euro,💷|libra,💰|saco dinero,💳|tarjeta,🪙|moneda,💎|diamante,⚖️|balanza,🪜|escalera,🧰|caja herramientas,🪛|destornillador,🔧|llave inglesa,🔨|martillo,⚒️|herramientas,🛠️|martillo llave,⛏️|pico,🪚|sierra,🔩|tornillo tuerca,⚙️|engranaje,🪤|trampa,🧱|ladrillo,🪨|piedra,🪵|madera,🧲|imán,🪝|gancho,🧪|tubo ensayo,🧫|placa Petri,🧬|ADN,🔬|microscopio,🔭|telescopio,📡|antena,💊|pastilla,🩹|tirita,🩺|estetoscopio,🚪|puerta,🪞|espejo,🪟|ventana,🛏️|cama,🛋️|sofá,🪑|silla,🚽|inodoro,🚿|ducha,🛁|bañera,🧴|loción,🧷|imperdible,🧹|escoba,🧺|cesta ropa,🧻|papel,🪣|cubo,🧼|jabón,🪥|cepillo dientes,🧽|esponja,🧯|extintor,🧸|oso peluche,🪆|muñecas,🖼️|cuadro,🎁|regalo,🎈|globo,🎀|lazo,🪄|varita mágica,🪅|piñata,🪩|bola disco,🧿|ojo turco,🪬|hamsa,🗝️|llave antigua,🔑|llave,🔒|candado,🔓|candado abierto,🔏|candado con pluma,🧳|maleta,🎒|mochila,👓|gafas,🕶️|gafas sol,🥽|gafas protección,🥼|bata,🦺|chaleco,👔|corbata,👕|camiseta,👖|vaqueros,🧣|bufanda,🧤|guantes,🧥|abrigo,🧦|calcetines,👗|vestido,👘|kimono,🥻|sari,🩱|bañador,🩳|pantalón corto,👙|bikini,👚|blusa,👛|monedero,👜|bolso,👝|bolsito,🛍️|bolsas compras,👞|zapato,👟|zapatilla,🥾|bota senderismo,🥿|bailarina,👠|tacón,👡|sandalia,🩴|chancla,👢|bota,👑|corona,👒|sombrero mujer,🎩|sombrero copa,🧢|gorra,🪖|casco,⛑️|casco rescate') },
+  { id:'symbols', label:'Símbolos', icon:'❤️', items: makeEmojiItems('❤️|corazón rojo,🩷|corazón rosa,🧡|corazón naranja,💛|corazón amarillo,💚|corazón verde,💙|corazón azul,🩵|corazón celeste,💜|corazón morado,🤎|corazón marrón,🖤|corazón negro,🩶|corazón gris,🤍|corazón blanco,💔|corazón roto,❤️‍🔥|corazón en llamas,❤️‍🩹|corazón curando,💕|dos corazones,💞|corazones girando,💓|latido,💗|creciendo,💖|brillante,💘|flecha corazón,💝|corazón regalo,💟|decoración corazón,❣️|exclamación corazón,💌|carta amor,💋|beso,💐|ramo,💍|anillo,💎|diamante,✨|destellos,⭐|estrella,🌟|estrella brillante,💫|mareo,🔥|fuego,💥|explosión,⚡|rayo,☄️|cometa,🌈|arcoíris,☀️|sol,🌙|luna,☁️|nube,❄️|copo nieve,☃️|muñeco nieve,💧|gota,🌊|ola,🎉|confeti,🎊|bola confeti,🎇|chispa,🎆|fuegos artificiales,🧨|petardo,🎀|lazo,🎁|regalo,✅|correcto,☑️|casilla marcada,✔️|marca,❌|cruz,❎|cruz verde,➕|más,➖|menos,➗|dividir,✖️|multiplicar,⚠️|advertencia,🚫|prohibido,⛔|entrada prohibida,🛑|stop,❗|exclamación,❓|pregunta,‼️|doble exclamación,⁉️|exclamación pregunta,💤|dormir,💬|bocadillo,🗨️|burbuja,🗯️|enfadado burbuja,💭|pensar,🔔|campana,🔕|campana silenciada,🎵|nota musical,🎶|notas musicales,🔒|candado,🔑|llave,🔗|enlace,🧡|naranja corazón,♻️|reciclaje,⚜️|flor de lis,🔱|tridente,📛|identificación,🔰|principiante,⭕|círculo,🔴|círculo rojo,🟠|círculo naranja,🟡|círculo amarillo,🟢|círculo verde,🔵|círculo azul,🟣|círculo morado,⚫|círculo negro,⚪|círculo blanco,🟤|círculo marrón,🟥|cuadrado rojo,🟧|cuadrado naranja,🟨|cuadrado amarillo,🟩|cuadrado verde,🟦|cuadrado azul,🟪|cuadrado morado,⬛|cuadrado negro,⬜|cuadrado blanco,🔶|rombo naranja,🔷|rombo azul,🔸|rombo pequeño naranja,🔹|rombo pequeño azul,🔺|triángulo rojo,🔻|triángulo hacia abajo,💠|rombo con punto,♠️|picas,♥️|corazones naipe,♦️|diamantes naipe,♣️|tréboles naipe,🃏|comodín,🔣|símbolos,🔤|letras,🔠|mayúsculas,🔡|minúsculas,🔢|números,♈|aries,♉|tauro,♊|géminis,♋|cáncer,♌|leo,♍|virgo,♎|libra,♏|escorpio,♐|sagitario,♑|capricornio,♒|acuario,♓|piscis,⛎|ofiuco') },
+  { id:'flags', label:'Banderas', icon:'🏳️', items: makeEmojiItems('🏳️|bandera blanca,🏴|bandera negra,🏁|bandera a cuadros,🚩|bandera roja,🏳️‍🌈|bandera arcoíris,🏳️‍⚧️|bandera trans,🇪🇸|España,🇦🇩|Andorra,🇫🇷|Francia,🇵🇹|Portugal,🇮🇹|Italia,🇩🇪|Alemania,🇬🇧|Reino Unido,🇺🇸|Estados Unidos,🇨🇦|Canadá,🇲🇽|México,🇧🇷|Brasil,🇦🇷|Argentina,🇨🇱|Chile,🇨🇴|Colombia,🇵🇪|Perú,🇺🇾|Uruguay,🇯🇵|Japón,🇨🇳|China,🇰🇷|Corea del Sur,🇮🇳|India,🇦🇺|Australia,🇳🇿|Nueva Zelanda,🇳🇱|Países Bajos,🇧🇪|Bélgica,🇨🇭|Suiza,🇦🇹|Austria,🇸🇪|Suecia,🇳🇴|Noruega,🇩🇰|Dinamarca,🇫🇮|Finlandia,🇮🇪|Irlanda,🇵🇱|Polonia,🇺🇦|Ucrania,🇬🇷|Grecia,🇹🇷|Turquía,🇷🇺|Rusia,🇮🇱|Israel,🇸🇦|Arabia Saudí,🇿🇦|Sudáfrica,🇪🇬|Egipto,🇲🇦|Marruecos,🇳🇬|Nigeria,🇰🇪|Kenia,🇹🇭|Tailandia,🇻🇳|Vietnam,🇮🇩|Indonesia,🇵🇭|Filipinas,🇸🇬|Singapur,🇲🇾|Malasia,🇵🇰|Pakistán,🇧🇩|Bangladesh') }
+];
+
+let activeEmojiCategory = 'smileys';
+function getRecentEmojis() {
+  try { const value = JSON.parse(localStorage.getItem('xifre_recent_emojis') || '[]'); return Array.isArray(value) ? value.filter(x => typeof x === 'string').slice(0, 24) : []; }
+  catch (_) { return []; }
+}
+function rememberEmoji(emoji) {
+  try { localStorage.setItem('xifre_recent_emojis', JSON.stringify([emoji, ...getRecentEmojis().filter(item => item !== emoji)].slice(0, 24))); }
+  catch (_) {}
+}
+function renderEmojiCategories() {
+  const bar = $('#emoji-categories');
+  if (!bar) return;
+  bar.innerHTML = '';
+  const categories = [{ id:'recent', label:'Recientes', icon:'🕘' }, ...EMOJI_CATEGORIES.map(({id,label,icon})=>({id,label,icon}))];
+  for (const category of categories) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = `emoji-category${activeEmojiCategory === category.id ? ' active' : ''}`;
+    button.dataset.emojiCategory = category.id; button.textContent = category.icon; button.title = category.label;
+    button.setAttribute('aria-label', category.label); button.setAttribute('aria-pressed', activeEmojiCategory === category.id ? 'true' : 'false');
+    bar.appendChild(button);
+  }
+}
+function renderEmojiGrid(query = '') {
+  const grid = $('#emoji-grid');
+  if (!grid) return;
+  const normalizeSearch = value => String(value || '').toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const term = normalizeSearch(String(query || '').trim());
+  let entries = [];
+  if (term) {
+    entries = EMOJI_CATEGORIES.flatMap(category => category.items.map(item => ({...item, category:category.label})))
+      .filter(item => item.emoji.includes(term) || normalizeSearch(item.name).includes(term));
+  } else if (activeEmojiCategory === 'recent') {
+    const names = new Map(EMOJI_CATEGORIES.flatMap(category => category.items.map(item => [item.emoji, item.name])));
+    entries = getRecentEmojis().map(emoji => ({ emoji, name:names.get(emoji) || 'reciente' }));
+  } else {
+    entries = (EMOJI_CATEGORIES.find(category => category.id === activeEmojiCategory) || EMOJI_CATEGORIES[0]).items;
+  }
+  grid.innerHTML = '';
+  if (!entries.length) {
+    const empty = document.createElement('div'); empty.className = 'emoji-grid-empty';
+    empty.textContent = term ? 'No se han encontrado emojis.' : 'Todavía no hay emojis recientes.'; grid.appendChild(empty); return;
+  }
+  for (const item of entries) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'emoji-choice'; button.dataset.emoji = item.emoji;
+    button.textContent = item.emoji; button.title = item.name || 'Emoji'; button.setAttribute('role','option'); button.setAttribute('aria-label',`${item.emoji} ${item.name || 'emoji'}`);
+    grid.appendChild(button);
+  }
+}
+function chooseEmoji(emoji) {
+  const cleanEmoji = String(emoji || '');
+  if (!cleanEmoji) return;
+  rememberEmoji(cleanEmoji);
+  const mode = emojiPickerMode;
+  const messageId = emojiPickerMessageId;
+  closeEmojiPicker();
+  if (mode === 'reaction') {
+    if (messageId) void toggleMessageReaction(messageId, cleanEmoji);
+  } else {
+    insertEmojiAtCursor(cleanEmoji);
+  }
+}
 function setupEmojiPicker() {
-  const picker = $('#emoji-picker');
-  if (!picker || picker.dataset.xifreBound === 'true') return;
-  picker.dataset.xifreBound = 'true';
-  const configureI18n = () => {
-    picker.i18n = {
-      categories: {
-        custom: 'Personalizados',
-        'smileys-emotion': 'Caras y emociones',
-        'people-body': 'Personas y cuerpo',
-        'animals-nature': 'Animales y naturaleza',
-        'food-drink': 'Comida y bebida',
-        'travel-places': 'Viajes y lugares',
-        activities: 'Actividades',
-        objects: 'Objetos',
-        symbols: 'Símbolos',
-        flags: 'Banderas'
-      },
-      categoriesLabel: 'Categorías',
-      emojiUnsupportedMessage: 'Este navegador no admite emojis en color.',
-      favoritesLabel: 'Frecuentes',
-      loadingMessage: 'Cargando emojis…',
-      networkErrorMessage: 'No se pudieron cargar los emojis. Comprueba la conexión.',
-      regionLabel: 'Selector de emojis',
-      searchDescription: 'Escribe para buscar emojis.',
-      searchLabel: 'Buscar emojis',
-      searchResultsLabel: 'Resultados de búsqueda',
-      skinToneDescription: 'Selecciona el tono de piel.',
-      skinToneLabel: 'Elegir tono de piel',
-      skinTones: ['Predeterminado', 'Claro', 'Claro medio', 'Medio', 'Oscuro medio', 'Oscuro'],
-      skinTonesLabel: 'Tonos de piel'
-    };
-  };
-  if (window.customElements?.whenDefined) customElements.whenDefined('emoji-picker').then(configureI18n).catch(() => {});
-  picker.addEventListener('emoji-click', async event => {
-    const emoji = String(event.detail?.unicode || event.detail?.emoji?.unicode || '');
-    if (!emoji) return;
-    const mode = emojiPickerMode;
-    const messageId = emojiPickerMessageId;
-    closeEmojiPicker();
-    if (mode === 'reaction') {
-      if (messageId) await toggleMessageReaction(messageId, emoji);
-    } else {
-      insertEmojiAtCursor(emoji);
-    }
+  const popover = $('#emoji-picker-popover');
+  const grid = $('#emoji-grid');
+  const bar = $('#emoji-categories');
+  const search = $('#emoji-search');
+  if (!popover || !grid || !bar || popover.dataset.xifreBound === 'true') return;
+  popover.dataset.xifreBound = 'true';
+  renderEmojiCategories();
+  renderEmojiGrid('');
+  search?.addEventListener('input', () => renderEmojiGrid(search.value));
+  bar.addEventListener('click', event => {
+    const button = event.target.closest('[data-emoji-category]');
+    if (!button) return;
+    activeEmojiCategory = button.dataset.emojiCategory || 'smileys';
+    if (search) search.value = '';
+    renderEmojiCategories(); renderEmojiGrid('');
+  });
+  grid.addEventListener('click', event => {
+    const button = event.target.closest('[data-emoji]');
+    if (button) chooseEmoji(button.dataset.emoji);
   });
 }
 
@@ -1789,6 +1890,7 @@ avatarInto($('#chat-avatar'), 'XIFRE', null, 'private');
 $('#chat-info-button')?.classList.add('hidden');
 $('#message-input').disabled = true;
 $('#message-input').value = '';
+resizeMessageInput();
 $('#send-button').disabled = true;
 clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden');
 setTypingVisible(false);
@@ -1909,6 +2011,7 @@ $('#composer-emoji-button')?.addEventListener('click', event => {
   else openEmojiPicker(event.currentTarget, 'compose');
 });
 setupEmojiPicker();
+resizeMessageInput();
 $('#conversation-search-input')?.addEventListener('input',e=>{clearTimeout(conversationSearchTimer);conversationSearchTimer=setTimeout(()=>renderConversationSearch(e.target.value),120);});
 document.addEventListener('click',event=>{const tab=event.target.closest('[data-people-tab]');if(tab)showPeopleTab(tab.dataset.peopleTab);});
 document.addEventListener('click',event=>{const a=event.target.closest('[data-member-menu]');if(a)void memberAction(a.dataset.memberMenu);});
@@ -1935,6 +2038,7 @@ previewFile(file, $('#group-edit-avatar-preview'), currentConversationData?.name
 
 $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
 $('#message-input')?.addEventListener('input', () => {
+resizeMessageInput();
 const value = String($('#message-input').value || '').trim();
 currentMentionIds.clear(); // mentions are recalculated from current text on send
 mentionEverywhere = false;
@@ -1948,7 +2052,7 @@ if(!picker.classList.contains('hidden')){
 const items=$$('.mention-item',picker);
 if(event.key==='ArrowDown'){event.preventDefault();mentionPickerIndex=Math.min(mentionPickerIndex+1,items.length-1);items.forEach((x,i)=>x.classList.toggle('active',i===mentionPickerIndex));return;}
 if(event.key==='ArrowUp'){event.preventDefault();mentionPickerIndex=Math.max(mentionPickerIndex-1,0);items.forEach((x,i)=>x.classList.toggle('active',i===mentionPickerIndex));return;}
-if(event.key==='Enter'&&items.length){event.preventDefault();items[mentionPickerIndex]?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));return;}
+if(event.key==='Enter'&&!event.shiftKey&&items.length){event.preventDefault();items[mentionPickerIndex]?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));return;}
 if(event.key==='Escape'){picker.classList.add('hidden');return;}
 }
 if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
