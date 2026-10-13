@@ -41,6 +41,10 @@ let selectedMember = null;
 let selectedConversationForMenu = null;
 let conversationSearchTimer = null;
 let conversationListPoll = null;
+let friendRequestsPoll = null;
+let memberFriendStatus = 'none';
+let lastFriendRequestsSignature = null;
+let lastFriendCacheRenderSignature = null;
 let conversationFilter = '';
 let emojiPickerMode = 'compose';
 let emojiPickerMessageId = null;
@@ -385,6 +389,16 @@ if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
 
 if (conversationListPoll) clearInterval(conversationListPoll);
 conversationListPoll = setInterval(() => { if (document.visibilityState === 'visible' && currentUser) loadConversations().catch(() => {}); }, 4000);
+if (friendRequestsPoll) clearInterval(friendRequestsPoll);
+friendRequestsPoll = setInterval(() => {
+  if (document.visibilityState !== 'visible' || !currentUser) return;
+  const peopleModalOpen = !$('#people-modal')?.classList.contains('hidden');
+  if (!peopleModalOpen) return;
+  void loadFriends().catch(error => console.warn('FRIEND POLL', error));
+  if ($('#people-requests-panel')?.classList.contains('active')) {
+    void loadFriendRequests().catch(error => console.warn('REQUEST POLL', error));
+  }
+}, 6500);
 
 try {
 await restoreConversation();
@@ -423,6 +437,8 @@ console.error('LOGOUT', error);
 stopChatRealtime();
 if (conversationListPoll) clearInterval(conversationListPoll);
 conversationListPoll = null;
+if (friendRequestsPoll) clearInterval(friendRequestsPoll);
+friendRequestsPoll = null;
 currentUser = null;
 currentProfile = null;
 currentConversation = null;
@@ -446,14 +462,32 @@ $('#message-menu')?.classList.add('hidden');
 /* ------------------------------------------------------------------------ */
 async function loadFriends() {
 if (!currentUser) return;
-const { data, error } = await supabase.from('friendships').select('user1_id,user2_id').or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`);
-if (error) { console.warn('FRIENDS', error); friendCache = []; return; }
-const ids = [...new Set((data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
-if (!ids.length) { friendCache = []; return; }
-const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,email_handle').in('id', ids);
-if (!result.error) friendCache = result.data || [];
+const rpc = await supabase.rpc('xifre_get_my_friends');
+if (!rpc.error) {
+  friendCache = (rpc.data || []).map(friend => ({ ...friend, display_name: friend.display_name || friend.username }));
+} else {
+  console.warn('FRIENDS RPC', rpc.error);
+  // Safe fallback for installations where the migration has not yet been applied.
+  const base = await supabase.from('friendships').select('user1_id,user2_id').or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`);
+  if (base.error) {
+    console.error('FRIENDS FALLBACK', base.error);
+    return; // Keep the last known friends instead of replacing it with an empty list.
+  }
+  const ids = [...new Set((base.data || []).map(row => String(row.user1_id) === String(currentUser.id) ? row.user2_id : row.user1_id).filter(Boolean))];
+  if (!ids.length) friendCache = [];
+  else {
+    const result = await supabase.from('profiles').select('id,username,display_name,avatar_url,avatar_color,email_handle').in('id', ids);
+    if (result.error) {
+      console.error('FRIEND PROFILES FALLBACK', result.error);
+      return;
+    }
+    friendCache = result.data || [];
+  }
 }
-
+renderFriendsModal();
+renderGroupSelection();
+renderGroupAddSelection();
+}
 async function searchPeople(query) {
 const list = $('#friend-search-results');
 if (!list) return;
@@ -487,35 +521,65 @@ if (!results.length) {
   return;
 }
 results.forEach(person => {
+  const targetId = String(person.id || '');
   const relationship = person.relationship || 'none';
   const row = document.createElement('div');
   row.className = 'search-result';
   const handle = String(person.email_handle || '').trim();
-  const status = relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Solicitud recibida' : 'No conectado';
+  const status = relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Te ha enviado una solicitud' : 'No conectado';
   row.innerHTML = `
     <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
-    <div class="result-copy"><strong>${esc(person.username)}</strong><small>@${esc(handle || person.username || 'usuario')}</small><small class="relationship-status">${esc(status)}</small></div>`;
+    <div class="result-copy"><strong>${esc(person.username || person.display_name || 'Usuario')}</strong><small>@${esc(handle || person.username || 'usuario')}</small><small class="relationship-status">${esc(status)}</small></div>`;
   const action = document.createElement('button');
   action.type = 'button';
   action.className = `result-action ${relationship === 'friend' ? '' : 'secondary'}`;
+  const refreshSearch = () => searchPeople($('#friend-search')?.value || '');
   if (relationship === 'friend') {
     action.textContent = 'Abrir';
-    action.addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(person.id); });
-  } else if (relationship === 'outgoing_pending' || relationship === 'incoming_pending') {
-    action.textContent = 'Pendiente';
-    action.disabled = true;
+    action.addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(targetId); });
+  } else if (relationship === 'outgoing_pending') {
+    action.textContent = 'Cancelar';
+    action.addEventListener('click', async () => {
+      if (!isValidUuid(targetId)) return toast('No se ha podido identificar a esta persona. Vuelve a buscarla.', 'error');
+      action.disabled = true;
+      try {
+        const { error } = await supabase.rpc('xifre_cancel_friend_request', { p_target_user: targetId });
+        if (error) throw error;
+        toast('Solicitud cancelada. Ya puedes volver a añadir a esta persona.', 'success');
+        await refreshSearch();
+      } catch (error) {
+        action.disabled = false;
+        toast(friendlyError(error), 'error');
+      }
+    });
+  } else if (relationship === 'incoming_pending') {
+    action.textContent = 'Aceptar';
+    action.addEventListener('click', async () => {
+      if (!isValidUuid(targetId)) return toast('No se ha podido identificar a esta persona. Vuelve a buscarla.', 'error');
+      action.disabled = true;
+      try {
+        const { error } = await supabase.rpc('xifre_accept_friend_request_from', { p_sender_user: targetId });
+        if (error) throw error;
+        await Promise.all([loadFriends(), loadFriendRequests()]);
+        toast('Solicitud aceptada. Ahora sois amigos.', 'success');
+        await refreshSearch();
+      } catch (error) {
+        action.disabled = false;
+        toast(friendlyError(error), 'error');
+      }
+    });
   } else {
     action.textContent = 'Añadir';
     action.addEventListener('click', async () => {
+      if (!isValidUuid(targetId)) return toast('No se ha podido identificar a esta persona. Vuelve a buscarla.', 'error');
       action.disabled = true;
       try {
-        const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: person.id });
+        const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: targetId });
         if (error) throw error;
-        action.textContent = 'Pendiente';
         toast('Solicitud enviada.', 'success');
+        await refreshSearch();
       } catch (error) {
         action.disabled = false;
-        action.textContent = 'Añadir';
         toast(friendlyError(error), 'error');
       }
     });
@@ -543,18 +607,36 @@ list.appendChild(row);
 
 async function loadFriendRequests() {
 if (!currentUser) return;
-const base = await supabase.from('friend_requests').select('id,sender_id,receiver_id,created_at').eq('receiver_id', currentUser.id).order('created_at', { ascending: false });
-if (base.error) return renderRequests([]);
-const ids = [...new Set((base.data || []).map(x => x.sender_id))];
-let profiles = [];
-if (ids.length) {
-const result = await supabase.from('profiles').select('id,username,avatar_url,avatar_color,email_handle').in('id', ids);
-if (!result.error) profiles = result.data || [];
+const list = $('#friend-requests-list');
+if (list && !list.children.length) list.innerHTML = '<div class="empty-sidebar">Cargando solicitudes…</div>';
+const { data, error } = await supabase.rpc('xifre_get_friend_requests');
+if (error) {
+  console.error('FRIEND REQUESTS RPC', error);
+  setModalMessage('requests-message', `No se pudieron cargar las solicitudes: ${friendlyError(error)}`, 'error');
+  // Do not falsely show an empty inbox when the database denied access or the RPC is missing.
+  return;
 }
-const map = new Map(profiles.map(p => [p.id, p]));
-renderRequests((base.data || []).map(req => ({ ...req, sender: map.get(req.sender_id) || {} })));
+setModalMessage('requests-message', '');
+const requests = (data || []).map(req => ({
+  id: req.request_id,
+  sender_id: req.sender_id,
+  receiver_id: currentUser.id,
+  created_at: req.created_at,
+  sender: {
+    id: req.sender_id,
+    username: req.username,
+    display_name: req.display_name,
+    avatar_url: req.avatar_url,
+    avatar_color: req.avatar_color,
+    email_handle: req.email_handle
+  }
+}));
+const signature = JSON.stringify(requests.map(req => [req.id, req.sender_id, req.created_at, req.sender.username, req.sender.avatar_url]));
+if (signature !== lastFriendRequestsSignature) {
+  lastFriendRequestsSignature = signature;
+  renderRequests(requests);
 }
-
+}
 function renderRequests(requests) {
 const list = $('#friend-requests-list');
 if (!list) return;
@@ -563,7 +645,7 @@ if (!requests.length) { list.innerHTML = '<div class="empty-sidebar">No tienes s
 requests.forEach(req => {
 const row = document.createElement('div');
 row.className = 'request-item';
-row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar')}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.email_handle || req.sender.username || 'usuario')}</small><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
+row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar', req.sender.avatar_color)}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.email_handle || req.sender.username || 'usuario')}</small><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
 const [accept, reject] = $$('.request-actions button', row);
 accept.addEventListener('click', () => acceptRequest(req, row));
 reject.addEventListener('click', () => rejectRequest(req, row));
@@ -572,37 +654,29 @@ list.appendChild(row);
 }
 
 async function acceptRequest(req, row) {
-$$('.request-actions button', row).forEach(b => b.disabled = true);
+$$('.request-actions button', row).forEach(button => button.disabled = true);
 try {
-const first = String(currentUser.id) < String(req.sender_id) ? currentUser.id : req.sender_id;
-const second = String(currentUser.id) < String(req.sender_id) ? req.sender_id : currentUser.id;
-const exists = await supabase.from('friendships').select('user1_id,user2_id').eq('user1_id', first).eq('user2_id', second).maybeSingle();
-if (exists.error) throw exists.error;
-if (!exists.data) {
-const insert = await supabase.from('friendships').insert({ user1_id: first, user2_id: second });
-if (insert.error) throw insert.error;
-}
-const remove = await supabase.from('friend_requests').delete().eq('id', req.id).eq('receiver_id', currentUser.id);
-if (remove.error) throw remove.error;
-row.remove();
-await loadFriends();
-toast('Ahora sois amigos.', 'success');
+  const { error } = await supabase.rpc('xifre_accept_friend_request', { p_request_id: req.id });
+  if (error) throw error;
+  await Promise.all([loadFriends(), loadFriendRequests()]);
+  toast('Ahora sois amigos.', 'success');
 } catch (error) {
-$$('.request-actions button', row).forEach(b => b.disabled = false);
-toast(friendlyError(error), 'error');
+  $$('.request-actions button', row).forEach(button => button.disabled = false);
+  toast(friendlyError(error), 'error');
 }
 }
 
 async function rejectRequest(req, row) {
-const button = $('.request-reject', row);
-button.disabled = true;
+const buttons = $$('.request-actions button', row);
+buttons.forEach(button => button.disabled = true);
 try {
-const { error } = await supabase.from('friend_requests').delete().eq('id', req.id).eq('receiver_id', currentUser.id);
-if (error) throw error;
-row.remove();
+  const { error } = await supabase.rpc('xifre_reject_friend_request', { p_request_id: req.id });
+  if (error) throw error;
+  await loadFriendRequests();
+  toast('Solicitud rechazada.', 'success');
 } catch (error) {
-button.disabled = false;
-toast(friendlyError(error), 'error');
+  buttons.forEach(button => button.disabled = false);
+  toast(friendlyError(error), 'error');
 }
 }
 
@@ -1559,24 +1633,36 @@ async function updateMemberProfileFriendAction(member) {
   const button = $('#member-profile-add-friend');
   if (!button || !member) return;
   const id = getMemberId(member);
-  const alreadyFriend = friendCache.some(friend => String(friend.id) === id);
-  if (!id || id === String(currentUser?.id) || alreadyFriend) {
+  memberFriendStatus = 'none';
+  if (!isValidUuid(id) || id === String(currentUser?.id)) {
     button.classList.add('hidden');
     return;
   }
   button.classList.remove('hidden');
-  button.disabled = false;
-  button.textContent = 'Añadir amigo';
+  button.disabled = true;
+  button.textContent = 'Comprobando…';
   try {
-    const { data, error } = await supabase.from('friend_requests').select('id,sender_id,receiver_id')
-      .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${id}),and(sender_id.eq.${id},receiver_id.eq.${currentUser.id})`).limit(1);
-    if (error) return;
+    const { data, error } = await supabase.rpc('xifre_get_friend_request_status', { p_target_user: id });
+    if (error) throw error;
     if (String(getMemberId(selectedMember)) !== id) return;
-    if ((data || []).length) {
-      button.disabled = true;
-      button.textContent = String(data[0].sender_id) === String(currentUser.id) ? 'Solicitud enviada' : 'Solicitud recibida';
+    memberFriendStatus = String(data || 'none');
+    if (memberFriendStatus === 'friend') {
+      button.classList.add('hidden');
+      return;
     }
-  } catch (_) { /* The action remains available; the RPC validates requests. */ }
+    button.classList.remove('hidden');
+    button.disabled = false;
+    button.textContent = memberFriendStatus === 'incoming_pending'
+      ? 'Aceptar solicitud'
+      : memberFriendStatus === 'outgoing_pending'
+        ? 'Cancelar solicitud'
+        : 'Añadir amigo';
+  } catch (error) {
+    console.error('MEMBER FRIEND STATUS', error);
+    button.disabled = false;
+    button.textContent = 'Añadir amigo';
+    // The send/accept RPCs still validate state, so an RLS read failure won't block the action.
+  }
 }
 
 async function sendFriendRequestFromMemberProfile() {
@@ -1584,12 +1670,23 @@ async function sendFriendRequestFromMemberProfile() {
   const button = $('#member-profile-add-friend');
   const id = getMemberId(member);
   if (!member || !button || !isValidUuid(id) || id === String(currentUser?.id)) return;
+  const previousStatus = memberFriendStatus;
   button.disabled = true;
   try {
-    const { error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: id });
+    let error = null;
+    if (previousStatus === 'incoming_pending') {
+      ({ error } = await supabase.rpc('xifre_accept_friend_request_from', { p_sender_user: id }));
+    } else if (previousStatus === 'outgoing_pending') {
+      ({ error } = await supabase.rpc('xifre_cancel_friend_request', { p_target_user: id }));
+    } else {
+      ({ error } = await supabase.rpc('xifre_send_friend_request', { p_target_user: id }));
+    }
     if (error) throw error;
-    button.textContent = 'Solicitud enviada';
-    toast('Solicitud de amistad enviada.', 'success');
+    await Promise.all([loadFriends(), loadFriendRequests()]);
+    await updateMemberProfileFriendAction(member);
+    if (previousStatus === 'incoming_pending') toast('Solicitud aceptada. Ahora sois amigos.', 'success');
+    else if (previousStatus === 'outgoing_pending') toast('Solicitud cancelada.', 'success');
+    else toast('Solicitud de amistad enviada.', 'success');
   } catch (error) {
     button.disabled = false;
     toast(friendlyError(error), 'error');
