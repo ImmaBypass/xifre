@@ -48,6 +48,20 @@ let lastFriendCacheRenderSignature = null;
 let conversationFilter = '';
 let emojiPickerMode = 'compose';
 let emojiPickerMessageId = null;
+let sendInFlight = false;
+let logoutInFlight = false;
+let conversationLoadSequence = 0;
+let conversationOpenSequence = 0;
+const messageLoadSequences = new Map();
+const reactionLoadSequences = new Map();
+let friendRequestLoadPromise = null;
+let friendRequestRefreshQueued = false;
+let friendRequestsLoadedOnce = false;
+let friendRequestKnownIds = new Set();
+let memberStatusRequestToken = 0;
+let removeProfileAvatarRequested = false;
+let removeGroupAvatarRequested = false;
+let editingMessageId = null;
 
 const screens = ['landing', 'login', 'register', 'email'];
 
@@ -163,6 +177,29 @@ return message || 'No se pudo completar la operación.';
 function formatTime(timestamp) {
 if (!timestamp) return '';
 return new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatMessageTime(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  const time = date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  const today = new Date();
+  const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayDay = yesterday.getTime();
+  if (dateDay === todayDay) return time;
+  if (dateDay === yesterdayDay) return `Ayer a las ${time}`;
+  return `${date.getDate()}/${date.getMonth() + 1} a las ${time}`;
+}
+
+function formatExactMessageTime(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function formatListTime(timestamp) {
@@ -389,14 +426,14 @@ if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
 
 if (conversationListPoll) clearInterval(conversationListPoll);
 conversationListPoll = setInterval(() => { if (document.visibilityState === 'visible' && currentUser) loadConversations().catch(() => {}); }, 4000);
+// Load requests as soon as the app starts, not only after opening the modal.
+void loadFriendRequests().catch(error => console.warn('INITIAL REQUEST LOAD', error));
 if (friendRequestsPoll) clearInterval(friendRequestsPoll);
 friendRequestsPoll = setInterval(() => {
   if (document.visibilityState !== 'visible' || !currentUser) return;
-  const peopleModalOpen = !$('#people-modal')?.classList.contains('hidden');
-  if (!peopleModalOpen) return;
-  void loadFriends().catch(error => console.warn('FRIEND POLL', error));
-  if ($('#people-requests-panel')?.classList.contains('active')) {
-    void loadFriendRequests().catch(error => console.warn('REQUEST POLL', error));
+  void loadFriendRequests().catch(error => console.warn('REQUEST POLL', error));
+  if (!$('#people-modal')?.classList.contains('hidden')) {
+    void loadFriends().catch(error => console.warn('FRIEND POLL', error));
   }
 }, 6500);
 
@@ -429,27 +466,43 @@ return startPromise;
 }
 
 async function logout() {
-try {
-await supabase.auth.signOut();
-} catch (error) {
-console.error('LOGOUT', error);
-} finally {
-stopChatRealtime();
-if (conversationListPoll) clearInterval(conversationListPoll);
-conversationListPoll = null;
-if (friendRequestsPoll) clearInterval(friendRequestsPoll);
-friendRequestsPoll = null;
-currentUser = null;
-currentProfile = null;
-currentConversation = null;
-currentConversationData = null;
-currentMembers = [];
-appStarted = false;
-sessionStorage.removeItem('xifre_current_conversation');
-closeAllModals();
-$('#settings-modal')?.classList.add('hidden');
-showScreen('landing');
-}
+  if (!currentUser || logoutInFlight) return;
+  const confirmed = await askConfirm('Cerrar sesión', '¿Quieres cerrar tu sesión de XIFRE? Volverás a la página principal.', 'Cerrar sesión');
+  if (!confirmed) return;
+  logoutInFlight = true;
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  } catch (error) {
+    console.error('LOGOUT', error);
+    toast(`No se pudo cerrar la sesión: ${friendlyError(error)}`, 'error');
+    logoutInFlight = false;
+    return;
+  }
+  stopChatRealtime();
+  if (conversationListPoll) clearInterval(conversationListPoll);
+  if (friendRequestsPoll) clearInterval(friendRequestsPoll);
+  conversationListPoll = null;
+  friendRequestsPoll = null;
+  currentUser = null;
+  currentProfile = null;
+  currentConversation = null;
+  currentConversationData = null;
+  currentMembers = [];
+  conversationCache = [];
+  friendCache = [];
+  memberCache.clear();
+  friendRequestLoadPromise = null;
+  friendRequestRefreshQueued = false;
+  friendRequestsLoadedOnce = false;
+  friendRequestKnownIds.clear();
+  lastFriendRequestsSignature = null;
+  appStarted = false;
+  logoutInFlight = false;
+  sessionStorage.removeItem('xifre_current_conversation');
+  closeAllModals();
+  $('#settings-modal')?.classList.add('hidden');
+  showScreen('landing');
 }
 
 function closeAllModals() {
@@ -606,42 +659,79 @@ list.appendChild(row);
 }
 
 async function loadFriendRequests() {
-if (!currentUser) return;
-const list = $('#friend-requests-list');
-if (list && !list.children.length) list.innerHTML = '<div class="empty-sidebar">Cargando solicitudes…</div>';
-const { data, error } = await supabase.rpc('xifre_get_friend_requests');
-if (error) {
-  console.error('FRIEND REQUESTS RPC', error);
-  setModalMessage('requests-message', `No se pudieron cargar las solicitudes: ${friendlyError(error)}`, 'error');
-  // Do not falsely show an empty inbox when the database denied access or the RPC is missing.
-  return;
-}
-setModalMessage('requests-message', '');
-const requests = (data || []).map(req => ({
-  id: req.request_id,
-  sender_id: req.sender_id,
-  receiver_id: currentUser.id,
-  created_at: req.created_at,
-  sender: {
-    id: req.sender_id,
-    username: req.username,
-    display_name: req.display_name,
-    avatar_url: req.avatar_url,
-    avatar_color: req.avatar_color,
-    email_handle: req.email_handle
+  if (!currentUser) return;
+  if (friendRequestLoadPromise) {
+    // If an accept/reject happens during a poll, force one fresh query after this one finishes.
+    friendRequestRefreshQueued = true;
+    return friendRequestLoadPromise;
   }
-}));
-const signature = JSON.stringify(requests.map(req => [req.id, req.sender_id, req.created_at, req.sender.username, req.sender.avatar_url]));
-if (signature !== lastFriendRequestsSignature) {
-  lastFriendRequestsSignature = signature;
-  renderRequests(requests);
+  const userId = String(currentUser.id);
+  const list = $('#friend-requests-list');
+  if (list && !list.children.length) list.innerHTML = '<div class="empty-sidebar">Cargando solicitudes…</div>';
+  friendRequestLoadPromise = (async () => {
+    const { data, error } = await supabase.rpc('xifre_get_friend_requests');
+    if (String(currentUser?.id || '') !== userId) return;
+    if (error) {
+      console.error('FRIEND REQUESTS RPC', error);
+      setModalMessage('requests-message', `No se pudieron cargar las solicitudes: ${friendlyError(error)}`, 'error');
+      // Preserve the last good UI and badge on network/RLS/RPC failure.
+      return;
+    }
+    setModalMessage('requests-message', '');
+    const requests = (data || []).map(req => ({
+      id: req.request_id || req.id,
+      sender_id: req.sender_id,
+      receiver_id: userId,
+      created_at: req.created_at,
+      sender: {
+        id: req.sender_id,
+        username: req.username,
+        display_name: req.display_name,
+        avatar_url: req.avatar_url,
+        avatar_color: req.avatar_color,
+        email_handle: req.email_handle
+      }
+    })).filter(req => isValidUuid(req.id) && isValidUuid(req.sender_id));
+    const signature = JSON.stringify(requests.map(req => [req.id, req.sender_id, req.created_at, req.sender.username, req.sender.avatar_url]));
+    const ids = new Set(requests.map(req => String(req.id)));
+    if (friendRequestsLoadedOnce) {
+      const fresh = requests.filter(req => !friendRequestKnownIds.has(String(req.id)));
+      if (fresh.length && document.visibilityState === 'visible') {
+        toast(fresh.length === 1 ? `Nueva solicitud de amistad de @${fresh[0].sender.username || 'usuario'}.` : `Tienes ${fresh.length} nuevas solicitudes de amistad.`, 'info');
+      }
+    }
+    friendRequestsLoadedOnce = true;
+    friendRequestKnownIds = ids;
+    setFriendRequestBadge(requests.length);
+    if (signature !== lastFriendRequestsSignature || list?.dataset.requestSignature !== signature) {
+      lastFriendRequestsSignature = signature;
+      renderRequests(requests);
+      if (list) list.dataset.requestSignature = signature;
+    }
+  })().finally(() => {
+    friendRequestLoadPromise = null;
+    if (friendRequestRefreshQueued && currentUser) {
+      friendRequestRefreshQueued = false;
+      queueMicrotask(() => { void loadFriendRequests().catch(error => console.warn('QUEUED REQUEST REFRESH', error)); });
+    }
+  });
+  return friendRequestLoadPromise;
 }
+
+function setFriendRequestBadge(count) {
+  const badge = $('#friend-request-badge');
+  if (!badge) return;
+  const value = Math.max(0, Number(count) || 0);
+  badge.textContent = value > 99 ? '99+' : String(value);
+  badge.classList.toggle('hidden', value === 0);
+  badge.setAttribute('aria-label', `${value} solicitudes pendientes`);
 }
+
 function renderRequests(requests) {
 const list = $('#friend-requests-list');
 if (!list) return;
 list.innerHTML = '';
-if (!requests.length) { list.innerHTML = '<div class="empty-sidebar">No tienes solicitudes pendientes.</div>'; return; }
+if (!requests.length) { list.dataset.requestSignature = '[]'; list.innerHTML = '<div class="empty-sidebar">No hay solicitudes.</div>'; return; }
 requests.forEach(req => {
 const row = document.createElement('div');
 row.className = 'request-item';
@@ -654,43 +744,55 @@ list.appendChild(row);
 }
 
 async function acceptRequest(req, row) {
-$$('.request-actions button', row).forEach(button => button.disabled = true);
-try {
-  const { error } = await supabase.rpc('xifre_accept_friend_request', { p_request_id: req.id });
-  if (error) throw error;
-  await Promise.all([loadFriends(), loadFriendRequests()]);
-  toast('Ahora sois amigos.', 'success');
-} catch (error) {
-  $$('.request-actions button', row).forEach(button => button.disabled = false);
-  toast(friendlyError(error), 'error');
+  const buttons = $$('.request-actions button', row);
+  buttons.forEach(button => button.disabled = true);
+  try {
+    const { error } = await supabase.rpc('xifre_accept_friend_request', { p_request_id: req.id });
+    if (error) throw error;
+    row?.remove();
+    setFriendRequestBadge(Math.max(0, Number($('#friend-request-badge')?.textContent || 0) - 1));
+    toast('Ahora sois amigos.', 'success');
+    const refreshes = await Promise.allSettled([loadFriends(), loadFriendRequests(), loadConversations()]);
+    for (const result of refreshes) if (result.status === 'rejected') console.warn('POST-ACCEPT REFRESH', result.reason);
+  } catch (error) {
+    buttons.forEach(button => button.disabled = false);
+    toast(friendlyError(error), 'error');
+  }
 }
-}
-
 async function rejectRequest(req, row) {
-const buttons = $$('.request-actions button', row);
-buttons.forEach(button => button.disabled = true);
-try {
-  const { error } = await supabase.rpc('xifre_reject_friend_request', { p_request_id: req.id });
-  if (error) throw error;
-  await loadFriendRequests();
-  toast('Solicitud rechazada.', 'success');
-} catch (error) {
-  buttons.forEach(button => button.disabled = false);
-  toast(friendlyError(error), 'error');
+  const buttons = $$('.request-actions button', row);
+  buttons.forEach(button => button.disabled = true);
+  try {
+    const { error } = await supabase.rpc('xifre_reject_friend_request', { p_request_id: req.id });
+    if (error) throw error;
+    row?.remove();
+    setFriendRequestBadge(Math.max(0, Number($('#friend-request-badge')?.textContent || 0) - 1));
+    toast('Solicitud rechazada.', 'success');
+    await loadFriendRequests().catch(error => console.warn('POST-REJECT REFRESH', error));
+  } catch (error) {
+    buttons.forEach(button => button.disabled = false);
+    toast(friendlyError(error), 'error');
+  }
 }
-}
-
 /* ------------------------------------------------------------------------ */
 /* Conversations */
 /* ------------------------------------------------------------------------ */
 async function loadConversations() {
-if (!currentUser) return [];
-const { data, error } = await supabase.rpc('xifre_get_my_conversations');
-if (error) { console.warn('CONVERSATIONS', error); return conversationCache; }
-conversationCache = (data || []).map(row => ({ ...row, displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado') }));
-conversationCache.sort((a,b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
-renderConversations();
-return conversationCache;
+  if (!currentUser) return [];
+  const requestSequence = ++conversationLoadSequence;
+  const ownerAtStart = String(currentUser.id);
+  const { data, error } = await supabase.rpc('xifre_get_my_conversations');
+  if (error) { console.warn('CONVERSATIONS', error); return conversationCache; }
+  if (!currentUser || String(currentUser.id) !== ownerAtStart || requestSequence !== conversationLoadSequence) return conversationCache;
+  const unique = new Map();
+  for (const row of data || []) {
+    if (!row?.id) continue;
+    unique.set(String(row.id), { ...row, displayName: row.display_name || row.name || (row.type === 'group' ? 'Grupo' : 'Chat privado') });
+  }
+  conversationCache = [...unique.values()];
+  conversationCache.sort((a, b) => new Date(b.last_message_at || b.created_at || 0) - new Date(a.last_message_at || a.created_at || 0));
+  renderConversations();
+  return conversationCache;
 }
 
 function renderConversations(filter = conversationFilter) {
@@ -763,48 +865,63 @@ async function hydrateMemberProfiles(members) {
 }
 
 async function openConversation(id, cached = null) {
-if (!id || !currentUser) return false;
-const conversationId = String(id);
-const isAlreadyOpen = String(currentConversation || '') === conversationId;
-let conversation = cached || conversationCache.find(c => String(c.id) === conversationId);
-if (!conversation) {
-await loadConversations();
-conversation = conversationCache.find(c => String(c.id) === conversationId);
-}
-if (!conversation) return false;
+  if (!id || !currentUser) return false;
+  const conversationId = String(id);
+  const openSequence = ++conversationOpenSequence;
+  const isCurrentOpen = () => openSequence === conversationOpenSequence && String(currentConversation || '') === conversationId;
+  const isAlreadyOpen = String(currentConversation || '') === conversationId;
+  let conversation = cached || conversationCache.find(c => String(c.id) === conversationId);
+  if (!conversation) {
+    await loadConversations();
+    // A slower click must not take over after the user has selected another chat.
+    if (openSequence !== conversationOpenSequence) return false;
+    conversation = conversationCache.find(c => String(c.id) === conversationId);
+  }
+  if (!conversation || openSequence !== conversationOpenSequence) return false;
 
-try {
-currentConversation = conversationId;
-currentConversationData = conversation;
-sessionStorage.setItem('xifre_current_conversation', conversationId);
-const { data: members, error } = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: conversationId });
-if (error) throw error;
-currentMembers = await hydrateMemberProfiles(members || []);
-memberCache.set(conversationId, currentMembers);
+  try {
+    currentConversation = conversationId;
+    currentConversationData = conversation;
+    sessionStorage.setItem('xifre_current_conversation', conversationId);
 
-updateChatHeader();
-renderRightPane();
-renderConversations();
-await loadMessages(conversationId, !isAlreadyOpen);
-await supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId });
-const readRow = conversationCache.find(c => String(c.id) === conversationId); if (readRow) { readRow.unread_count = 0; readRow.has_mention = false; }
-renderConversations();
-setupTypingChannel(conversationId);
-setupMessageChannel(conversationId);
-$('#message-input').disabled = false;
-$('#send-button').disabled = true;
-resizeMessageInput();
-$('#message-input').focus();
-return true;
-} catch (error) {
-console.error('OPEN CONVERSATION', error);
-currentConversation = conversationId;
-currentConversationData = conversation;
-showChatError(error?.message || 'No se pudo abrir esta conversación.');
-return false;
-}
-}
+    const memberResponse = await supabase.rpc('xifre_get_conversation_members', { p_conversation_id: conversationId });
+    if (!isCurrentOpen()) return false;
+    if (memberResponse.error) throw memberResponse.error;
 
+    const hydrated = await hydrateMemberProfiles(memberResponse.data || []);
+    if (!isCurrentOpen()) return false;
+    currentMembers = hydrated;
+    memberCache.set(conversationId, currentMembers);
+
+    updateChatHeader();
+    renderRightPane();
+    renderConversations();
+    await loadMessages(conversationId, !isAlreadyOpen);
+    if (!isCurrentOpen()) return false;
+
+    const readResult = await supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId });
+    if (!isCurrentOpen()) return false;
+    if (readResult.error) console.warn('MARK READ', readResult.error);
+    const readRow = conversationCache.find(c => String(c.id) === conversationId);
+    if (readRow) { readRow.unread_count = 0; readRow.has_mention = false; }
+    renderConversations();
+    setupTypingChannel(conversationId);
+    setupMessageChannel(conversationId);
+    $('#message-input').disabled = false;
+    updateSendState();
+    resizeMessageInput();
+    $('#message-input').focus();
+    return true;
+  } catch (error) {
+    // Errors from an obsolete open attempt must not overwrite the active chat.
+    if (!isCurrentOpen()) return false;
+    console.error('OPEN CONVERSATION', error);
+    currentConversation = conversationId;
+    currentConversationData = conversation;
+    showChatError(error?.message || 'No se pudo abrir esta conversación.');
+    return false;
+  }
+}
 async function restoreConversation() {
 if (!currentUser) return;
 const saved = sessionStorage.getItem('xifre_current_conversation');
@@ -841,16 +958,33 @@ return { ...row };
 
 async function loadMessages(conversationId, scrollToBottom = false) {
   const requestedId = String(conversationId || '');
-  if (!requestedId) return;
-  const { data, error } = await supabase.rpc('xifre_get_messages', {
+  if (!requestedId || !currentUser) return;
+  const ownerAtStart = String(currentUser.id);
+  const sequence = (messageLoadSequences.get(requestedId) || 0) + 1;
+  messageLoadSequences.set(requestedId, sequence);
+  let response = await supabase.rpc('xifre_get_messages_v17', {
     p_conversation_id: requestedId,
     p_limit: 500
   });
-  if (error) throw error;
-  // An earlier request may finish after the user has switched to another chat.
-  if (String(currentConversation || '') !== requestedId) return;
-  renderMessages((data || []).map(messageObject), scrollToBottom);
+  // Allow a temporarily un-migrated deployment to keep reading messages while SQL is updated.
+  if (response.error && (response.error.code === 'PGRST202' || /xifre_get_messages_v17/i.test(String(response.error.message || '')))) {
+    response = await supabase.rpc('xifre_get_messages', { p_conversation_id: requestedId, p_limit: 500 });
+  }
+  if (response.error) throw response.error;
+  if (String(currentUser?.id || '') !== ownerAtStart || String(currentConversation || '') !== requestedId) return;
+  if (messageLoadSequences.get(requestedId) !== sequence) return; // Ignore out-of-order poll/realtime responses.
+  renderMessages((response.data || []).map(messageObject), scrollToBottom);
   void loadMessageReactions(requestedId).catch(error => console.debug('REACTIONS LOAD', error));
+}
+
+function messageRenderSignature(message) {
+  return JSON.stringify([
+    message?.content, message?.created_at, message?.edited_at || null, message?.sender_id,
+    message?.sender_username, message?.sender_avatar_url, message?.sender_avatar_color,
+    message?.reply_to, message?.reply_sender_id, message?.reply_sender_username,
+    message?.reply_sender_avatar_url, message?.reply_content, message?.mentions || [],
+    !!message?.mention_everyone, message?.message_type || 'user'
+  ]);
 }
 
 function renderMessageContent(content, message) {
@@ -906,22 +1040,20 @@ function messageMentionsMe(message) {
 function renderMessages(messages, forceBottom = false) {
   const box = $('#messages');
   if (!box) return;
-
   const ordered = [...(messages || [])].sort((a, b) => {
-    const timeDiff = new Date(a.created_at || 0) - new Date(b.created_at || 0);
-    return timeDiff || String(a.id || '').localeCompare(String(b.id || ''));
+    const delta = new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    return delta || String(a.id || '').localeCompare(String(b.id || ''));
   });
-  const incomingIds = new Set(ordered.map(message => String(message.id || '')).filter(Boolean));
-  const existingNodes = new Map(
-    [...box.querySelectorAll('[data-message-id]')].map(node => [String(node.dataset.messageId), node])
-  );
+  const incomingIds = new Set(ordered.map(item => String(item.id || '')).filter(Boolean));
+  const existingNodes = new Map([...box.querySelectorAll('[data-message-id]')].map(node => [String(node.dataset.messageId), node]));
   const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   const originalScrollTop = box.scrollTop;
   const boxTop = box.getBoundingClientRect().top;
   const anchor = [...existingNodes.values()].find(node => node.getBoundingClientRect().bottom > boxTop + 1);
   const anchorId = anchor?.dataset.messageId || '';
-  const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+  const anchorTop = anchor?.getBoundingClientRect().top || 0;
   let changed = false;
+  let addedAny = false;
 
   if (!ordered.length) {
     if (existingNodes.size || !box.querySelector('.chat-welcome')) {
@@ -931,42 +1063,37 @@ function renderMessages(messages, forceBottom = false) {
     return;
   }
 
-  // Prune only messages that really disappeared; keep existing DOM nodes alive
-  // so text selection, focus, hover menus and scroll position do not flicker.
   for (const [id, node] of existingNodes) {
-    if (!incomingIds.has(id)) {
-      node.remove();
-      existingNodes.delete(id);
-      changed = true;
-    }
+    if (!incomingIds.has(id)) { node.remove(); existingNodes.delete(id); changed = true; }
   }
   const welcome = box.querySelector('.chat-welcome');
   if (welcome) { welcome.remove(); changed = true; }
-
   const profiles = new Map((currentMembers || []).map(member => [getMemberId(member), member]));
-  let addedAny = false;
-  for (const message of ordered) {
+  for (let i = 0; i < ordered.length; i++) {
+    const message = ordered[i];
     const id = String(message.id || '');
-    if (!id || existingNodes.has(id)) continue;
-    const node = renderOneMessage(message, profiles);
-    if (node) {
-      existingNodes.set(id, node);
-      const messageIndex = ordered.findIndex(item => String(item.id || '') === id);
-      const nextExisting = ordered.slice(messageIndex + 1)
-        .map(item => existingNodes.get(String(item.id || '')))
-        .find(Boolean);
-      if (nextExisting && nextExisting !== node) box.insertBefore(node, nextExisting);
+    if (!id) continue;
+    const existing = existingNodes.get(id);
+    if (existing) {
+      // A background poll must never destroy an editor or steal focus from the user.
+      if (String(editingMessageId || '') === id) continue;
+      if (existing.dataset.messageSignature !== messageRenderSignature(message)) {
+        const updated = renderOneMessage(message, profiles, existing);
+        if (updated) existingNodes.set(id, updated);
+        changed = true;
+      }
+      continue;
     }
+    const node = renderOneMessage(message, profiles);
+    if (!node) continue;
+    existingNodes.set(id, node);
+    const nextExisting = ordered.slice(i + 1).map(next => existingNodes.get(String(next.id || ''))).find(Boolean);
+    if (nextExisting && nextExisting !== node) box.insertBefore(node, nextExisting);
     changed = true;
     addedAny = true;
   }
 
-  // Recompute contiguous message groups after inserts/deletes. Grouping changes
-  // the layout, so do it before restoring the scroll anchor below.
   if (changed) applyMessageGrouping();
-
-  // Opening a conversation intentionally starts at its latest message. Polling
-  // does not: it only follows new messages if the viewer was already at bottom.
   if (forceBottom || (wasNearBottom && addedAny)) {
     box.scrollTop = box.scrollHeight;
   } else if (changed && anchorId) {
@@ -974,11 +1101,9 @@ function renderMessages(messages, forceBottom = false) {
     if (anchorAfter) {
       const delta = anchorAfter.getBoundingClientRect().top - anchorTop;
       if (Math.abs(delta) > 0.5) box.scrollTop = Math.max(0, originalScrollTop + delta);
-    } else {
-      box.scrollTop = originalScrollTop;
-    }
+    } else box.scrollTop = originalScrollTop;
   } else if (!changed) {
-    // Crucial: do not touch scrollTop on a no-op 2.5-second refresh.
+    // Stable DOM is important: polls must not blink or move text selection.
     return;
   }
 }
@@ -1004,27 +1129,154 @@ function applyMessageGrouping() {
   }
 }
 
-function renderOneMessage(message, profiles=new Map()) {
-const box=$('#messages'); if(!box||!message?.id)return;
-const existing = box.querySelector(`[data-message-id="${CSS.escape(String(message.id))}"]`); if (existing) return existing;
-$('.chat-welcome',box)?.remove();
-if(message.message_type==='system'){
-const row=document.createElement('div');row.className='system-message-row';row.dataset.messageId=String(message.id);row.dataset.messageType='system';row.innerHTML=`<span>${esc(message.content||'')}</span>`;box.appendChild(row);return row;
-}
-const mine=String(message.sender_id)===String(currentUser.id); const cached=profiles.get(String(message.sender_id))||currentMembers.find(m => getMemberId(m) === String(message.sender_id))||{};
-const sender={username:message.sender_username||cached.username||'Usuario',avatar_url:message.sender_avatar_url||cached.avatar_url||null};
-const mentioned = !mine && messageMentionsMe(message);
-const row=document.createElement('article');row.className=`message-row${mine?' mine':''}${mentioned?' mentioned':''}`;row.dataset.messageId=String(message.id);row.dataset.senderId=String(message.sender_id||'');row.dataset.createdAt=String(message.created_at||'');
-row.innerHTML=`<span class="message-grouped-time" aria-hidden="true">${esc(formatTime(message.created_at))}</span><span class="message-avatar">${avatarHTML(sender.username,sender.avatar_url,'private','',cached.avatar_color || message.sender_avatar_color || '')}</span><div class="message-body">${message.reply_to?`<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username||'Usuario',message.reply_sender_avatar_url,'private','',message.reply_sender_avatar_color||'')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username||'Usuario')}</strong><span>${esc(message.reply_content||'')}</span></div></div>`:''}<div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time">${esc(formatTime(message.created_at))}</span></div><div class="message-content">${renderMessageContent(message.content,message)}</div><div class="message-reactions" data-reactions-for="${esc(message.id)}"></div></div><div class="message-actions"><button class="message-action" type="button" data-message-action="reply" title="Responder">↩</button><button class="message-action" type="button" data-message-action="react" title="Añadir reacción">☺</button><button class="message-action more" type="button" data-message-action="more" title="Más">•••</button></div>`;
-row.querySelector('[data-message-action="reply"]').addEventListener('click',e=>{e.stopPropagation();setReplyTo(message);highlightMessage(message.id);});
-row.querySelector('[data-message-action="react"]').addEventListener('click',e=>{e.stopPropagation();openEmojiPicker(e.currentTarget,'reaction',String(message.id));});
-row.querySelector('[data-message-action="more"]').addEventListener('click',e=>{e.stopPropagation();openMessageMenu(message,e.currentTarget);});
-row.querySelector('.message-reply-preview')?.addEventListener('click',()=>highlightMessage(message.reply_to));
-row.addEventListener('contextmenu',e=>{e.preventDefault();openMessageMenu(message,row);});
-box.appendChild(row);
-return row;
+function renderOneMessage(message, profiles = new Map(), existingNode = null) {
+  const box = $('#messages');
+  if (!box || !message?.id) return null;
+  const id = String(message.id);
+  const existing = existingNode || box.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+  const signature = messageRenderSignature(message);
+  if (existing && existing.dataset.messageSignature === signature) return existing;
+  $('.chat-welcome', box)?.remove();
+  if (message.message_type === 'system') {
+    const row = document.createElement('div');
+    row.className = 'system-message-row';
+    row.dataset.messageId = id;
+    row.dataset.senderId = String(message.sender_id || '');
+    row.dataset.createdAt = String(message.created_at || '');
+    row.dataset.messageSignature = signature;
+    row.dataset.messageType = 'system';
+    row.innerHTML = `<span>${esc(message.content || '')}</span>`;
+    if (existing) existing.replaceWith(row); else box.appendChild(row);
+    return row;
+  }
+  const mine = String(message.sender_id) === String(currentUser?.id);
+  const cached = profiles.get(String(message.sender_id)) || currentMembers.find(member => getMemberId(member) === String(message.sender_id)) || {};
+  const sender = {
+    username: message.sender_username || cached.username || 'Usuario',
+    avatar_url: message.sender_avatar_url || cached.avatar_url || null,
+    avatar_color: message.sender_avatar_color || cached.avatar_color || ''
+  };
+  const mentioned = !mine && messageMentionsMe(message);
+  const stamp = formatMessageTime(message.created_at);
+  const exactStamp = formatExactMessageTime(message.created_at);
+  const row = document.createElement('article');
+  row.className = `message-row${mine ? ' mine' : ''}${mentioned ? ' mentioned' : ''}`;
+  row.dataset.messageId = id;
+  row.dataset.senderId = String(message.sender_id || '');
+  row.dataset.createdAt = String(message.created_at || '');
+  row.dataset.messageSignature = signature;
+  row.innerHTML = `
+    <span class="message-grouped-time" aria-hidden="true">${esc(formatTime(message.created_at))}</span>
+    <span class="message-avatar">${avatarHTML(sender.username, sender.avatar_url, 'private', '', sender.avatar_color)}</span>
+    <div class="message-body">
+      ${message.reply_to ? `<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'private', '', message.reply_sender_avatar_color || '')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(message.reply_content || '')}</span></div></div>` : ''}
+      <div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time" title="${esc(exactStamp)}">${esc(stamp)}</span>${message.edited_at ? '<span class="message-edited" title="Este mensaje ha sido editado">(editado)</span>' : ''}</div>
+      <div class="message-content">${renderMessageContent(message.content, message)}${message.edited_at ? '<span class="message-edited-inline"> (editado)</span>' : ''}</div>
+      <div class="message-reactions" data-reactions-for="${esc(id)}"></div>
+    </div>
+    <div class="message-actions">
+      <button class="message-action" type="button" data-message-action="reply" title="Responder" aria-label="Responder">↩</button>
+      <button class="message-action" type="button" data-message-action="react" title="Añadir reacción" aria-label="Añadir reacción">☺</button>
+      ${mine ? '<button class="message-action" type="button" data-message-action="edit" title="Editar mensaje" aria-label="Editar mensaje">✎</button>' : ''}
+      <button class="message-action more" type="button" data-message-action="more" title="Más" aria-label="Más opciones">•••</button>
+    </div>`;
+  row.querySelector('[data-message-action="reply"]')?.addEventListener('click', event => { event.stopPropagation(); setReplyTo(message); highlightMessage(message.id); });
+  row.querySelector('[data-message-action="react"]')?.addEventListener('click', event => { event.stopPropagation(); openEmojiPicker(event.currentTarget, 'reaction', id); });
+  row.querySelector('[data-message-action="edit"]')?.addEventListener('click', event => { event.stopPropagation(); startEditMessage(message, row); });
+  row.querySelector('[data-message-action="more"]')?.addEventListener('click', event => { event.stopPropagation(); openMessageMenu(message, event.currentTarget); });
+  row.querySelector('.message-reply-preview')?.addEventListener('click', () => highlightMessage(message.reply_to));
+  row.addEventListener('contextmenu', event => { event.preventDefault(); openMessageMenu(message, row); });
+  if (existing) existing.replaceWith(row); else box.appendChild(row);
+  return row;
 }
 
+function startEditMessage(message, row) {
+  if (!message || !row || String(message.sender_id) !== String(currentUser?.id) || message.message_type === 'system') return;
+  if (editingMessageId) return;
+  const contentNode = $('.message-content', row);
+  if (!contentNode) return;
+  editingMessageId = String(message.id);
+  const initial = String(message.content || '');
+  const wrap = document.createElement('div');
+  wrap.className = 'message-edit-wrap';
+  const editor = document.createElement('textarea');
+  editor.className = 'message-edit-input';
+  editor.maxLength = 2000;
+  editor.value = initial;
+  editor.setAttribute('aria-label', 'Editar mensaje');
+  const actions = document.createElement('div');
+  actions.className = 'message-edit-actions';
+  const hint = document.createElement('span'); hint.textContent = 'Esc para cancelar · Enter para guardar · Shift+Enter para nueva línea';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'message-edit-cancel'; cancel.textContent = 'Cancelar';
+  const save = document.createElement('button'); save.type = 'button'; save.className = 'message-edit-save'; save.textContent = 'Guardar';
+  actions.append(hint, cancel, save); wrap.append(editor, actions);
+  contentNode.replaceWith(wrap);
+  const finishLocal = () => {
+    if (String(editingMessageId) === String(message.id)) editingMessageId = null;
+    const replacement = document.createElement('div'); replacement.className = 'message-content'; replacement.innerHTML = renderMessageContent(initial, message);
+    wrap.replaceWith(replacement);
+  };
+  cancel.addEventListener('click', finishLocal);
+  save.addEventListener('click', async () => {
+    save.disabled = cancel.disabled = true;
+    try { await saveMessageEdit(message, editor.value, row); }
+    catch (error) { toast(friendlyError(error), 'error'); save.disabled = cancel.disabled = false; }
+  });
+  editor.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); finishLocal(); }
+    else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); save.click(); }
+  });
+  editor.style.height = 'auto'; editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 54), 180)}px`;
+  editor.addEventListener('input', () => { editor.style.height = 'auto'; editor.style.height = `${Math.min(Math.max(editor.scrollHeight, 54), 180)}px`; });
+  editor.focus(); editor.setSelectionRange(editor.value.length, editor.value.length);
+}
+
+async function saveMessageEdit(message, updatedContent, row) {
+  const content = String(updatedContent || '').trim();
+  if (!content) throw new Error('El mensaje no puede estar vacío.');
+  if (content.length > 2000) throw new Error('El mensaje no puede superar los 2000 caracteres.');
+  const conversationId = String(message.conversation_id || currentConversation || '');
+  const derived = deriveMentions(content);
+  const mentionedIds = new Set(derived.ids.filter(isValidUuid));
+  // Responder también notifica/resalta al autor original de la respuesta.
+  const replySenderId = String(message.reply_sender_id || '');
+  if (isValidUuid(replySenderId) && replySenderId !== String(currentUser?.id)) mentionedIds.add(replySenderId);
+
+  const { data, error } = await supabase.rpc('xifre_edit_message_v17', {
+    p_message_id: message.id,
+    p_content: content,
+    p_mentions: [...mentionedIds],
+    p_mention_everyone: !!derived.everyone
+  });
+  if (error) throw error;
+  messageLoadSequences.set(conversationId, (messageLoadSequences.get(conversationId) || 0) + 1);
+  editingMessageId = null;
+
+  const updated = (Array.isArray(data) ? data[0] : data) || {};
+  const patched = {
+    ...message,
+    ...updated,
+    content,
+    edited_at: updated.edited_at || new Date().toISOString(),
+    mentions: Array.isArray(updated.mentions) ? updated.mentions : [...mentionedIds],
+    mention_everyone: Object.prototype.hasOwnProperty.call(updated, 'mention_everyone') ? !!updated.mention_everyone : !!derived.everyone
+  };
+  if (String(currentConversation || '') === conversationId) {
+    const profiles = new Map((currentMembers || []).map(member => [getMemberId(member), member]));
+    const currentRow = $(`[data-message-id="${CSS.escape(String(message.id))}"]`, $('#messages'));
+    if (currentRow) renderOneMessage(patched, profiles, currentRow);
+    applyMessageGrouping();
+  }
+  toast('Mensaje editado.', 'success');
+
+  // The edit is already saved. A transient list/message refresh failure must not
+  // leave the editor open or make the user think they need to submit it again.
+  const refreshes = await Promise.allSettled([
+    loadMessages(conversationId, false),
+    loadConversations()
+  ]);
+  for (const result of refreshes) if (result.status === 'rejected') console.warn('POST-EDIT REFRESH', result.reason);
+}
 function highlightMessage(id){
 $$('.message-row', $('#messages')).forEach(r=>r.classList.remove('reply-target'));
 const row=$(`[data-message-id="${CSS.escape(String(id))}"]`,$('#messages')); if(!row)return; row.classList.add('reply-target'); row.scrollIntoView({behavior:'smooth',block:'center'}); setTimeout(()=>row.classList.remove('reply-target'),1600);
@@ -1050,6 +1302,7 @@ const menu = $('#message-menu');
 if (!menu) return;
 menuMessage = message;
 $('#delete-message-menu')?.classList.toggle('hidden', String(message.sender_id) !== String(currentUser.id));
+$('#edit-message-menu')?.classList.toggle('hidden', String(message.sender_id) !== String(currentUser.id) || message.message_type === 'system');
 menu.classList.remove('hidden');
 const rect = anchor.getBoundingClientRect();
 const width = 180;
@@ -1085,39 +1338,32 @@ function updateMentionPicker() {
   const input = $('#message-input');
   const picker = $('#mention-picker');
   if (!input || !picker) return;
-
   const value = input.value;
   const position = input.selectionStart ?? value.length;
   const before = value.slice(0, position);
-  const match = before.match(/(^|\s)@([a-z0-9_]*)$/i);
-  if (!currentConversation || !match) {
-    picker.classList.add('hidden');
-    return;
-  }
-
+  const match = before.match(/(^|[^a-z0-9_])@([a-z0-9_]*)$/i);
+  if (!currentConversation || !match) { picker.classList.add('hidden'); return; }
   const query = match[2].toLowerCase();
   const people = (currentMembers || []).filter(member => {
     const id = getMemberId(member);
-    return id && id !== String(currentUser?.id) && isValidUuid(id) &&
-      String(member.username || '').toLowerCase().startsWith(query);
+    return id && id !== String(currentUser?.id) && isValidUuid(id) && String(member.username || '').toLowerCase().startsWith(query);
   }).slice(0, 8);
-
-  // @everyone stays a manually typed mention; it is not a picker suggestion.
+  const choices = [...people];
+  if (currentConversationData?.type === 'group' && 'everyone'.startsWith(query)) {
+    choices.unshift({ id: null, username: 'everyone', display_name: 'everyone', everyone: true });
+  }
   picker.innerHTML = '';
   mentionPickerIndex = 0;
-  if (!people.length) {
-    picker.classList.add('hidden');
-    return;
-  }
-
-  people.forEach((person, index) => {
+  if (!choices.length) { picker.classList.add('hidden'); return; }
+  choices.forEach((person, index) => {
     const row = document.createElement('div');
-    row.className = `mention-item${index === 0 ? ' active' : ''}`;
-    row.innerHTML = `${avatarHTML(person.username, person.avatar_url, 'private', 'mention-avatar', person.avatar_color)}<span class="mention-item-copy"><strong>${esc(person.username)}</strong><small>@${esc(person.username)}</small></span>`;
-    row.addEventListener('mousedown', event => {
-      event.preventDefault();
-      selectMention(person);
-    });
+    row.className = `mention-item${index === 0 ? ' active' : ''}${person.everyone ? ' mention-item-everyone' : ''}`;
+    if (person.everyone) {
+      row.innerHTML = '<span class="mention-avatar mention-everyone-avatar">@</span><span class="mention-item-copy"><strong>@everyone</strong><small>Mencionar a todos los miembros</small></span>';
+    } else {
+      row.innerHTML = `${avatarHTML(person.username, person.avatar_url, 'private', 'mention-avatar', person.avatar_color)}<span class="mention-item-copy"><strong>${esc(person.username)}</strong><small>@${esc(person.username)}</small></span>`;
+    }
+    row.addEventListener('mousedown', event => { event.preventDefault(); selectMention(person); });
     picker.appendChild(row);
   });
   picker.classList.remove('hidden');
@@ -1127,36 +1373,33 @@ function selectMention(person) {
   const input = $('#message-input');
   const value = input?.value || '';
   if (!input || !person) return;
-  const id = getMemberId(person);
-  const username = String(person.username || '').trim();
-  if (!username || !isValidUuid(id)) {
+  const everyone = person.everyone === true;
+  const id = everyone ? '' : getMemberId(person);
+  const username = everyone ? 'everyone' : String(person.username || '').trim();
+  if (!username || (!everyone && !isValidUuid(id))) {
     $('#mention-picker')?.classList.add('hidden');
     toast('No se pudo identificar correctamente a ese miembro. Actualiza el chat e inténtalo otra vez.', 'error');
     return;
   }
-
   const position = input.selectionStart ?? value.length;
   const before = value.slice(0, position);
-  const match = before.match(/(^|\s)@([a-z0-9_]*)$/i);
+  const match = before.match(/(^|[^a-z0-9_])@([a-z0-9_]*)$/i);
   if (!match) return;
   const start = position - match[2].length - 1;
   const token = `@${username} `;
   input.value = value.slice(0, start) + token + value.slice(position);
   const cursor = start + token.length;
-  input.focus();
-  input.setSelectionRange(cursor, cursor);
-  currentMentionIds.add(id); // Optional hint; sendMessage validates against text before sending.
-  mentionEverywhere = false;
+  input.focus(); input.setSelectionRange(cursor, cursor);
+  if (everyone) mentionEverywhere = true; else currentMentionIds.add(id);
   $('#mention-picker')?.classList.add('hidden');
-  updateSendState();
-  scheduleTyping();
+  resizeMessageInput(); updateSendState(); scheduleTyping();
 }
 
 function updateSendState() {
   const input = $('#message-input');
   const button = $('#send-button');
   if (!button) return;
-  button.disabled = !currentConversation || !String(input?.value || '').trim();
+  button.disabled = !currentConversation || sendInFlight || !String(input?.value || '').trim();
 }
 
 function deriveMentions(content) {
@@ -1169,56 +1412,88 @@ function deriveMentions(content) {
     const expression = new RegExp(`(^|[^a-z0-9_])@${escapeRegExp(username)}(?![a-z0-9_])`, 'i');
     if (expression.test(text)) ids.add(id);
   }
-  const everyone = currentConversationData?.type === 'group' && /(^|\s)@everyone(?![a-z0-9_])/i.test(text);
+  const everyone = currentConversationData?.type === 'group' && /(^|[^a-z0-9_])@everyone(?![a-z0-9_])/i.test(text);
   return { ids: [...ids], everyone };
 }
 
 async function sendMessage() {
-  if (!currentUser || !currentConversation) return;
+  if (sendInFlight || !currentUser || !currentConversation) return;
   const input = $('#message-input');
-  const content = String(input?.value || '').trim();
+  const rawDraft = String(input?.value || '');
+  const content = rawDraft.trim();
   if (!content) return;
-
-  const button = $('#send-button');
-  if (button) button.disabled = true;
   const conversationId = String(currentConversation);
+  const sendingReply = replyTarget;
+  const button = $('#send-button');
+  let persisted = false;
+  sendInFlight = true;
+  if (button) button.disabled = true;
   try {
     const derived = deriveMentions(content);
-    const safeMentions = derived.ids.filter(isValidUuid);
+    const safeMentions = new Set(derived.ids.filter(isValidUuid));
+    const replySenderId = String(sendingReply?.sender_id || '');
+    if (isValidUuid(replySenderId) && replySenderId !== String(currentUser.id)) safeMentions.add(replySenderId);
+
     const { data, error } = await supabase.rpc('xifre_send_message', {
       p_conversation_id: conversationId,
       p_content: content,
-      p_reply_to: replyTarget?.id || null,
-      p_mentions: safeMentions,
+      p_reply_to: sendingReply?.id || null,
+      p_mentions: [...safeMentions],
       p_mention_everyone: !!derived.everyone
     });
     if (error) throw error;
-    if (String(currentConversation) !== conversationId) return;
+    persisted = true;
+    messageLoadSequences.set(conversationId, (messageLoadSequences.get(conversationId) || 0) + 1);
     const sent = Array.isArray(data) ? data[0] : data;
+    if (String(currentConversation) !== conversationId) {
+      toast('El mensaje se ha enviado en la conversación anterior.', 'success');
+      return;
+    }
+
+    // Clear the exact submitted draft immediately after server confirmation, before UI refreshes.
+    if (input && input.value === rawDraft) {
+      input.value = '';
+      resizeMessageInput();
+      if (replyTarget === sendingReply) clearReply();
+      currentMentionIds.clear(); mentionEverywhere = false;
+      $('#mention-picker')?.classList.add('hidden');
+      stopTypingBroadcast();
+    }
+
     if (sent?.id) {
+      if (sendingReply) {
+        sent.reply_sender_id = sent.reply_sender_id || sendingReply.sender_id;
+        sent.reply_sender_username = sent.reply_sender_username || sendingReply.sender_username;
+        sent.reply_sender_avatar_url = sent.reply_sender_avatar_url || sendingReply.sender_avatar_url;
+        sent.reply_content = sent.reply_content || sendingReply.content;
+      }
       const profiles = new Map((currentMembers || []).map(member => [getMemberId(member), member]));
       renderOneMessage(sent, profiles);
       applyMessageGrouping();
     }
-    input.value = '';
-    resizeMessageInput();
-    clearReply();
-    currentMentionIds.clear();
-    mentionEverywhere = false;
-    $('#mention-picker')?.classList.add('hidden');
-    stopTypingBroadcast();
     const box = $('#messages');
     if (box) box.scrollTop = box.scrollHeight;
-    await loadConversations();
-    await supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId });
+
+    // Best-effort refresh is separate from send success; never ask the user to resend
+    // a message which the server has already stored.
+    const refreshes = await Promise.allSettled([
+      loadConversations(),
+      supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId })
+    ]);
+    for (const result of refreshes) if (result.status === 'rejected' || result.value?.error) console.warn('POST-SEND REFRESH', result.reason || result.value?.error);
   } catch (error) {
-    toast(friendlyError(error), 'error');
+    if (persisted) {
+      console.warn('MESSAGE SENT; UI RECOVERY', error);
+      toast('El mensaje se ha enviado, pero no se ha actualizado la vista. No hace falta reenviarlo.', 'info');
+      if (String(currentConversation) === conversationId) void loadMessages(conversationId, false).catch(refreshError => console.warn('MESSAGE RECOVERY', refreshError));
+    } else {
+      toast(friendlyError(error), 'error');
+    }
   } finally {
+    sendInFlight = false;
     updateSendState();
-    input?.focus();
   }
 }
-
 /* ------------------------------------------------------------------------ */
 /* Emoji picker and message reactions */
 /* ------------------------------------------------------------------------ */
@@ -1433,9 +1708,11 @@ function renderMessageReactions(messageRow, reactionRows) {
 async function loadMessageReactions(conversationId = currentConversation) {
   const id = String(conversationId || '');
   if (!id || !currentUser || String(currentConversation) !== id) return;
+  const sequence = (reactionLoadSequences.get(id) || 0) + 1;
+  reactionLoadSequences.set(id, sequence);
   const { data, error } = await supabase.rpc('xifre_get_message_reactions', { p_conversation_id: id });
   if (error) throw error;
-  if (String(currentConversation) !== id) return;
+  if (String(currentConversation) !== id || reactionLoadSequences.get(id) !== sequence) return;
   const rows = data || [];
   const byMessage = new Map();
   rows.forEach(reaction => {
@@ -1456,10 +1733,8 @@ async function loadMessageReactions(conversationId = currentConversation) {
   });
   if (!changed) return;
   if (wasNearBottom) box.scrollTop = box.scrollHeight;
-  else if (anchor) {
-    const newAnchorTop = anchor.getBoundingClientRect().top;
-    box.scrollTop = Math.max(0, originalScrollTop + newAnchorTop - anchorTop);
-  } else box.scrollTop = originalScrollTop;
+  else if (anchor) box.scrollTop = Math.max(0, originalScrollTop + anchor.getBoundingClientRect().top - anchorTop);
+  else box.scrollTop = originalScrollTop;
 }
 
 async function toggleMessageReaction(messageId, emoji) {
@@ -1491,31 +1766,44 @@ setTypingVisible(false);
 }
 
 function setupMessageChannel(conversationId) {
-if (messageChannel) supabase.removeChannel(messageChannel);
-messageChannel = supabase.channel(`xifre:messages:${conversationId}:${Date.now()}`)
-.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async payload => {
-if (String(payload.new?.sender_id) === String(currentUser.id)) return;
-if (String(currentConversation) !== String(conversationId)) return;
-await loadMessages(conversationId).catch(() => {});
-await loadConversations().catch(() => {});
-const box=$('#messages'); if(box && box.scrollHeight-box.scrollTop-box.clientHeight<80) { await supabase.rpc('xifre_mark_read',{p_conversation_id:conversationId}).catch(()=>{}); const c=conversationCache.find(x=>String(x.id)===String(conversationId)); if(c){c.unread_count=0;c.has_mention=false;} renderConversations(); }
-})
-.on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async () => {
-if (String(currentConversation) !== String(conversationId)) return;
-await loadMessages(conversationId).catch(() => {});
-await loadConversations().catch(() => {});
-})
-.on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, async () => {
-if (String(currentConversation) !== String(conversationId)) return;
-await loadMessageReactions(conversationId).catch(() => {});
-})
-.subscribe();
-if (messagePoll) clearInterval(messagePoll);
-messagePoll = setInterval(() => {
-if (document.visibilityState === 'visible' && String(currentConversation) === String(conversationId)) {
-loadMessages(conversationId).catch(() => {});
-}
-}, 2500);
+  if (messageChannel) supabase.removeChannel(messageChannel);
+  messageChannel = supabase.channel(`xifre:messages:${conversationId}:${Date.now()}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async payload => {
+      if (String(currentConversation) !== String(conversationId)) return;
+      // The sender already renders its RPC response; the poll/realtime ID de-duplicates it.
+      if (String(payload.new?.sender_id) !== String(currentUser?.id)) {
+        await loadMessages(conversationId, false).catch(() => {});
+        await loadConversations().catch(() => {});
+      }
+      const box = $('#messages');
+      if (box && box.scrollHeight - box.scrollTop - box.clientHeight < 80) {
+        await supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId }).catch(() => {});
+        const c = conversationCache.find(item => String(item.id) === String(conversationId));
+        if (c) { c.unread_count = 0; c.has_mention = false; }
+        renderConversations();
+      }
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async () => {
+      if (String(currentConversation) !== String(conversationId)) return;
+      await loadMessages(conversationId, false).catch(() => {});
+      await loadConversations().catch(() => {});
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, async () => {
+      if (String(currentConversation) !== String(conversationId)) return;
+      await loadMessages(conversationId, false).catch(() => {});
+      await loadConversations().catch(() => {});
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, async () => {
+      if (String(currentConversation) !== String(conversationId)) return;
+      await loadMessageReactions(conversationId).catch(() => {});
+    })
+    .subscribe();
+  if (messagePoll) clearInterval(messagePoll);
+  messagePoll = setInterval(() => {
+    if (document.visibilityState === 'visible' && String(currentConversation) === String(conversationId)) {
+      loadMessages(conversationId, false).catch(() => {});
+    }
+  }, 3000);
 }
 
 function setupTypingChannel(conversationId) {
@@ -1633,35 +1921,34 @@ async function updateMemberProfileFriendAction(member) {
   const button = $('#member-profile-add-friend');
   if (!button || !member) return;
   const id = getMemberId(member);
+  const token = ++memberStatusRequestToken;
   memberFriendStatus = 'none';
-  if (!isValidUuid(id) || id === String(currentUser?.id)) {
-    button.classList.add('hidden');
-    return;
-  }
+  if (!isValidUuid(id) || id === String(currentUser?.id)) { button.classList.add('hidden'); return; }
   button.classList.remove('hidden');
   button.disabled = true;
   button.textContent = 'Comprobando…';
+  let timeoutId;
   try {
-    const { data, error } = await supabase.rpc('xifre_get_friend_request_status', { p_target_user: id });
+    const statusPromise = supabase.rpc('xifre_get_friend_request_status', { p_target_user: id });
+    const timeoutPromise = new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('La comprobación está tardando demasiado')), 4500); });
+    const { data, error } = await Promise.race([statusPromise, timeoutPromise]);
     if (error) throw error;
-    if (String(getMemberId(selectedMember)) !== id) return;
+    if (token !== memberStatusRequestToken || String(getMemberId(selectedMember)) !== id) return;
     memberFriendStatus = String(data || 'none');
-    if (memberFriendStatus === 'friend') {
-      button.classList.add('hidden');
-      return;
-    }
+    if (memberFriendStatus === 'friend') { button.classList.add('hidden'); return; }
     button.classList.remove('hidden');
     button.disabled = false;
-    button.textContent = memberFriendStatus === 'incoming_pending'
-      ? 'Aceptar solicitud'
-      : memberFriendStatus === 'outgoing_pending'
-        ? 'Cancelar solicitud'
-        : 'Añadir amigo';
+    button.textContent = memberFriendStatus === 'incoming_pending' ? 'Aceptar solicitud' : memberFriendStatus === 'outgoing_pending' ? 'Cancelar solicitud' : 'Añadir amigo';
   } catch (error) {
-    console.error('MEMBER FRIEND STATUS', error);
+    console.warn('MEMBER FRIEND STATUS', error);
+    if (token !== memberStatusRequestToken || String(getMemberId(selectedMember)) !== id) return;
+    // Never leave the card disabled on a slow or unavailable status RPC.
+    memberFriendStatus = 'none';
+    button.classList.remove('hidden');
     button.disabled = false;
     button.textContent = 'Añadir amigo';
-    // The send/accept RPCs still validate state, so an RLS read failure won't block the action.
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
@@ -1692,7 +1979,7 @@ async function sendFriendRequestFromMemberProfile() {
     toast(friendlyError(error), 'error');
   }
 }
-function closeMemberProfile(){ $('#member-profile-popover')?.classList.add('hidden'); selectedMember=null; }
+function closeMemberProfile(){ memberStatusRequestToken++; $('#member-profile-popover')?.classList.add('hidden'); const button=$('#member-profile-add-friend'); if(button){button.disabled=false;button.classList.add('hidden');button.textContent='Añadir amigo';} selectedMember=null; }
 function openMemberMenu(member,x,y){
 selectedMember=member; const menu=$('#member-menu'); if(!menu)return; const me=currentMembers.find(m=>String(m.user_id)===String(currentUser.id)); const creator=!!me?.is_owner, admin=!!me?.is_admin;
 const canManage=creator||admin; const targetIsAdmin=!!member.is_admin||!!member.is_owner; $('#member-menu [data-member-menu="kick"]')?.classList.toggle('hidden',!canManage||member.is_owner||(!creator&&targetIsAdmin)); $('#member-menu [data-member-menu="grant"]')?.classList.toggle('hidden',!creator||member.is_owner||member.is_admin); $('#member-menu [data-member-menu="revoke"]')?.classList.toggle('hidden',!creator||!member.is_admin); menu.classList.remove('hidden'); menu.style.left=`${Math.min(x,window.innerWidth-205)}px`; menu.style.top=`${Math.min(y,window.innerHeight-150)}px`;
@@ -1829,37 +2116,39 @@ setLoading(button, false);
 }
 
 async function saveGroupSettings() {
-if (!currentConversation || currentConversationData?.type !== 'group') return;
-const button = $('#save-group-settings');
-const name = String($('#group-edit-name').value || '').trim();
-if (!name) return setModalMessage('group-settings-message', 'El nombre es obligatorio.', 'error');
-setLoading(button, true);
-try {
-let avatarUrl = null;
-if (pendingGroupAvatarFile) {
-const path = `${currentUser.id}/groups/${currentConversation}/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingGroupAvatarFile)}`;
-avatarUrl = await uploadAvatar(pendingGroupAvatarFile, path);
-}
-const { data, error } = await supabase.rpc('xifre_update_group', { p_conversation_id: currentConversation, p_name: name, p_avatar_url: avatarUrl });
-if (error) throw error;
-const updated = Array.isArray(data) ? data[0] : data;
-currentConversationData.name = updated?.name || name;
-currentConversationData.displayName = currentConversationData.name;
-if (updated?.avatar_url) currentConversationData.avatar_url = updated.avatar_url;
-const local = conversationCache.find(c => String(c.id) === String(currentConversation));
-if (local) { local.name = currentConversationData.name; local.displayName = currentConversationData.name; local.avatar_url = currentConversationData.avatar_url || null; }
-pendingGroupAvatarFile = null;
-pendingGroupAvatarURL = null;
-updateChatHeader();
-renderRightPane();
-renderConversations();
-avatarInto($('#group-edit-avatar-preview'), currentConversationData.name, currentConversationData.avatar_url, 'group');
-setModalMessage('group-settings-message', 'Cambios guardados.', 'success');
-} catch (error) {
-setModalMessage('group-settings-message', friendlyError(error), 'error');
-} finally {
-setLoading(button, false);
-}
+  if (!currentConversation || currentConversationData?.type !== 'group') return;
+  const conversationId = String(currentConversation);
+  const button = $('#save-group-settings');
+  const name = String($('#group-edit-name')?.value || '').trim();
+  if (!name) return setModalMessage('group-settings-message', 'El nombre es obligatorio.', 'error');
+  setLoading(button, true);
+  try {
+    let avatarUrl = null;
+    if (pendingGroupAvatarFile) {
+      const path = `${currentUser.id}/groups/${conversationId}/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingGroupAvatarFile)}`;
+      avatarUrl = await uploadAvatar(pendingGroupAvatarFile, path);
+    }
+    const { data, error } = await supabase.rpc('xifre_update_group_v17', {
+      p_conversation_id: conversationId,
+      p_name: name,
+      p_avatar_url: avatarUrl,
+      p_remove_avatar: !!removeGroupAvatarRequested && !pendingGroupAvatarFile
+    });
+    if (error) throw error;
+    const updated = Array.isArray(data) ? data[0] : data;
+    currentConversationData.name = updated?.name || name;
+    currentConversationData.displayName = currentConversationData.name;
+    if (updated && Object.prototype.hasOwnProperty.call(updated, 'avatar_url')) currentConversationData.avatar_url = updated.avatar_url || null;
+    const local = conversationCache.find(item => String(item.id) === conversationId);
+    if (local) { local.name = currentConversationData.name; local.displayName = currentConversationData.name; local.avatar_url = currentConversationData.avatar_url || null; }
+    pendingGroupAvatarFile = null; pendingGroupAvatarURL = null; removeGroupAvatarRequested = false;
+    const fileInput = $('#group-avatar-file'); if (fileInput) fileInput.value = '';
+    updateChatHeader(); renderRightPane(); renderConversations();
+    avatarInto($('#group-edit-avatar-preview'), currentConversationData.name, currentConversationData.avatar_url, 'group');
+    setModalMessage('group-settings-message', 'Cambios guardados.', 'success');
+  } catch (error) {
+    setModalMessage('group-settings-message', friendlyError(error), 'error');
+  } finally { setLoading(button, false); }
 }
 
 async function deleteGroup() {
@@ -1906,6 +2195,8 @@ return `${result.data.publicUrl}?v=${Date.now()}`;
 
 function previewFile(file, target, name, kind) {
 try { validateImage(file); } catch (error) { toast(error.message, 'error'); return; }
+const oldUrl = target.dataset.objectUrl;
+if (oldUrl) URL.revokeObjectURL(oldUrl);
 const url = URL.createObjectURL(file);
 target.innerHTML = avatarHTML(name, url, kind);
 target.dataset.objectUrl = url;
@@ -1918,34 +2209,41 @@ $('#settings-modal')?.classList.remove('hidden');
 }
 
 async function saveProfileSettings() {
-if (!currentUser) return;
-const button = $('#save-profile-settings');
-const username = normalizeUsername($('#settings-username').value);
-if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
-setLoading(button, true);
-try {
-let avatarUrl = null;
-if (pendingProfileAvatarFile) {
-const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;
-avatarUrl = await uploadAvatar(pendingProfileAvatarFile, path);
-}
-const { data, error } = await supabase.rpc('xifre_update_profile', { p_username: username, p_display_name: username, p_avatar_url: avatarUrl });
-if (error) throw error;
-currentProfile = Array.isArray(data) ? data[0] : data;
-if (currentProfile && !currentProfile.email_handle) currentProfile.email_handle = emailHandle(currentUser?.email);
-pendingProfileAvatarFile = null;
-pendingProfileAvatarURL = null;
-syncProfileUI();
-memberCache.clear();
-await loadFriends();
-await loadConversations();
-if (currentConversation) await openConversation(currentConversation);
-setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
-} catch (error) {
-setModalMessage('profile-settings-message', friendlyError(error), 'error');
-} finally {
-setLoading(button, false);
-}
+  if (!currentUser) return;
+  const button = $('#save-profile-settings');
+  const username = normalizeUsername($('#settings-username')?.value);
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) return setModalMessage('profile-settings-message', 'El username debe tener 3–20 caracteres y solo letras, números y _.', 'error');
+  setLoading(button, true);
+  try {
+    let avatarUrl = null;
+    if (pendingProfileAvatarFile) {
+      const path = `${currentUser.id}/profile/${Date.now()}-${crypto.randomUUID()}.${fileExt(pendingProfileAvatarFile)}`;
+      avatarUrl = await uploadAvatar(pendingProfileAvatarFile, path);
+    }
+    const { data, error } = await supabase.rpc('xifre_update_profile_v17', {
+      p_username: username,
+      p_display_name: username,
+      p_avatar_url: avatarUrl,
+      p_remove_avatar: !!removeProfileAvatarRequested && !pendingProfileAvatarFile
+    });
+    if (error) throw error;
+    currentProfile = Array.isArray(data) ? data[0] : data;
+    if (currentProfile && !currentProfile.email_handle) currentProfile.email_handle = emailHandle(currentUser?.email);
+    pendingProfileAvatarFile = null; pendingProfileAvatarURL = null; removeProfileAvatarRequested = false;
+    const fileInput = $('#profile-avatar-file'); if (fileInput) fileInput.value = '';
+    const preview = $('#settings-avatar-preview'); if (preview?.dataset.objectUrl) { URL.revokeObjectURL(preview.dataset.objectUrl); delete preview.dataset.objectUrl; }
+    syncProfileUI(); memberCache.clear();
+    await Promise.all([loadFriends(), loadConversations()]);
+    if (currentConversation) {
+      const conv = conversationCache.find(item => String(item.id) === String(currentConversation));
+      if (conv) currentConversationData = conv;
+      await loadMessages(currentConversation, false);
+      updateChatHeader(); renderRightPane();
+    }
+    setModalMessage('profile-settings-message', 'Cambios guardados.', 'success');
+  } catch (error) {
+    setModalMessage('profile-settings-message', friendlyError(error), 'error');
+  } finally { setLoading(button, false); }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1980,6 +2278,7 @@ $(`#${id}`)?.classList.add('hidden');
 }
 
 function resetChatView() {
+conversationOpenSequence++;
 stopChatRealtime();
 setText('chat-title', 'XIFRE');
 setText('chat-subtitle', 'Selecciona una conversación');
@@ -2073,6 +2372,7 @@ if (theme) applyTheme(theme.dataset.themeChoice);
 const messageAction = event.target.closest('[data-message-menu]');
 if (messageAction) {
 if (messageAction.dataset.messageMenu === 'reply' && menuMessage) setReplyTo(menuMessage);
+if (messageAction.dataset.messageMenu === 'edit' && menuMessage) { const message = menuMessage; const row = $(`[data-message-id="${CSS.escape(String(message.id))}"]`); if (row) startEditMessage(message, row); }
 if (messageAction.dataset.messageMenu === 'delete' && menuMessage) void deleteMessage(menuMessage);
 closeMessageMenu();
 }
@@ -2122,7 +2422,9 @@ const file = event.target.files?.[0];
 if (!file) return;
 try { validateImage(file); } catch (error) { event.target.value = ''; toast(error.message, 'error'); return; }
 pendingProfileAvatarFile = file;
-previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private');
+removeProfileAvatarRequested = false;
+previewFile(file, $('#settings-avatar-preview'), currentProfile?.username || 'Usuario', 'private', currentProfile?.avatar_color || '');
+setModalMessage('profile-settings-message', '');
 });
 
 $('#group-avatar-file')?.addEventListener('change', event => {
@@ -2130,7 +2432,28 @@ const file = event.target.files?.[0];
 if (!file) return;
 try { validateImage(file); } catch (error) { event.target.value = ''; toast(error.message, 'error'); return; }
 pendingGroupAvatarFile = file;
+removeGroupAvatarRequested = false;
 previewFile(file, $('#group-edit-avatar-preview'), currentConversationData?.name || 'Grupo', 'group');
+setModalMessage('group-settings-message', '');
+});
+
+$('#remove-profile-avatar')?.addEventListener('click', () => {
+  pendingProfileAvatarFile = null;
+  removeProfileAvatarRequested = true;
+  const input = $('#profile-avatar-file'); if (input) input.value = '';
+  const preview = $('#settings-avatar-preview');
+  if (preview?.dataset.objectUrl) { URL.revokeObjectURL(preview.dataset.objectUrl); delete preview.dataset.objectUrl; }
+  avatarInto(preview, currentProfile?.username || 'Usuario', null, 'private', currentProfile?.avatar_color || '');
+  setModalMessage('profile-settings-message', 'La foto se quitará al guardar los cambios.', '');
+});
+$('#remove-group-avatar')?.addEventListener('click', () => {
+  pendingGroupAvatarFile = null;
+  removeGroupAvatarRequested = true;
+  const input = $('#group-avatar-file'); if (input) input.value = '';
+  const preview = $('#group-edit-avatar-preview');
+  if (preview?.dataset.objectUrl) { URL.revokeObjectURL(preview.dataset.objectUrl); delete preview.dataset.objectUrl; }
+  avatarInto(preview, currentConversationData?.name || 'Grupo', null, 'group');
+  setModalMessage('group-settings-message', 'La foto se quitará al guardar los cambios.', '');
 });
 
 $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
@@ -2152,7 +2475,7 @@ if(event.key==='ArrowUp'){event.preventDefault();mentionPickerIndex=Math.max(men
 if(event.key==='Enter'&&!event.shiftKey&&items.length){event.preventDefault();items[mentionPickerIndex]?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));return;}
 if(event.key==='Escape'){picker.classList.add('hidden');return;}
 }
-if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
+if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!sendInFlight) void sendMessage(); }
 });
 $('#message-input')?.addEventListener('blur', () => stopTypingBroadcast());
 $('#messages')?.addEventListener('scroll',()=>{const box=$('#messages');if(!currentConversation||!box)return;if(box.scrollHeight-box.scrollTop-box.clientHeight<12){const c=conversationCache.find(x=>String(x.id)===String(currentConversation));if(c&&(Number(c.unread_count)||c.has_mention)){void supabase.rpc('xifre_mark_read',{p_conversation_id:currentConversation}).then(()=>{c.unread_count=0;c.has_mention=false;renderConversations();});}}});
