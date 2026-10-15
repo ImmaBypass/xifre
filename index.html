@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261013-v16">
+<link rel="stylesheet" href="style.css?v=20261015-v18">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -71,7 +71,7 @@
   <button id="conversation-filter-clear" type="button" class="conversation-filter-clear hidden" aria-label="Borrar búsqueda">×</button>
 </div>
 <button type="button" class="nav-action" data-action="open-group"><span class="nav-icon">＋</span><span>Nuevo grupo</span></button>
-<button type="button" class="nav-action primary" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span></button>
+<button type="button" class="nav-action primary" data-action="open-people"><span class="nav-icon">♙</span><span>Amigos</span><span id="friend-request-badge" class="nav-request-badge hidden" aria-label="Solicitudes pendientes">0</span></button>
 </div>
 </div>
 
@@ -183,7 +183,7 @@
 <div class="editor-heading">Personalizar grupo</div>
 <div class="group-photo-editor">
 <div id="group-edit-avatar-preview" class="group-edit-preview">#</div>
-<div class="group-photo-copy"><strong>Foto del grupo</strong><small>PNG, JPG, WEBP o GIF · máximo 5 MB</small><label class="file-button">Elegir imagen<input id="group-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label></div>
+<div class="group-photo-copy"><strong>Foto del grupo</strong><small>PNG, JPG, WEBP o GIF · máximo 5 MB</small><div class="avatar-file-actions"><label class="file-button">Elegir imagen<input id="group-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><button id="remove-group-avatar" class="avatar-remove-inline" type="button">Quitar foto</button></div></div>
 </div>
 <label class="modal-label" for="group-edit-name">Nombre</label>
 <input id="group-edit-name" class="modal-input" type="text" maxlength="50" placeholder="Nombre del grupo">
@@ -275,6 +275,7 @@
 <!-- MESSAGE MENU -->
 <div id="message-menu" class="message-menu hidden">
 <button type="button" data-message-menu="reply">↩ <span>Responder</span></button>
+<button id="edit-message-menu" type="button" data-message-menu="edit">✎ <span>Editar mensaje</span></button>
 <button id="delete-message-menu" type="button" class="message-menu-danger" data-message-menu="delete">⌫ <span>Eliminar mensaje</span></button>
 </div>
 
@@ -308,7 +309,7 @@
 <div class="settings-profile-banner">
 <div class="settings-banner-bg"></div>
 <span id="settings-avatar-preview" class="settings-avatar-preview">X</span>
-<label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+<div class="settings-avatar-actions"><label class="settings-avatar-change">Cambiar foto<input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><button id="remove-profile-avatar" class="settings-avatar-remove" type="button">Quitar foto</button></div>
 </div>
 <div class="settings-user-readout"><strong id="settings-preview-username">@usuario</strong><span>Tu username sirve para menciones. También pueden encontrarte por tu @.</span></div>
 <div class="settings-field-block">
@@ -335,6 +336,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261013-v16-friendfix1"></script>
+<script src="app.js?v=20261015-v18"></script>
 </body>
 </html>
