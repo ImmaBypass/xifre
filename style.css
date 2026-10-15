@@ -809,3 +809,73 @@ html[data-theme="light"] .member-profile-divider { background: rgba(0,0,0,.10); 
 [data-theme="light"] .emoji-category:hover, [data-theme="light"] .emoji-choice:hover, [data-theme="light"] .emoji-choice:focus-visible { background: #e3e5e8; }
 @media (max-width: 520px) { .emoji-grid { grid-template-columns: repeat(7,minmax(0,1fr)); } .emoji-choice { font-size: 22px; } .composer-box textarea#message-input { font-size: 14px; } }
 @media (prefers-reduced-motion: reduce) { .emoji-category, .emoji-choice, .message-grouped-time { transition: none !important; } }
+
+
+/* ===================== XIFRE V17 FIX PACK ===================== */
+/* Compact but readable message rows; grouped rows remain tight. */
+.message-row:not(.grouped-message) { min-height: 0 !important; padding-top: 4px !important; padding-bottom: 4px !important; }
+.message-row .message-body { min-width: 0; }
+.message-meta { flex-wrap: wrap; row-gap: 3px; }
+.message-time { white-space: nowrap; }
+.message-edited { color: var(--text-faint); font-size: 9px; font-style: italic; }
+.message-actions { gap: 3px; }
+.message-action[data-message-action="edit"] { font-size: 14px; }
+.message-edit-wrap { width: 100%; margin-top: 4px; }
+.message-edit-input { display: block; width: 100%; min-height: 54px; max-height: 180px; resize: vertical; border: 1px solid rgba(88,101,242,.65); border-radius: 7px; outline: 0; padding: 9px 10px; background: var(--composer); color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; box-shadow: 0 0 0 2px rgba(88,101,242,.12); }
+.message-edit-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.message-edit-actions > span { margin-right: auto; color: var(--text-faint); font-size: 9px; }
+.message-edit-actions button { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.message-edit-save { background: #5865f2; color: #fff; }
+.message-edit-save:hover { background: #4752c4; }
+.message-edit-cancel { background: var(--panel); color: var(--text-muted); }
+.message-edit-actions button:disabled { opacity: .55; cursor: wait; }
+
+/* Four real composer columns: attachment, text, send, emoji. */
+.composer-box { grid-template-columns: 42px minmax(0,1fr) 36px 36px !important; }
+.composer-box textarea#message-input { grid-column: 2 !important; }
+.composer-send { display: grid !important; grid-column: 3 !important; place-items: center; width: 30px; height: 30px; border-radius: 50%; margin: auto; background: var(--brand); color: #fff; font-size: 13px; cursor: pointer; }
+.composer-send:hover:not(:disabled) { background: #4752c4; transform: scale(1.04); }
+.composer-send:disabled { opacity: .32; cursor: default; transform: none; }
+.composer-emoji-button { grid-column: 4 !important; }
+.composer-area { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+
+/* Request counter is shown even when the People modal is closed. */
+.nav-action { position: relative; }
+.nav-request-badge { min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; border-radius: 999px; background: #ed4245; color: #fff; font-size: 9px; line-height: 1; font-weight: 800; box-shadow: 0 0 0 2px var(--sidebar); }
+.nav-request-badge.hidden { display: none !important; }
+
+/* Remove-photo controls are secondary actions and don't disturb previews. */
+.settings-avatar-actions { position: relative; z-index: 2; display: flex; align-items: center; gap: 7px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
+.settings-avatar-change { margin-top: 0 !important; }
+.settings-avatar-remove, .avatar-remove-inline { min-height: 28px; padding: 0 9px; border-radius: 6px; background: rgba(237,66,69,.10); color: #ff8b8e; border: 1px solid rgba(237,66,69,.20); font-size: 10px; font-weight: 700; cursor: pointer; transition: background .15s, transform .15s; }
+.settings-avatar-remove:hover, .avatar-remove-inline:hover { background: rgba(237,66,69,.19); transform: translateY(-1px); }
+.avatar-file-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 7px; }
+.avatar-file-actions .file-button { margin: 0; }
+
+/* Mention styles match the blue mention token for usernames and @everyone. */
+.mention-token, .mention-token.everyone { color: #00a8fc !important; background: rgba(0,168,252,.12); border-radius: 3px; padding: 0 2px; font-weight: 650; }
+.message-row.mentioned { background: rgba(250,166,26,.18) !important; box-shadow: inset 3px 0 0 #faa61a; }
+.message-row.mentioned:hover { background: rgba(250,166,26,.24) !important; }
+.mention-everyone-avatar { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 30px; border-radius: 50%; background: rgba(0,168,252,.14); color: #00a8fc; font-weight: 800; }
+.mention-item-everyone strong { color: #00a8fc !important; }
+html[data-theme="light"] .mention-token, html[data-theme="light"] .mention-token.everyone { color: #087db3 !important; background: rgba(0,168,252,.10); }
+html[data-theme="light"] .message-row.mentioned { background: rgba(250,166,26,.20) !important; }
+
+/* Keep the existing group-name lettering accent, never outline the group avatar or whole item. */
+.conversation.group-conversation .conversation-avatar-image,
+.conversation.group-conversation .conversation-avatar-image .avatar-media,
+.conversation.group-conversation .conversation-avatar-image .avatar-fallback { border: 0 !important; outline: 0 !important; box-shadow: none !important; }
+.conversation.group-conversation { border: 0 !important; outline: 0 !important; box-shadow: none !important; }
+.conversation.group-conversation .conversation-name { border: 0 !important; outline: 0 !important; box-shadow: none !important; background: transparent !important; }
+
+@media (max-width: 520px) {
+  .composer-box { grid-template-columns: 36px minmax(0,1fr) 32px 32px !important; }
+  .composer-send { width: 27px; height: 27px; }
+  .composer-emoji-button { width: 27px; height: 27px; font-size: 19px; }
+  .message-edit-actions > span { flex-basis: 100%; }
+}
+
+
+/* V18: edited marker remains visible on compact/grouped messages. */
+.message-edited-inline { display: none; color: var(--text-faint); font-size: 9px; font-style: italic; white-space: nowrap; }
+.message-row.grouped-message .message-edited-inline { display: inline; }
