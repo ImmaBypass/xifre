@@ -62,6 +62,16 @@ let memberStatusRequestToken = 0;
 let removeProfileAvatarRequested = false;
 let removeGroupAvatarRequested = false;
 let editingMessageId = null;
+let presenceChannel = null;
+let presenceTrackTimer = null;
+let presenceRenderTimer = null;
+let presencePayloads = new Map();
+let presenceActivityAt = Date.now();
+let presenceLastTrackAt = 0;
+let presenceOwnerId = null;
+const presenceTabId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const PRESENCE_IDLE_MS = 5 * 60 * 1000;
+let pendingExternalUrl = '';
 
 const screens = ['landing', 'login', 'register', 'email'];
 
@@ -124,6 +134,217 @@ function avatarHTML(name, url, kind = 'private', className = '', color = '') {
 function avatarInto(element, name, url, kind = 'private', color = '') {
 if (!element) return;
 element.innerHTML = avatarHTML(name, url, kind, '', color);
+}
+
+
+function presenceDotHTML(userId, extraClass = '') {
+  const id = String(userId || '');
+  if (!isValidUuid(id)) return '';
+  return `<span class="presence-dot presence-offline ${esc(extraClass)}" data-presence-user="${esc(id)}" title="Desconectado" aria-label="Desconectado"></span>`;
+}
+
+function presenceAvatarHTML(name, url, kind = 'private', avatarClass = '', color = '', userId = '', wrapClass = '') {
+  return `<span class="presence-avatar-wrap ${esc(wrapClass)}">${avatarHTML(name, url, kind, avatarClass, color)}${presenceDotHTML(userId)}</span>`;
+}
+
+function ensurePresenceDot(elementOrSelector, userId, extraClass = '') {
+  const element = typeof elementOrSelector === 'string' ? $(elementOrSelector) : elementOrSelector;
+  if (!element) return;
+  element.querySelectorAll(':scope > .presence-dot').forEach(dot => dot.remove());
+  element.classList.remove('presence-anchor');
+  const id = String(userId || '');
+  if (!isValidUuid(id)) return;
+  element.classList.add('presence-anchor');
+  element.insertAdjacentHTML('beforeend', presenceDotHTML(id, extraClass));
+  updatePresenceDot(element.querySelector(':scope > .presence-dot'));
+}
+
+function parsePresenceTimestamp(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getPresenceStatus(userId) {
+  const id = String(userId || '');
+  const records = presencePayloads.get(id) || [];
+  if (!records.length) return 'offline';
+  const now = Date.now();
+  const activelyVisible = records.some(record => {
+    const last = parsePresenceTimestamp(record.last_active_at);
+    return record.visible === true && (record.status === 'online' || record.status == null) && last > 0 && now - last < PRESENCE_IDLE_MS;
+  });
+  return activelyVisible ? 'online' : 'away';
+}
+
+function updatePresenceDot(dot) {
+  if (!dot) return;
+  const status = getPresenceStatus(dot.dataset.presenceUser);
+  dot.classList.remove('presence-online', 'presence-away', 'presence-offline');
+  dot.classList.add(`presence-${status}`);
+  const labels = { online: 'En línea', away: 'Ausente', offline: 'Desconectado' };
+  dot.title = labels[status] || labels.offline;
+  dot.setAttribute('aria-label', labels[status] || labels.offline);
+}
+
+function renderPresenceIndicators() {
+  $$('[data-presence-user]').forEach(updatePresenceDot);
+}
+
+function rebuildPresencePayloads() {
+  const next = new Map();
+  if (presenceChannel) {
+    const state = presenceChannel.presenceState() || {};
+    for (const metas of Object.values(state)) {
+      for (const meta of (Array.isArray(metas) ? metas : [])) {
+        const id = String(meta.user_id || meta.userId || '');
+        if (!isValidUuid(id)) continue;
+        if (!next.has(id)) next.set(id, []);
+        next.get(id).push(meta);
+      }
+    }
+  }
+  // Keep our tab's most recent local state until the server sync catches up.
+  if (presenceOwnerId) {
+    const local = (presencePayloads.get(presenceOwnerId) || []).find(item => item.tab_id === presenceTabId);
+    if (local) {
+      if (!next.has(presenceOwnerId)) next.set(presenceOwnerId, []);
+      if (!next.get(presenceOwnerId).some(item => item.tab_id === presenceTabId)) next.get(presenceOwnerId).push(local);
+    }
+  }
+  presencePayloads = next;
+  renderPresenceIndicators();
+}
+
+async function trackPresence(force = false) {
+  if (!currentUser || !presenceChannel) return;
+  const now = Date.now();
+  if (!force && now - presenceLastTrackAt < 12000) return;
+  const visible = document.visibilityState === 'visible';
+  const recent = now - presenceActivityAt < PRESENCE_IDLE_MS;
+  const payload = {
+    user_id: String(currentUser.id),
+    tab_id: presenceTabId,
+    visible,
+    status: visible && recent ? 'online' : 'away',
+    last_active_at: presenceActivityAt
+  };
+  presenceLastTrackAt = now;
+  const ownId = String(currentUser.id);
+  const rows = (presencePayloads.get(ownId) || []).filter(item => item.tab_id !== presenceTabId);
+  rows.push(payload);
+  presencePayloads.set(ownId, rows);
+  renderPresenceIndicators();
+  try {
+    await presenceChannel.track(payload);
+  } catch (error) {
+    console.warn('PRESENCE TRACK', error);
+  }
+}
+
+function notePresenceActivity() {
+  if (!currentUser || document.visibilityState !== 'visible') return;
+  presenceActivityAt = Date.now();
+  void trackPresence(false);
+  renderPresenceIndicators();
+}
+
+async function setupPresenceTracking() {
+  if (!currentUser || !supabase) return;
+  if (presenceChannel && presenceOwnerId === String(currentUser.id)) return;
+  stopPresenceTracking();
+  presenceOwnerId = String(currentUser.id);
+  presenceActivityAt = Date.now();
+  presenceLastTrackAt = 0;
+  const topic = 'xifre:presence:global';
+  const channel = supabase.channel(topic, {
+    config: { private: true, presence: { key: `${presenceOwnerId}:${presenceTabId}` } }
+  });
+  presenceChannel = channel;
+  channel
+    .on('presence', { event: 'sync' }, rebuildPresencePayloads)
+    .on('presence', { event: 'join' }, rebuildPresencePayloads)
+    .on('presence', { event: 'leave' }, rebuildPresencePayloads)
+    .subscribe(status => {
+      if (channel !== presenceChannel) return;
+      if (status === 'SUBSCRIBED') {
+        presenceLastTrackAt = 0;
+        void trackPresence(true);
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.warn('PRESENCE CHANNEL', status);
+      }
+    });
+  if (presenceTrackTimer) clearInterval(presenceTrackTimer);
+  if (presenceRenderTimer) clearInterval(presenceRenderTimer);
+  presenceTrackTimer = setInterval(() => { if (currentUser) void trackPresence(true); }, 60000);
+  presenceRenderTimer = setInterval(renderPresenceIndicators, 30000);
+}
+
+function stopPresenceTracking() {
+  if (presenceTrackTimer) clearInterval(presenceTrackTimer);
+  if (presenceRenderTimer) clearInterval(presenceRenderTimer);
+  presenceTrackTimer = null;
+  presenceRenderTimer = null;
+  const channel = presenceChannel;
+  presenceChannel = null;
+  presenceOwnerId = null;
+  presenceLastTrackAt = 0;
+  presencePayloads = new Map();
+  if (channel && supabase) void supabase.removeChannel(channel).catch(error => console.warn('PRESENCE CLEANUP', error));
+  renderPresenceIndicators();
+}
+
+function presenceDotForFriendOrMember(item) {
+  return String(item?.user_id || item?.id || '');
+}
+
+function conversationPeerId(conversation) {
+  if (!conversation || conversation.type === 'group') return '';
+  const possible = conversation.other_user_id || conversation.peer_user_id || conversation.user_id || conversation.recipient_id;
+  if (isValidUuid(possible)) return String(possible);
+  const username = normalizeUsername(conversation.username || conversation.displayName || conversation.display_name);
+  const match = friendCache.find(friend => normalizeUsername(friend.username) === username);
+  return String(match?.id || '');
+}
+
+function openExternalLinkWarning(rawUrl) {
+  try {
+    let value = String(rawUrl || '').trim();
+    if (/^www\./i.test(value)) value = `https://${value}`;
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Solo se permiten enlaces HTTP o HTTPS.');
+    pendingExternalUrl = url.href;
+    setText('external-link-host', url.hostname);
+    setText('external-link-url', url.href);
+    closeEmojiPicker();
+    openModal('external-link-modal');
+    $('#external-link-cancel')?.focus({ preventScroll: true });
+  } catch (error) {
+    toast('Este enlace no es válido o no es compatible.', 'error');
+  }
+}
+
+function closeExternalLinkWarning() {
+  pendingExternalUrl = '';
+  closeModal('external-link-modal');
+}
+
+function confirmExternalLink() {
+  const value = pendingExternalUrl;
+  if (!value) return closeExternalLinkWarning();
+  let safeUrl;
+  try {
+    safeUrl = new URL(value);
+    if (!['http:', 'https:'].includes(safeUrl.protocol)) throw new Error('Protocolo no permitido');
+  } catch {
+    closeExternalLinkWarning();
+    return toast('Este enlace no es válido.', 'error');
+  }
+  closeExternalLinkWarning();
+  // Open only after an explicit click in the warning dialog; never let message HTML navigate directly.
+  window.open(safeUrl.href, '_blank', 'noopener,noreferrer');
 }
 
 function setText(id, value) {
@@ -380,8 +601,11 @@ setText('settings-nav-name', username);
 setText('settings-nav-username', `@${handle}`);
 setText('settings-preview-username', `@${handle}`);
 avatarInto($('#profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
+ensurePresenceDot($('#profile-avatar'), currentUser?.id);
 avatarInto($('#bottom-profile-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
+ensurePresenceDot($('#bottom-profile-avatar'), currentUser?.id, 'presence-dot-small');
 avatarInto($('#settings-nav-avatar'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
+ensurePresenceDot($('#settings-nav-avatar'), currentUser?.id, 'presence-dot-small');
 if (!pendingProfileAvatarFile) avatarInto($('#settings-avatar-preview'), username, currentProfile?.avatar_url, 'private', currentProfile?.avatar_color);
 const settingsUsername = $('#settings-username');
 if (settingsUsername && document.activeElement !== settingsUsername) settingsUsername.value = username;
@@ -412,6 +636,7 @@ if (!isAllowedEmailDomain(sessionUser.email)) {
 
 currentUser = sessionUser;
 appStarted = true;
+void setupPresenceTracking();
 applyTheme(currentTheme());
 showMain();
 
@@ -470,6 +695,7 @@ async function logout() {
   const confirmed = await askConfirm('Cerrar sesión', '¿Quieres cerrar tu sesión de XIFRE? Volverás a la página principal.', 'Cerrar sesión');
   if (!confirmed) return;
   logoutInFlight = true;
+  stopPresenceTracking();
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -540,6 +766,8 @@ if (!rpc.error) {
 renderFriendsModal();
 renderGroupSelection();
 renderGroupAddSelection();
+renderConversations();
+renderPresenceIndicators();
 }
 async function searchPeople(query) {
 const list = $('#friend-search-results');
@@ -581,7 +809,7 @@ results.forEach(person => {
   const handle = String(person.email_handle || '').trim();
   const status = relationship === 'friend' ? 'Amigo' : relationship === 'outgoing_pending' ? 'Solicitud enviada' : relationship === 'incoming_pending' ? 'Te ha enviado una solicitud' : 'No conectado';
   row.innerHTML = `
-    <span class="search-avatar">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}</span>
+    <span class="search-avatar presence-host">${avatarHTML(person.username, person.avatar_url, 'private', '', person.avatar_color)}${presenceDotHTML(targetId)}</span>
     <div class="result-copy"><strong>${esc(person.username || person.display_name || 'Usuario')}</strong><small>@${esc(handle || person.username || 'usuario')}</small><small class="relationship-status">${esc(status)}</small></div>`;
   const action = document.createElement('button');
   action.type = 'button';
@@ -652,7 +880,7 @@ return;
 friendCache.forEach(friend => {
 const row = document.createElement('div');
 row.className = 'friend-item';
-row.innerHTML = `${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}<div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
+row.innerHTML = `<span class="friend-avatar presence-host">${avatarHTML(friend.username, friend.avatar_url, 'private', 'friend-avatar', friend.avatar_color)}${presenceDotHTML(friend.id)}</span><div class="friend-copy"><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></div><button class="open-chat" type="button">Abrir</button>`;
 row.querySelector('button').addEventListener('click', async () => { closeModal('people-modal'); await openPrivateChat(friend.id); });
 list.appendChild(row);
 });
@@ -706,6 +934,7 @@ async function loadFriendRequests() {
     if (signature !== lastFriendRequestsSignature || list?.dataset.requestSignature !== signature) {
       lastFriendRequestsSignature = signature;
       renderRequests(requests);
+      renderPresenceIndicators();
       if (list) list.dataset.requestSignature = signature;
     }
   })().finally(() => {
@@ -719,12 +948,14 @@ async function loadFriendRequests() {
 }
 
 function setFriendRequestBadge(count) {
-  const badge = $('#friend-request-badge');
-  if (!badge) return;
   const value = Math.max(0, Number(count) || 0);
-  badge.textContent = value > 99 ? '99+' : String(value);
-  badge.classList.toggle('hidden', value === 0);
-  badge.setAttribute('aria-label', `${value} solicitudes pendientes`);
+  for (const selector of ['#friend-request-badge', '#friend-request-tab-badge']) {
+    const badge = $(selector);
+    if (!badge) continue;
+    badge.textContent = value > 99 ? '99+' : String(value);
+    badge.classList.toggle('hidden', value === 0);
+    badge.setAttribute('aria-label', `${value} solicitudes pendientes`);
+  }
 }
 
 function renderRequests(requests) {
@@ -735,7 +966,7 @@ if (!requests.length) { list.dataset.requestSignature = '[]'; list.innerHTML = '
 requests.forEach(req => {
 const row = document.createElement('div');
 row.className = 'request-item';
-row.innerHTML = `${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar', req.sender.avatar_color)}<div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.email_handle || req.sender.username || 'usuario')}</small><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
+row.innerHTML = `<span class="request-avatar presence-host">${avatarHTML(req.sender.username || 'Usuario', req.sender.avatar_url, 'private', 'request-avatar', req.sender.avatar_color)}${presenceDotHTML(req.sender_id)}</span><div class="request-copy"><strong>${esc(req.sender.username || 'Usuario')}</strong><small>@${esc(req.sender.email_handle || req.sender.username || 'usuario')}</small><small>Quiere añadirte como amigo</small></div><div class="request-actions"><button class="request-accept" type="button">Aceptar</button><button class="request-reject" type="button">Rechazar</button></div>`;
 const [accept, reject] = $$('.request-actions button', row);
 accept.addEventListener('click', () => acceptRequest(req, row));
 reject.addEventListener('click', () => rejectRequest(req, row));
@@ -809,11 +1040,13 @@ const row = document.createElement('button'); row.type='button';
 const unread = Number(conversation.unread_count || 0);
 const mentioned = !!conversation.has_mention;
 row.className = `conversation${String(currentConversation)===String(conversation.id)?' active':''}${unread?' unread':''}${isGroup?' group-conversation':''}`;
-row.innerHTML = `${avatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color)}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
+const peerId = isGroup ? '' : conversationPeerId(conversation);
+row.innerHTML = `${presenceAvatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color,peerId,'conversation-avatar-wrap')}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
 row.addEventListener('click',()=>openConversation(conversation.id,conversation));
 row.addEventListener('contextmenu',e=>{e.preventDefault(); openConversationMenu(conversation,e.clientX,e.clientY);});
 list.appendChild(row);
 });
+renderPresenceIndicators();
 }
 
 function openConversationSearch() {
@@ -825,7 +1058,7 @@ const list=$('#conversation-search-results'); if(!list)return;
 const q=normalizeUsername(query); const matches=conversationCache.filter(c=>!q||normalizeUsername(c.displayName||c.name).includes(q)||normalizeUsername(c.username).includes(q));
 list.innerHTML='';
 if(!matches.length){list.innerHTML='<div class="empty-sidebar">No se encontraron conversaciones.</div>';return;}
-matches.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='friend-item';const group=c.type==='group';row.innerHTML=`${avatarHTML(c.displayName,c.avatar_url,group?'group':'private','friend-avatar')}<div class="friend-copy"><strong>${esc(c.displayName)}</strong><small>${group?'Grupo':'@'+esc(c.username||'')}</small></div><span class="open-chat">Abrir</span>`;row.addEventListener('click',()=>{closeModal('conversation-search-modal');openConversation(c.id,c);});list.appendChild(row);});
+matches.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='friend-item';const group=c.type==='group';const peerId = group ? '' : conversationPeerId(c); row.innerHTML=`<span class="friend-avatar presence-host">${avatarHTML(c.displayName,c.avatar_url,group?'group':'private','friend-avatar',c.avatar_color)}${presenceDotHTML(peerId)}</span><div class="friend-copy"><strong>${esc(c.displayName)}</strong><small>${group?'Grupo':'@'+esc(c.username||'')}</small></div><span class="open-chat">Abrir</span>`;row.addEventListener('click',()=>{closeModal('conversation-search-modal');openConversation(c.id,c);});list.appendChild(row);});
 }
 
 function openConversationMenu(conversation,x,y){
@@ -910,6 +1143,7 @@ async function openConversation(id, cached = null) {
     $('#message-input').disabled = false;
     updateSendState();
     resizeMessageInput();
+    updateMessageCharacterCount();
     $('#message-input').focus();
     return true;
   } catch (error) {
@@ -944,6 +1178,8 @@ subtitle = 'Mensaje directo';
 subtitle = `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`;
 }
 avatarInto($('#chat-avatar'), name, url, isGroup ? 'group' : 'private', isGroup ? '' : (currentMembers.find(m=>String(m.user_id)!==String(currentUser.id))?.avatar_color || ''));
+const chatPeer = isGroup ? null : currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
+ensurePresenceDot($('#chat-avatar'), getMemberId(chatPeer));
 setText('chat-title', name);
 setText('chat-subtitle', subtitle);
 $('#chat-info-button')?.classList.remove('hidden');
@@ -997,19 +1233,38 @@ function renderMessageContent(content, message) {
     if (username) membersByName.set(username.toLowerCase(), member);
   }
 
-  // Parse tokens from the original plain text, then escape every untouched part.
-  // This prevents nested HTML when one username happens to be another username's prefix.
-  const tokenRegex = /(^|[^a-z0-9_])@([a-z0-9_]+)/gi;
+  // URLs are links only when they use HTTP(S) or www.; clicking is intercepted by the warning modal.
+  // Mention token parsing and escaping remain independent to prevent HTML injection.
+  const tokenRegex = /(https?:\/\/[^\s<>"'`]+|www\.[^\s<>"'`]+)|(^|[^a-z0-9_])@([a-z0-9_]+)/gi;
   let html = '';
   let lastIndex = 0;
   let match;
   while ((match = tokenRegex.exec(source)) !== null) {
-    const prefix = match[1] || '';
-    const name = match[2] || '';
+    const linkToken = match[1];
+    if (linkToken) {
+      const tokenStart = match.index;
+      let cleanLink = linkToken;
+      const trailing = cleanLink.match(/[.,!?;:)\]}]+$/)?.[0] || '';
+      if (trailing) cleanLink = cleanLink.slice(0, -trailing.length);
+      if (!cleanLink) continue;
+      const candidate = /^www\./i.test(cleanLink) ? `https://${cleanLink}` : cleanLink;
+      let safe = false;
+      try { const parsed = new URL(candidate); safe = parsed.protocol === 'http:' || parsed.protocol === 'https:'; } catch {}
+      html += esc(source.slice(lastIndex, tokenStart));
+      if (safe) {
+        html += `<a class="chat-link" href="${esc(candidate)}" target="_blank" rel="noopener noreferrer nofollow" data-external-url="${esc(candidate)}">${esc(cleanLink)}</a>`;
+      } else {
+        html += esc(cleanLink);
+      }
+      lastIndex = tokenStart + cleanLink.length;
+      continue;
+    }
+
+    const prefix = match[2] || '';
+    const name = match[3] || '';
     const tokenStart = match.index + prefix.length;
     const tokenEnd = tokenStart + name.length + 1;
     html += esc(source.slice(lastIndex, tokenStart));
-
     if (name.toLowerCase() === 'everyone' && currentConversationData?.type === 'group' && message?.mention_everyone) {
       html += '<span class="mention-token everyone">@everyone</span>';
     } else {
@@ -1167,10 +1422,10 @@ function renderOneMessage(message, profiles = new Map(), existingNode = null) {
   row.dataset.messageSignature = signature;
   row.innerHTML = `
     <span class="message-grouped-time" aria-hidden="true">${esc(formatTime(message.created_at))}</span>
-    <span class="message-avatar">${avatarHTML(sender.username, sender.avatar_url, 'private', '', sender.avatar_color)}</span>
+    <span class="message-avatar">${avatarHTML(sender.username, sender.avatar_url, 'private', '', sender.avatar_color)}${presenceDotHTML(message.sender_id, 'presence-dot-message')}</span>
     <div class="message-body">
       ${message.reply_to ? `<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'private', '', message.reply_sender_avatar_color || '')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(message.reply_content || '')}</span></div></div>` : ''}
-      <div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-username">@${esc(sender.username)}</span><span class="message-time" title="${esc(exactStamp)}">${esc(stamp)}</span>${message.edited_at ? '<span class="message-edited" title="Este mensaje ha sido editado">(editado)</span>' : ''}</div>
+      <div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-time" title="${esc(exactStamp)}">${esc(stamp)}</span>${message.edited_at ? '<span class="message-edited" title="Este mensaje ha sido editado">(editado)</span>' : ''}</div>
       <div class="message-content">${renderMessageContent(message.content, message)}${message.edited_at ? '<span class="message-edited-inline"> (editado)</span>' : ''}</div>
       <div class="message-reactions" data-reactions-for="${esc(id)}"></div>
     </div>
@@ -1395,11 +1650,24 @@ function selectMention(person) {
   resizeMessageInput(); updateSendState(); scheduleTyping();
 }
 
+function updateMessageCharacterCount() {
+  const input = $('#message-input');
+  const counter = $('#message-character-count');
+  if (!input || !counter) return;
+  const max = Number(input.maxLength) > 0 ? Number(input.maxLength) : 2000;
+  const remaining = Math.max(0, max - String(input.value || '').length);
+  counter.textContent = String(remaining);
+  counter.classList.toggle('hidden', remaining > 20);
+  counter.classList.toggle('at-zero', remaining === 0);
+  counter.classList.toggle('near-limit', remaining > 0 && remaining <= 20);
+  counter.setAttribute('aria-label', `Quedan ${remaining} caracteres`);
+}
+
 function updateSendState() {
   const input = $('#message-input');
   const button = $('#send-button');
-  if (!button) return;
-  button.disabled = !currentConversation || sendInFlight || !String(input?.value || '').trim();
+  if (button) button.disabled = !currentConversation || sendInFlight || !String(input?.value || '').trim();
+  updateMessageCharacterCount();
 }
 
 function deriveMentions(content) {
@@ -1870,10 +2138,13 @@ if (!isGroup) {
 const other = currentMembers.find(m => String(m.user_id) !== String(currentUser.id));
 const name = other?.username || 'Usuario';
 avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other?.avatar_color);
+ensurePresenceDot($('#right-profile-avatar'), getMemberId(other));
 setText('right-profile-name', name);
 setText('right-profile-handle', `@${other?.email_handle || other?.username || 'usuario'}`);
+renderPresenceIndicators();
 } else {
 const name = currentConversationData?.name || 'Grupo';
+ensurePresenceDot($('#right-profile-avatar'), '');
 avatarInto($('#right-group-avatar'), name, currentConversationData?.avatar_url, 'group');
 setText('right-group-name', name);
 setText('right-group-count', `${currentMembers.length} miembro${currentMembers.length === 1 ? '' : 's'}`);
@@ -1882,11 +2153,12 @@ list.innerHTML = '';
 currentMembers.forEach(member => {
 const row = document.createElement('div');
 row.className = 'right-member';
-row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar', member.avatar_color)}<span class="right-member-name">${esc(member.username || 'Usuario')}</span>${member.is_owner?'<span class="member-role-crown crown-owner" title="Creador">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin" title="Administrador">♛</span>':''}`;
+row.innerHTML = `<span class="right-member-avatar-wrap presence-host">${avatarHTML(member.username, member.avatar_url, 'private', 'member-avatar', member.avatar_color)}${presenceDotHTML(getMemberId(member))}</span><span class="right-member-name">${esc(member.username || 'Usuario')}</span>${member.is_owner?'<span class="member-role-crown crown-owner" title="Creador">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin" title="Administrador">♛</span>':''}`;
 row.addEventListener('click',e=>{if(e.defaultPrevented)return;showMemberProfile(member,row);});
 row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
 list.appendChild(row);
 });
+renderPresenceIndicators();
 }
 }
 
@@ -1895,6 +2167,7 @@ function showMemberProfile(member, anchor) {
   if (!popover || !member) return;
   selectedMember = member;
   avatarInto($('#member-profile-avatar'), member.username, member.avatar_url, 'private', member.avatar_color || '');
+  ensurePresenceDot($('#member-profile-avatar'), getMemberId(member));
   setText('member-profile-name', member.username || 'Usuario');
   setText('member-profile-username', `@${member.email_handle || member.username || 'usuario'}`);
   const role = $('#member-profile-role');
@@ -1915,6 +2188,7 @@ function showMemberProfile(member, anchor) {
   popover.style.left = `${left}px`;
   popover.style.top = `${top}px`;
   updateMemberProfileFriendAction(member);
+  renderPresenceIndicators();
 }
 
 async function updateMemberProfileFriendAction(member) {
@@ -1924,17 +2198,27 @@ async function updateMemberProfileFriendAction(member) {
   const token = ++memberStatusRequestToken;
   memberFriendStatus = 'none';
   if (!isValidUuid(id) || id === String(currentUser?.id)) { button.classList.add('hidden'); return; }
+
+  // Friends cache is authoritative for this common case: no spinner / permanent "Comprobando".
+  if (friendCache.some(friend => String(friend.id) === id)) {
+    memberFriendStatus = 'friend';
+    button.classList.add('hidden');
+    return;
+  }
   button.classList.remove('hidden');
-  button.disabled = true;
-  button.textContent = 'Comprobando…';
+  button.disabled = false;
+  button.textContent = 'Añadir amigo';
+
   let timeoutId;
   try {
     const statusPromise = supabase.rpc('xifre_get_friend_request_status', { p_target_user: id });
-    const timeoutPromise = new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('La comprobación está tardando demasiado')), 4500); });
-    const { data, error } = await Promise.race([statusPromise, timeoutPromise]);
-    if (error) throw error;
+    const timeoutPromise = new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('La comprobación está tardando demasiado')), 2800); });
+    const response = await Promise.race([statusPromise, timeoutPromise]);
+    if (response.error) throw response.error;
     if (token !== memberStatusRequestToken || String(getMemberId(selectedMember)) !== id) return;
-    memberFriendStatus = String(data || 'none');
+    const raw = response.data;
+    const statusValue = Array.isArray(raw) ? raw[0] : raw;
+    memberFriendStatus = String(statusValue?.status || statusValue?.relationship || statusValue || 'none');
     if (memberFriendStatus === 'friend') { button.classList.add('hidden'); return; }
     button.classList.remove('hidden');
     button.disabled = false;
@@ -1942,7 +2226,8 @@ async function updateMemberProfileFriendAction(member) {
   } catch (error) {
     console.warn('MEMBER FRIEND STATUS', error);
     if (token !== memberStatusRequestToken || String(getMemberId(selectedMember)) !== id) return;
-    // Never leave the card disabled on a slow or unavailable status RPC.
+    // A failed status lookup is not allowed to block the action. The server-side operation
+    // will return a clear result if a request already exists.
     memberFriendStatus = 'none';
     button.classList.remove('hidden');
     button.disabled = false;
@@ -1958,6 +2243,7 @@ async function sendFriendRequestFromMemberProfile() {
   const id = getMemberId(member);
   if (!member || !button || !isValidUuid(id) || id === String(currentUser?.id)) return;
   const previousStatus = memberFriendStatus;
+  memberStatusRequestToken++;
   button.disabled = true;
   try {
     let error = null;
@@ -1977,6 +2263,7 @@ async function sendFriendRequestFromMemberProfile() {
   } catch (error) {
     button.disabled = false;
     toast(friendlyError(error), 'error');
+    await updateMemberProfileFriendAction(member);
   }
 }
 function closeMemberProfile(){ memberStatusRequestToken++; $('#member-profile-popover')?.classList.add('hidden'); const button=$('#member-profile-add-friend'); if(button){button.disabled=false;button.classList.add('hidden');button.textContent='Añadir amigo';} selectedMember=null; }
@@ -2001,7 +2288,7 @@ list.innerHTML = '';
 friendCache.forEach(friend => {
 const row = document.createElement('label');
 row.className = 'selection-item';
-row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></span>`;
+row.innerHTML = `<input type="checkbox" class="group-friend-check" value="${esc(friend.id)}"><span class="presence-host">${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}${presenceDotHTML(friend.id)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></span>`;
 list.appendChild(row);
 });
 updateGroupSelectedCount();
@@ -2064,7 +2351,7 @@ list.innerHTML = '';
 members.forEach(member => {
 const row = document.createElement('div');
 row.className = 'friend-item';
-row.innerHTML = `${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}<div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>@${esc(member.email_handle || member.username || 'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
+row.innerHTML = `<span class="friend-avatar presence-host">${avatarHTML(member.username, member.avatar_url, 'private', 'friend-avatar', member.avatar_color)}${presenceDotHTML(getMemberId(member))}</span><div class="friend-copy"><strong>${esc(member.username || 'Usuario')}</strong><small>@${esc(member.email_handle || member.username || 'usuario')}</small></div><span>${member.is_owner?'<span class="member-role-crown crown-owner">♛</span>':member.is_admin?'<span class="member-role-crown crown-admin">♛</span>':''}</span>`;
 row.addEventListener('click',()=>showMemberProfile(member,row));
 row.addEventListener('contextmenu',e=>{e.preventDefault();openMemberMenu(member,e.clientX,e.clientY);});
 list.appendChild(row);
@@ -2080,7 +2367,7 @@ list.innerHTML = '';
 candidates.forEach(friend => {
 const row = document.createElement('label');
 row.className = 'selection-item';
-row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span>${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></span>`;
+row.innerHTML = `<input type="checkbox" class="group-add-check" value="${esc(friend.id)}"><span class="presence-host">${avatarHTML(friend.username, friend.avatar_url, 'private', '', friend.avatar_color)}${presenceDotHTML(friend.id)}</span><span><strong>${esc(friend.username)}</strong><small>@${esc(friend.email_handle || friend.username)}</small></span>`;
 list.appendChild(row);
 });
 updateGroupAddCount();
@@ -2287,6 +2574,7 @@ $('#chat-info-button')?.classList.add('hidden');
 $('#message-input').disabled = true;
 $('#message-input').value = '';
 resizeMessageInput();
+updateMessageCharacterCount();
 $('#send-button').disabled = true;
 clearReply(); currentMentionIds.clear(); mentionEverywhere=false; $('#mention-picker')?.classList.add('hidden');
 setTypingVisible(false);
@@ -2312,6 +2600,10 @@ $$('.people-panel').forEach(p=>p.classList.toggle('active',p.id===`people-${tab=
 /* Event wiring */
 /* ------------------------------------------------------------------------ */
 function bind() {
+// Presence activity is intentionally low-frequency; it tracks online/away without sending every mouse movement.
+document.addEventListener('pointerdown', notePresenceActivity, { passive: true });
+document.addEventListener('keydown', notePresenceActivity, true);
+document.addEventListener('touchstart', notePresenceActivity, { passive: true });
 // Un solo submit handler por formulario.
 $('#login-form')?.addEventListener('submit', event => {
 event.preventDefault();
@@ -2325,6 +2617,8 @@ void register();
 });
 
 document.addEventListener('click', event => {
+const chatLink = event.target.closest('a.chat-link[data-external-url]');
+if (chatLink) { event.preventDefault(); event.stopPropagation(); openExternalLinkWarning(chatLink.dataset.externalUrl || chatLink.href); return; }
 const go = event.target.closest('[data-go]');
 if (go) {
 event.preventDefault();
@@ -2354,6 +2648,8 @@ else if (type === 'add-group-members') void addGroupMembers();
 else if (type === 'request-delete-group') void deleteGroup();
 else if (type === 'save-profile-settings') void saveProfileSettings();
 else if (type === 'composer-placeholder') return;
+else if (type === 'confirm-external-link') confirmExternalLink();
+else if (type === 'cancel-external-link') closeExternalLinkWarning();
 else if (type === 'resend') void resendConfirmation();
 else if (type === 'close-modal') closeModal(action.dataset.modal);
 }
@@ -2482,6 +2778,7 @@ $('#messages')?.addEventListener('scroll',()=>{const box=$('#messages');if(!curr
 
 document.addEventListener('keydown', event => {
 if (event.key === 'Escape') {
+if (!$('#external-link-modal')?.classList.contains('hidden')) return closeExternalLinkWarning();
 if (!$('#emoji-picker-popover')?.classList.contains('hidden')) return closeEmojiPicker();
 if (!$('#message-menu').classList.contains('hidden')) return closeMessageMenu();
 if (!$('#confirm-modal').classList.contains('hidden')) return finishConfirm(false);
@@ -2491,7 +2788,11 @@ $$('.modal:not(.hidden)').forEach(m => m.classList.add('hidden'));
 });
 
 document.addEventListener('visibilitychange', () => {
-if (document.visibilityState !== 'visible' || !currentUser) return;
+if (!currentUser) return;
+if (document.visibilityState === 'visible') presenceActivityAt = Date.now();
+void trackPresence(true);
+renderPresenceIndicators();
+if (document.visibilityState !== 'visible') return;
 void loadConversations().then(async () => {
   if (currentConversation) {
     const fresh = conversationCache.find(c => String(c.id) === String(currentConversation));
@@ -2537,6 +2838,7 @@ void startApplication(session);
 return;
 }
 if (event === 'SIGNED_OUT') {
+stopPresenceTracking();
 currentUser = null;
 currentProfile = null;
 appStarted = false;
