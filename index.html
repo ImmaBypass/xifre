@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261015-v18">
+<link rel="stylesheet" href="style.css?v=20261018-v19">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -131,6 +131,7 @@
 <textarea id="message-input" rows="1" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled></textarea>
 <button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
 <button id="composer-emoji-button" class="composer-emoji-button" type="button" aria-label="Abrir selector de emojis" title="Emojis">☺</button>
+<span id="message-character-count" class="message-character-count hidden" aria-live="polite">20</span>
 </div>
 </form>
 </section>
@@ -230,7 +231,7 @@
 <div class="modal-kicker">SOCIAL</div>
 <div class="people-tabs">
 <button type="button" class="people-tab active" data-people-tab="friends">Amigos</button>
-<button type="button" class="people-tab" data-people-tab="requests">Solicitudes</button>
+<button type="button" class="people-tab requests-tab" data-people-tab="requests">Solicitudes<span id="friend-request-tab-badge" class="nav-request-badge tab-request-badge hidden" aria-label="Solicitudes pendientes">0</span></button>
 <button type="button" class="people-tab accent" data-people-tab="add">Añadir amigo</button>
 </div>
 <section id="people-friends-panel" class="people-panel active">
@@ -290,6 +291,23 @@
 </div>
 </div>
 
+
+<!-- EXTERNAL LINK WARNING -->
+<div id="external-link-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="external-link-title">
+  <div class="modal-card external-link-card">
+    <div class="external-link-icon" aria-hidden="true">↗</div>
+    <div class="modal-kicker">ENLACE EXTERNO</div>
+    <h2 id="external-link-title">Vas a salir de XIFRE</h2>
+    <p>Este enlace abre una página fuera de XIFRE. Comprueba la dirección antes de continuar.</p>
+    <div id="external-link-host" class="external-link-host">example.com</div>
+    <code id="external-link-url" class="external-link-url"></code>
+    <div class="external-link-actions">
+      <button id="external-link-cancel" class="secondary-action" type="button" data-action="cancel-external-link">Volver al chat</button>
+      <button id="external-link-continue" class="primary-action" type="button" data-action="confirm-external-link">Abrir enlace</button>
+    </div>
+  </div>
+</div>
+
 <!-- SETTINGS -->
 <div id="settings-modal" class="settings-overlay hidden">
 <div class="settings-shell">
@@ -336,6 +354,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261015-v18"></script>
+<script src="app.js?v=20261018-v19"></script>
 </body>
 </html>
