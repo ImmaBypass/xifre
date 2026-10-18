@@ -879,3 +879,187 @@ html[data-theme="light"] .message-row.mentioned { background: rgba(250,166,26,.2
 /* V18: edited marker remains visible on compact/grouped messages. */
 .message-edited-inline { display: none; color: var(--text-faint); font-size: 9px; font-style: italic; white-space: nowrap; }
 .message-row.grouped-message .message-edited-inline { display: inline; }
+
+
+/* ===================== XIFRE V19 FIXES ===================== */
+/* Presence dots: the avatar image clips inside its own media element, not the outer host. */
+.presence-avatar-wrap,
+.presence-host,
+.presence-anchor {
+  position: relative !important;
+  overflow: visible !important;
+}
+.presence-avatar-wrap {
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  line-height: 0;
+}
+.presence-avatar-wrap > .avatar-media,
+.presence-host > .avatar-media,
+.presence-anchor > .avatar-media {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.presence-host > .avatar-media { position: relative; }
+.presence-dot {
+  position: absolute !important;
+  left: -2px;
+  bottom: -2px;
+  z-index: 9;
+  display: block;
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  box-sizing: border-box;
+  border: 2px solid var(--panel, #2b2d31);
+  border-radius: 50%;
+  padding: 0;
+  pointer-events: none;
+  transition: background-color .18s ease, box-shadow .18s ease;
+}
+.presence-dot.presence-offline { background: #80848e; box-shadow: none; }
+.presence-dot.presence-online { background: #23a559; box-shadow: 0 0 0 1px rgba(35,165,89,.18), 0 0 6px rgba(35,165,89,.22); }
+.presence-dot.presence-away { background: #f0b232; box-shadow: 0 0 0 1px rgba(240,178,50,.14); }
+.presence-dot.presence-dot-small { width: 11px; height: 11px; min-width: 11px; min-height: 11px; left: -1px; bottom: -1px; }
+.presence-dot.presence-dot-message { width: 11px; height: 11px; min-width: 11px; min-height: 11px; left: -1px; bottom: -1px; }
+.conversation-avatar-wrap { width: 36px; height: 36px; }
+.right-member-avatar-wrap { display: block; width: 30px; height: 30px; flex: 0 0 30px; }
+.right-member { grid-template-columns: 32px minmax(0,1fr) auto; }
+.message-avatar,
+.userbar-avatar,
+.settings-nav-avatar,
+.chat-header-avatar,
+.right-profile-avatar,
+.member-profile-avatar,
+#profile-avatar {
+  position: relative;
+  overflow: visible !important;
+}
+.message-avatar > .avatar-media,
+.userbar-avatar > .avatar-media,
+.settings-nav-avatar > .avatar-media,
+.chat-header-avatar > .avatar-media,
+.right-profile-avatar > .avatar-media,
+.member-profile-avatar > .avatar-media,
+#profile-avatar > .avatar-media { border-radius: inherit; overflow: hidden; }
+html[data-theme="light"] .presence-dot { border-color: #f1f2f4; }
+
+/* Photo controls are centered within the free area of the banner and sit slightly lower. */
+.settings-profile-banner { position: relative; }
+.settings-avatar-actions {
+  position: absolute !important;
+  left: 120px;
+  right: 12px;
+  bottom: 8px !important;
+  z-index: 4;
+  display: flex !important;
+  align-items: center;
+  justify-content: center !important;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 !important;
+  transform: none !important;
+}
+.settings-avatar-change {
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  flex: 0 0 auto;
+}
+.settings-avatar-remove { flex: 0 0 auto; }
+@media (max-width: 620px) {
+  .settings-avatar-actions { left: 105px; right: 7px; bottom: 7px !important; gap: 5px; }
+  .settings-avatar-change, .settings-avatar-remove { min-height: 27px; padding-left: 7px; padding-right: 7px; font-size: 9px; }
+}
+
+/* Message mentions use a Discord-like periwinkle blue; @everyone is blue too. */
+.mention-token,
+.mention-token.everyone,
+.mention-token.self {
+  color: #c9cdfb !important;
+  background: rgba(88,101,242,.26) !important;
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 650;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.mention-token:hover { background: rgba(88,101,242,.42) !important; }
+.mention-item-everyone strong,
+.mention-everyone-avatar { color: #c9cdfb !important; }
+.mention-everyone-avatar { background: rgba(88,101,242,.23) !important; }
+.mention-token.self { color: #fff !important; background: rgba(88,101,242,.52) !important; }
+html[data-theme="light"] .mention-token,
+html[data-theme="light"] .mention-token.everyone { color: #4752c4 !important; background: rgba(88,101,242,.14) !important; }
+html[data-theme="light"] .mention-token.self { color: #30398f !important; background: rgba(88,101,242,.22) !important; }
+
+/* Safe clickable links. Navigation itself is intercepted by the external-link warning modal. */
+.chat-link {
+  color: #00a8fc;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid rgba(0,168,252,.22);
+  cursor: pointer;
+  transition: color .12s ease, border-color .12s ease;
+}
+.chat-link:hover { color: #36b7ff; border-bottom-color: currentColor; text-decoration: underline; }
+html[data-theme="light"] .chat-link { color: #006fc4; border-bottom-color: rgba(0,111,196,.24); }
+html[data-theme="light"] .chat-link:hover { color: #0056a7; }
+.external-link-card { width: min(460px, calc(100vw - 28px)); }
+.external-link-icon { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 15px; border-radius: 13px; color: #c9cdfb; background: rgba(88,101,242,.18); font-size: 25px; font-weight: 800; }
+.external-link-host { margin-top: 15px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--composer); color: var(--text-strong); font-size: 12px; font-weight: 800; overflow-wrap: anywhere; }
+.external-link-url { display: block; max-height: 90px; margin-top: 8px; overflow: auto; color: var(--text-faint); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
+.external-link-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.external-link-actions .primary-action { width: auto; min-width: 120px; margin-top: 0; }
+.external-link-actions .secondary-action { min-width: 120px; }
+
+/* Character count stays hidden until only 20 characters remain. */
+.composer-box { position: relative; }
+.message-character-count {
+  position: absolute;
+  right: 76px;
+  bottom: 6px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--composer);
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.message-character-count.near-limit { color: #f0b232; }
+.message-character-count.at-zero { color: #ed4245; font-weight: 900; }
+.message-character-count.hidden { display: none !important; }
+.composer-box textarea#message-input { padding-right: 34px; }
+
+/* Request count inside the Requests tab is aligned independently of the top navigation badge. */
+.people-tab.requests-tab { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.people-tab.requests-tab .tab-request-badge { margin-left: 2px; flex: 0 0 auto; box-shadow: none; }
+.people-tab.requests-tab .tab-request-badge.hidden { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .presence-dot, .chat-link { transition: none !important; }
+}
+
+/* Preserve XIFRE's group distinction as a very thin blue stroke on the letters only. */
+.conversation.group-conversation .conversation-name {
+  -webkit-text-stroke: .18px rgba(88,101,242,.92);
+  text-shadow: 0 0 .55px rgba(88,101,242,.70);
+  background: transparent !important;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
