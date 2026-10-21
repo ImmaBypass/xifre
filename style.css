@@ -1063,3 +1063,70 @@ html[data-theme="light"] .chat-link:hover { color: #0056a7; }
   outline: 0 !important;
   box-shadow: none !important;
 }
+
+
+/* ===================== XIFRE V20 targeted visual fixes ===================== */
+/* The avatar frame itself defines the circle. Do not inherit radius from wrappers
+   such as .presence-host, which may have no border-radius. */
+.avatar-media,
+.avatar-media > .avatar-img,
+.avatar-media > .avatar-fallback,
+.avatar-media > img,
+.avatar-media > span,
+.avatar-img,
+.avatar-fallback,
+.profile-avatar,
+.userbar-avatar,
+.chat-header-avatar,
+.right-profile-avatar,
+.right-group-avatar,
+.message-avatar,
+.member-avatar,
+.conversation-avatar-image,
+.search-avatar,
+.friend-avatar,
+.request-avatar,
+.settings-avatar-preview,
+.settings-nav-avatar,
+.member-profile-avatar,
+.group-edit-preview,
+.reply-avatar,
+.avatar-media.mention-avatar {
+  border-radius: 50% !important;
+}
+
+/* Avatar wrappers may overflow so the presence marker remains visible, while
+   the image/fallback inside is clipped to a circle. */
+.presence-avatar-wrap > .avatar-media,
+.presence-host > .avatar-media,
+.presence-anchor > .avatar-media {
+  border-radius: 50% !important;
+  overflow: hidden !important;
+}
+.presence-avatar-wrap > .presence-dot,
+.presence-host > .presence-dot,
+.presence-anchor > .presence-dot {
+  left: auto !important;
+  right: -2px !important;
+  bottom: -2px !important;
+}
+.presence-dot.presence-dot-small,
+.presence-dot.presence-dot-message {
+  left: auto !important;
+  right: -1px !important;
+  bottom: -1px !important;
+}
+
+/* Put both profile-photo controls on the right side of the account banner. */
+.settings-avatar-actions {
+  left: auto !important;
+  right: 14px !important;
+  justify-content: flex-end !important;
+}
+@media (max-width: 620px) {
+  .settings-avatar-actions {
+    left: auto !important;
+    right: 7px !important;
+    justify-content: flex-end !important;
+  }
+}
