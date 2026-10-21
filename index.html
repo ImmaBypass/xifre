@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261021-v20">
+<link rel="stylesheet" href="style.css?v=20261022-v21">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -126,11 +126,21 @@
 <div class="reply-bar-copy"><span class="reply-label">RESPONDIENDO A</span><strong id="replying-name">Usuario</strong><span id="replying-content"></span></div>
 <button id="cancel-reply" class="reply-close" type="button" aria-label="Cancelar respuesta">×</button>
 </div>
+<div id="chat-attachment-preview" class="chat-attachment-preview hidden" aria-live="polite">
+  <img id="chat-attachment-preview-image" alt="Vista previa del archivo adjunto">
+  <div class="chat-attachment-preview-copy"><strong id="chat-attachment-preview-name">imagen.png</strong><small>Imagen adjunta al mensaje</small></div>
+  <button id="remove-chat-attachment" class="chat-attachment-remove" type="button" aria-label="Quitar imagen adjunta" title="Quitar imagen">×</button>
+</div>
 <div class="composer-box">
-<button class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo">＋</button>
+<button id="composer-plus-button" class="composer-plus" type="button" data-action="composer-placeholder" aria-label="Añadir archivo" aria-expanded="false">＋</button>
+<div id="attachment-menu" class="attachment-menu hidden" role="menu">
+  <button id="upload-chat-attachment" type="button" role="menuitem"><span aria-hidden="true">▧</span><span><strong>Subir archivo</strong><small>PNG, JPG, WEBP o GIF · máximo 8 MB</small></span></button>
+</div>
+<input id="chat-attachment-input" class="visually-hidden-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
 <textarea id="message-input" rows="1" autocomplete="off" maxlength="2000" placeholder="Enviar mensaje..." disabled></textarea>
-<button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje">➤</button>
+<button id="send-button" class="composer-send" type="submit" disabled aria-label="Enviar mensaje" title="Enviar mensaje">➤</button>
 <button id="composer-emoji-button" class="composer-emoji-button" type="button" aria-label="Abrir selector de emojis" title="Emojis">☺</button>
+<button id="composer-keyboard-button" class="composer-keyboard-button" type="button" aria-label="Abrir teclado en pantalla" title="Teclado en pantalla" aria-expanded="false">⌨</button>
 <span id="message-character-count" class="message-character-count hidden" aria-live="polite">20</span>
 </div>
 </form>
@@ -273,6 +283,14 @@
   <div id="emoji-grid" class="emoji-grid" role="listbox" aria-label="Emojis disponibles"></div>
 </div>
 
+<!-- Teclado català en pantalla, independiente de servicios externos -->
+<div id="catalan-keyboard-popover" class="catalan-keyboard-popover hidden" role="dialog" aria-label="Teclado català en pantalla">
+  <div class="catalan-keyboard-titlebar"><strong>Teclat català</strong><button id="catalan-keyboard-close" type="button" aria-label="Cerrar teclado">×</button></div>
+  <div id="keyboard-suggestions" class="keyboard-suggestions" aria-label="Sugerencias de palabras"></div>
+  <div id="catalan-keyboard-rows" class="catalan-keyboard-rows"></div>
+  <div class="keyboard-footnote">Les paraules suggerides s'aprenen només en aquest navegador.</div>
+</div>
+
 <!-- MESSAGE MENU -->
 <div id="message-menu" class="message-menu hidden">
 <button type="button" data-message-menu="reply">↩ <span>Responder</span></button>
@@ -354,6 +372,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261021-v20"></script>
+<script src="app.js?v=20261022-v21"></script>
 </body>
 </html>
