@@ -1130,3 +1130,85 @@ html[data-theme="light"] .chat-link:hover { color: #0056a7; }
     justify-content: flex-end !important;
   }
 }
+
+
+/* ==================== XIFRE V21: teclado català + adjuntos privados ==================== */
+.composer-box {
+  position: relative;
+  grid-template-columns: 38px minmax(0,1fr) 34px 34px 34px !important;
+  gap: 1px;
+}
+.composer-plus-button, .composer-emoji-button, .composer-keyboard-button, .composer-send {
+  width: 29px; height: 29px; min-width: 29px; align-self: center; justify-self: center;
+  display: grid; place-items: center; border-radius: 50%; cursor: pointer;
+  transition: transform .14s ease, background .14s ease, color .14s ease, opacity .14s ease;
+}
+.composer-keyboard-button { grid-column: 5 !important; color: var(--text-muted); background: transparent; font-size: 15px; }
+.composer-keyboard-button:hover, .composer-emoji-button:hover { background: var(--panel-hover); color: var(--text-strong); transform: translateY(-1px); }
+.composer-plus { grid-column: 1 !important; }
+.composer-box textarea#message-input { grid-column: 2 !important; padding-right: 4px; }
+.composer-send { grid-column: 3 !important; display: grid !important; background: var(--brand); color: white; }
+.composer-emoji-button { grid-column: 4 !important; }
+.composer-plus:disabled, .composer-keyboard-button:disabled { opacity: .35; cursor: wait; }
+
+.visually-hidden-input { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
+.attachment-menu {
+  position: fixed; z-index: 160; width: 245px; padding: 6px; border: 1px solid var(--line-strong); border-radius: 10px;
+  background: var(--panel); color: var(--text); box-shadow: 0 18px 50px rgba(0,0,0,.30); animation: modalEnter .14s ease;
+}
+.attachment-menu button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 7px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.attachment-menu button:hover { background: var(--panel-hover); }
+.attachment-menu button > span:first-child { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border-radius: 7px; background: rgba(88,101,242,.16); color: #c9cdfb; font-size: 18px; }
+.attachment-menu button strong, .attachment-menu button small { display: block; }
+.attachment-menu button strong { font-size: 11px; }
+.attachment-menu button small { margin-top: 3px; color: var(--text-faint); font-size: 9px; }
+.chat-attachment-preview { position: relative; display: flex; align-items: center; gap: 11px; max-width: min(430px, 100%); margin: 0 0 8px 0; padding: 9px 42px 9px 9px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); animation: messageAppear .16s ease; }
+.chat-attachment-preview.hidden { display: none !important; }
+.chat-attachment-preview > img { display: block; width: 62px; height: 62px; flex: 0 0 62px; object-fit: cover; border-radius: 7px; background: var(--composer); }
+.chat-attachment-preview-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-attachment-preview-copy strong { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong); font-size: 11px; }
+.chat-attachment-preview-copy small { color: var(--text-faint); font-size: 9px; }
+.chat-attachment-remove { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: rgba(237,66,69,.16); color: #ff9698; font-size: 20px; cursor: pointer; transition: background .12s, transform .12s; }
+.chat-attachment-remove:hover { background: rgba(237,66,69,.28); transform: scale(1.05); }
+.message-image-attachment { display: block; max-width: min(440px, 100%); margin: 5px 0 2px; overflow: hidden; border-radius: 10px; background: rgba(0,0,0,.08); }
+.message-image-attachment img { display: block; max-width: 100%; max-height: 390px; width: auto; height: auto; object-fit: contain; border-radius: 10px; }
+.message-image-unavailable { padding: 16px; color: var(--text-faint); font-size: 10px; }
+.message-caption { white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-content:has(.message-image-attachment) { padding-top: 1px; }
+.chat-drag-over { position: relative; }
+.chat-drag-over::after { content: 'Suelta la imagen para adjuntarla'; position: absolute; z-index: 90; inset: 12px; display: grid; place-items: center; border: 2px dashed #5865f2; border-radius: 15px; background: rgba(21,24,40,.82); color: white; font-size: 15px; font-weight: 800; pointer-events: none; }
+
+/* Small floating Catalan keyboard. Suggestions are local; no network calls are made. */
+.catalan-keyboard-popover { position: fixed; z-index: 170; display: flex; flex-direction: column; gap: 8px; width: min(580px, calc(100vw - 20px)); max-height: min(360px, calc(100vh - 24px)); padding: 10px; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 13px; background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.36); animation: modalEnter .16s cubic-bezier(.16,1,.3,1); }
+.catalan-keyboard-popover.hidden { display: none !important; }
+.catalan-keyboard-titlebar { display: flex; align-items: center; justify-content: space-between; min-height: 22px; padding: 0 3px; }
+.catalan-keyboard-titlebar strong { font-size: 11px; letter-spacing: .2px; }
+.catalan-keyboard-titlebar button { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 6px; background: transparent; color: var(--text-faint); font-size: 19px; cursor: pointer; }
+.catalan-keyboard-titlebar button:hover { background: var(--panel-hover); color: var(--text); }
+.keyboard-suggestions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; min-height: 31px; }
+.keyboard-suggestion { min-width: 0; min-height: 31px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--composer); color: var(--text); font-size: 11px; cursor: pointer; transition: background .12s, border-color .12s, transform .12s; }
+.keyboard-suggestion:hover { background: rgba(88,101,242,.20); border-color: rgba(88,101,242,.5); transform: translateY(-1px); }
+.keyboard-suggestion-empty { grid-column: 1/-1; display: grid; place-items: center; color: var(--text-faint); font-size: 9px; }
+.catalan-keyboard-rows { display: flex; flex-direction: column; gap: 5px; }
+.catalan-keyboard-row { display: flex; gap: 4px; justify-content: center; width: 100%; }
+.catalan-key { min-width: 0; flex: 1 1 0; min-height: 32px; padding: 0 2px; border: 1px solid rgba(255,255,255,.055); border-radius: 6px; background: #42444a; color: #f2f3f5; box-shadow: 0 1px 0 rgba(0,0,0,.22); font-family: var(--font-ui); font-size: 12px; cursor: pointer; touch-action: manipulation; transition: transform .09s, background .1s, box-shadow .1s; }
+.catalan-key:hover, .catalan-key:focus-visible { background: #54575f; outline: 0; }
+.catalan-key:active { transform: translateY(1px); box-shadow: none; }
+.catalan-key.keyboard-special, .catalan-key.keyboard-mode { flex-grow: 1.45; background: #34363b; color: #d6d8dc; }
+.catalan-key.keyboard-space { flex-grow: 4.2; font-size: 10px; }
+.keyboard-footnote { padding: 0 3px; color: var(--text-faint); font-size: 8px; }
+[data-theme="light"] .catalan-key { background: #e0e2e6; color: #2e3338; border-color: rgba(0,0,0,.08); box-shadow: 0 1px 0 rgba(0,0,0,.08); }
+[data-theme="light"] .catalan-key:hover { background: #d0d3d9; }
+[data-theme="light"] .catalan-key.keyboard-special, [data-theme="light"] .catalan-key.keyboard-mode { background: #cfd2d8; }
+
+@media (max-width: 600px) {
+  .composer-box { grid-template-columns: 34px minmax(0,1fr) 31px 31px 31px !important; }
+  .composer-plus, .composer-emoji-button, .composer-keyboard-button, .composer-send { width: 27px; height: 27px; min-width: 27px; font-size: 12px; }
+  .catalan-keyboard-popover { padding: 7px; gap: 6px; }
+  .catalan-keyboard-row { gap: 3px; }
+  .catalan-key { min-height: 30px; font-size: 11px; }
+  .chat-attachment-preview { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .catalan-key, .keyboard-suggestion, .chat-attachment-preview, .chat-attachment-remove { transition: none !important; animation: none !important; }
+}
