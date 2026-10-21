@@ -1212,3 +1212,8 @@ html[data-theme="light"] .chat-link:hover { color: #0056a7; }
 @media (prefers-reduced-motion: reduce) {
   .catalan-key, .keyboard-suggestion, .chat-attachment-preview, .chat-attachment-remove { transition: none !important; animation: none !important; }
 }
+
+/* V21.1: attachment preview only image plus remove control */
+.chat-attachment-preview { gap:0; padding:8px 42px 8px 8px; width:fit-content; max-width:min(420px,100%); }
+.chat-attachment-preview-copy { display:none !important; }
+.chat-attachment-preview > img { width:auto; height:auto; max-width:min(360px,70vw); max-height:220px; object-fit:contain; border-radius:8px; }
