@@ -63,6 +63,7 @@ let removeProfileAvatarRequested = false;
 let removeGroupAvatarRequested = false;
 let editingMessageId = null;
 let presenceChannel = null;
+let presenceSetupPromise = null;
 let presenceTrackTimer = null;
 let presenceRenderTimer = null;
 let presencePayloads = new Map();
@@ -160,10 +161,16 @@ function ensurePresenceDot(elementOrSelector, userId, extraClass = '') {
 }
 
 function parsePresenceTimestamp(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric;
-  const parsed = Date.parse(String(value || ''));
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 0 && value < 100000000000 ? value * 1000 : value;
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return 0;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 100000000000 ? numeric * 1000 : numeric;
+  }
+  const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -197,16 +204,20 @@ function rebuildPresencePayloads() {
   const next = new Map();
   if (presenceChannel) {
     const state = presenceChannel.presenceState() || {};
-    for (const metas of Object.values(state)) {
-      for (const meta of (Array.isArray(metas) ? metas : [])) {
-        const id = String(meta.user_id || meta.userId || '');
+    for (const [presenceKey, rawMetas] of Object.entries(state)) {
+      const metas = Array.isArray(rawMetas) ? rawMetas : (rawMetas ? [rawMetas] : []);
+      for (const meta of metas) {
+        // Supabase Presence returns an array of tracked metadata per presence key.
+        // Use the payload user id first, falling back to our stable userId:tabId key.
+        const keyUserId = String(presenceKey || '').split(':')[0];
+        const id = String(meta?.user_id || meta?.userId || meta?.user?.id || keyUserId || '');
         if (!isValidUuid(id)) continue;
         if (!next.has(id)) next.set(id, []);
-        next.get(id).push(meta);
+        next.get(id).push(meta || {});
       }
     }
   }
-  // Keep our tab's most recent local state until the server sync catches up.
+  // Keep the local tab's latest state until the server sync catches up.
   if (presenceOwnerId) {
     const local = (presencePayloads.get(presenceOwnerId) || []).find(item => item.tab_id === presenceTabId);
     if (local) {
@@ -238,7 +249,12 @@ async function trackPresence(force = false) {
   presencePayloads.set(ownId, rows);
   renderPresenceIndicators();
   try {
-    await presenceChannel.track(payload);
+    const channel = presenceChannel;
+    const response = await channel.track(payload);
+    if (channel !== presenceChannel) return;
+    if (response?.status && response.status !== 'ok') {
+      console.warn('PRESENCE TRACK STATUS', response.status, response.error || '');
+    }
   } catch (error) {
     console.warn('PRESENCE TRACK', error);
   }
@@ -253,33 +269,72 @@ function notePresenceActivity() {
 
 async function setupPresenceTracking() {
   if (!currentUser || !supabase) return;
-  if (presenceChannel && presenceOwnerId === String(currentUser.id)) return;
-  stopPresenceTracking();
-  presenceOwnerId = String(currentUser.id);
-  presenceActivityAt = Date.now();
-  presenceLastTrackAt = 0;
-  const topic = 'xifre:presence:global';
-  const channel = supabase.channel(topic, {
-    config: { private: true, presence: { key: `${presenceOwnerId}:${presenceTabId}` } }
-  });
-  presenceChannel = channel;
-  channel
-    .on('presence', { event: 'sync' }, rebuildPresencePayloads)
-    .on('presence', { event: 'join' }, rebuildPresencePayloads)
-    .on('presence', { event: 'leave' }, rebuildPresencePayloads)
-    .subscribe(status => {
-      if (channel !== presenceChannel) return;
-      if (status === 'SUBSCRIBED') {
-        presenceLastTrackAt = 0;
-        void trackPresence(true);
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        console.warn('PRESENCE CHANNEL', status);
+  const requestedOwner = String(currentUser.id);
+  if (presenceChannel && presenceOwnerId === requestedOwner) return;
+  if (presenceSetupPromise) {
+    try { await presenceSetupPromise; } catch (_) { /* handled by the creator */ }
+    if (presenceChannel && presenceOwnerId === requestedOwner) return;
+  }
+
+  presenceSetupPromise = (async () => {
+    stopPresenceTracking();
+    if (!currentUser || String(currentUser.id) !== requestedOwner) return;
+    presenceOwnerId = requestedOwner;
+    presenceActivityAt = Date.now();
+    presenceLastTrackAt = 0;
+
+    // Private Realtime channels need the current Auth JWT when subscribing.
+    try {
+      const sessionResult = await supabase.auth.getSession();
+      if (sessionResult.error) throw sessionResult.error;
+      if (!currentUser || String(currentUser.id) !== requestedOwner) return;
+      const accessToken = sessionResult.data?.session?.access_token;
+      if (accessToken) await supabase.realtime.setAuth(accessToken);
+    } catch (error) {
+      console.warn('PRESENCE AUTH', error);
+    }
+    if (!currentUser || String(currentUser.id) !== requestedOwner) return;
+
+    const topic = 'xifre:presence:global';
+    const channel = supabase.channel(topic, {
+      config: {
+        private: true,
+        presence: { enabled: true, key: `${requestedOwner}:${presenceTabId}` }
       }
     });
-  if (presenceTrackTimer) clearInterval(presenceTrackTimer);
-  if (presenceRenderTimer) clearInterval(presenceRenderTimer);
-  presenceTrackTimer = setInterval(() => { if (currentUser) void trackPresence(true); }, 60000);
-  presenceRenderTimer = setInterval(renderPresenceIndicators, 30000);
+    presenceChannel = channel;
+    channel
+      .on('presence', { event: 'sync' }, rebuildPresencePayloads)
+      .on('presence', { event: 'join' }, rebuildPresencePayloads)
+      .on('presence', { event: 'leave' }, rebuildPresencePayloads)
+      .subscribe((status, error) => {
+        if (channel !== presenceChannel) return;
+        if (status === 'SUBSCRIBED') {
+          presenceLastTrackAt = 0;
+          void trackPresence(true);
+          // Reconcile after the server has applied the initial presence sync.
+          setTimeout(() => { if (channel === presenceChannel) rebuildPresencePayloads(); }, 250);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('PRESENCE CHANNEL', status, error || '');
+        }
+      });
+
+    if (presenceTrackTimer) clearInterval(presenceTrackTimer);
+    if (presenceRenderTimer) clearInterval(presenceRenderTimer);
+    // Heartbeats keep the connected session visible; user activity determines online vs away.
+    presenceTrackTimer = setInterval(() => {
+      if (currentUser && String(currentUser.id) === requestedOwner) void trackPresence(true);
+    }, 30000);
+    presenceRenderTimer = setInterval(renderPresenceIndicators, 15000);
+  })();
+
+  try {
+    await presenceSetupPromise;
+  } catch (error) {
+    console.warn('PRESENCE SETUP', error);
+  } finally {
+    presenceSetupPromise = null;
+  }
 }
 
 function stopPresenceTracking() {
@@ -434,6 +489,9 @@ return date.toDateString() === now.toDateString()
 
 function showScreen(name) {
 if (!screens.includes(name)) name = 'landing';
+// The application shell is not part of `screens`; always deactivate it when
+// returning to landing/login/register/email, otherwise it remains above the landing.
+$('#main-screen')?.classList.remove('active');
 screens.forEach(key => document.getElementById(`${key}-screen`)?.classList.toggle('active', key === name));
 }
 
@@ -729,6 +787,13 @@ async function logout() {
   closeAllModals();
   $('#settings-modal')?.classList.add('hidden');
   showScreen('landing');
+  // Explicitly force the landing state after Supabase's SIGNED_OUT event has settled.
+  setTimeout(() => {
+    if (!currentUser && !appStarted) {
+      $('#main-screen')?.classList.remove('active');
+      showScreen('landing');
+    }
+  }, 0);
 }
 
 function closeAllModals() {
@@ -2600,10 +2665,17 @@ $$('.people-panel').forEach(p=>p.classList.toggle('active',p.id===`people-${tab=
 /* Event wiring */
 /* ------------------------------------------------------------------------ */
 function bind() {
-// Presence activity is intentionally low-frequency; it tracks online/away without sending every mouse movement.
+// Presence activity is low-frequency; mouse movement only refreshes activity every 15 seconds.
 document.addEventListener('pointerdown', notePresenceActivity, { passive: true });
 document.addEventListener('keydown', notePresenceActivity, true);
 document.addEventListener('touchstart', notePresenceActivity, { passive: true });
+let lastPointerPresenceNotice = 0;
+document.addEventListener('pointermove', () => {
+  const now = Date.now();
+  if (now - lastPointerPresenceNotice < 15000) return;
+  lastPointerPresenceNotice = now;
+  notePresenceActivity();
+}, { passive: true });
 // Un solo submit handler por formulario.
 $('#login-form')?.addEventListener('submit', event => {
 event.preventDefault();
@@ -2834,6 +2906,7 @@ storageKey: 'xifre-auth-v9'
 supabase.auth.onAuthStateChange((event, session) => {
 setTimeout(() => {
 if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session) {
+if (session.access_token) void supabase.realtime.setAuth(session.access_token).catch(error => console.warn('REALTIME AUTH REFRESH', error));
 void startApplication(session);
 return;
 }
