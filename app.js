@@ -1,6 +1,11 @@
 (() => {
 'use strict';
 
+const CHAT_MEDIA_BUCKET = 'xifre-chat-media';
+const CHAT_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
+const CHAT_MESSAGE_MAX_CHARS = 2000;
+const CHAT_MESSAGE_WITH_IMAGE_MAX_TEXT = 1800;
+const CHAT_IMAGE_MARKER_PREFIX = '[[XIFRE_IMAGE:';
 const CONFIG = {
 url: 'https://doppekualeyvrlbtumze.supabase.co',
 key: 'sb_publishable_96LHpw9bFMWX6tAl6p_6qA__ZANADwE'
@@ -73,6 +78,17 @@ let presenceOwnerId = null;
 const presenceTabId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const PRESENCE_IDLE_MS = 5 * 60 * 1000;
 let pendingExternalUrl = '';
+let pendingChatAttachment = null;
+let pendingChatAttachmentObjectUrl = null;
+let pendingChatAttachmentGeneration = 0;
+let keyboardOpen = false;
+let keyboardShift = false;
+let keyboardSymbols = false;
+let remoteTypingUsers = new Map();
+let remoteTypingTimers = new Map();
+const signedChatMediaCache = new Map();
+let keyboardWordUsageCache = null;
+let keyboardWordUsageOwner = null;
 
 const screens = ['landing', 'login', 'register', 'email'];
 
@@ -773,6 +789,12 @@ async function logout() {
   currentConversation = null;
   currentConversationData = null;
   currentMembers = [];
+  signedChatMediaCache.clear();
+  keyboardWordUsageCache = null;
+  keyboardWordUsageOwner = null;
+  clearPendingChatAttachment(false);
+  closeAttachmentMenu();
+  closeCatalanKeyboard();
   conversationCache = [];
   friendCache = [];
   memberCache.clear();
@@ -1106,7 +1128,8 @@ const unread = Number(conversation.unread_count || 0);
 const mentioned = !!conversation.has_mention;
 row.className = `conversation${String(currentConversation)===String(conversation.id)?' active':''}${unread?' unread':''}${isGroup?' group-conversation':''}`;
 const peerId = isGroup ? '' : conversationPeerId(conversation);
-row.innerHTML = `${presenceAvatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color,peerId,'conversation-avatar-wrap')}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(conversation.last_message || (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación'))}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
+const previewText = conversation.last_message ? messagePreviewText(conversation.last_message) : (isGroup ? `${conversation.member_count||0} miembros` : 'Conversación');
+row.innerHTML = `${presenceAvatarHTML(label, conversation.avatar_url, isGroup?'group':'private','conversation-avatar-image',conversation.avatar_color,peerId,'conversation-avatar-wrap')}<span class="conversation-copy"><span class="conversation-name">${esc(label)}</span><span class="conversation-preview ${conversation.message_type==='system'?'conversation-system':''}">${esc(previewText)}</span></span><span class="conversation-tail">${mentioned?'<span class="conversation-mention-badge">@</span>':''}${unread?`<span class="conversation-unread-badge">${unread>99?'99+':unread}</span>`:''}<span class="conversation-meta">${esc(formatListTime(conversation.last_message_at))}</span></span>`;
 row.addEventListener('click',()=>openConversation(conversation.id,conversation));
 row.addEventListener('contextmenu',e=>{e.preventDefault(); openConversationMenu(conversation,e.clientX,e.clientY);});
 list.appendChild(row);
@@ -1176,6 +1199,12 @@ async function openConversation(id, cached = null) {
     conversation = conversationCache.find(c => String(c.id) === conversationId);
   }
   if (!conversation || openSequence !== conversationOpenSequence) return false;
+
+  // Never carry a pending image into another DM/group by accident.
+  if (String(currentConversation || '') !== conversationId && pendingChatAttachment) {
+    clearPendingChatAttachment(false);
+    toast('El adjunto se ha quitado porque has cambiado de conversación.', 'info');
+  }
 
   try {
     currentConversation = conversationId;
@@ -1257,6 +1286,168 @@ function messageObject(row) {
 return { ...row };
 }
 
+function isSafeChatMediaPath(path) {
+  return typeof path === 'string' && /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[a-z0-9_-]{8,100}\.(?:png|jpe?g|webp|gif)$/i.test(path);
+}
+
+function parseImageAttachmentContent(content) {
+  const source = String(content || '');
+  const match = source.match(/^\[\[XIFRE_IMAGE:([^\]\r\n]+)\]\](?:\r?\n([\s\S]*))?$/i);
+  if (!match || !isSafeChatMediaPath(match[1])) return null;
+  return { path: match[1], caption: match[2] || '' };
+}
+
+function makeImageAttachmentContent(path, caption = '') {
+  const cleanCaption = String(caption || '').trim();
+  return `${CHAT_IMAGE_MARKER_PREFIX}${path}]]${cleanCaption ? `\n${cleanCaption}` : ''}`;
+}
+
+function messagePreviewText(content) {
+  const attachment = parseImageAttachmentContent(content);
+  if (!attachment) return String(content || '');
+  const caption = attachment.caption.trim();
+  return caption ? `🖼️ ${caption}` : '🖼️ Imagen adjunta';
+}
+
+async function getSignedChatMediaUrl(path) {
+  if (!isSafeChatMediaPath(path)) throw new Error('Ruta de imagen no válida.');
+  const cached = signedChatMediaCache.get(path);
+  if (cached && cached.expiresAt > Date.now() + 90_000) return cached.url;
+  const { data, error } = await supabase.storage.from(CHAT_MEDIA_BUCKET).createSignedUrl(path, 3600);
+  if (error) throw error;
+  const url = data?.signedUrl || data?.signedURL;
+  if (!url) throw new Error('Supabase no devolvió el enlace temporal de la imagen.');
+  signedChatMediaCache.set(path, { url, expiresAt: Date.now() + 55 * 60 * 1000 });
+  return url;
+}
+
+async function resolveMessageAttachmentUrls(messages) {
+  // Limit simultaneous signed-URL requests when opening long chats with many images.
+  const queue = (messages || []).filter(message => parseImageAttachmentContent(message?.content));
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const message = queue[cursor++];
+      const attachment = parseImageAttachmentContent(message?.content);
+      if (!attachment) continue;
+      try {
+        message.attachment_signed_url = await getSignedChatMediaUrl(attachment.path);
+        message.attachment_load_error = false;
+      } catch (error) {
+        message.attachment_signed_url = '';
+        message.attachment_load_error = true;
+        // Do not fail message history because one attachment is missing or cannot be signed.
+        console.warn('CHAT IMAGE URL', error?.message || error);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, queue.length) }, () => worker()));
+  return messages;
+}
+
+function chatAttachmentExtension(file) {
+  const map = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+  return map[String(file?.type || '').toLowerCase()] || '';
+}
+
+function validateChatAttachment(file) {
+  if (!file) throw new Error('Selecciona una imagen o GIF.');
+  if (!chatAttachmentExtension(file)) throw new Error('Formato no admitido. Usa PNG, JPG, WEBP o GIF.');
+  if (file.size > CHAT_MEDIA_MAX_BYTES) throw new Error('La imagen supera el límite de 8 MB.');
+  if (file.size <= 0) throw new Error('El archivo está vacío.');
+  return true;
+}
+
+function createChatFileId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function syncAttachmentMessageLimit() {
+  const input = $('#message-input');
+  if (!input) return;
+  input.maxLength = pendingChatAttachment ? CHAT_MESSAGE_WITH_IMAGE_MAX_TEXT : CHAT_MESSAGE_MAX_CHARS;
+  updateMessageCharacterCount();
+}
+
+function setPendingChatAttachment(file) {
+  if (!currentConversation) { toast('Selecciona una conversación antes de adjuntar una imagen.', 'info'); return false; }
+  try { validateChatAttachment(file); }
+  catch (error) { toast(error.message, 'error'); return false; }
+  clearPendingChatAttachment(false);
+  pendingChatAttachment = file;
+  pendingChatAttachmentGeneration++;
+  pendingChatAttachmentObjectUrl = URL.createObjectURL(file);
+  const preview = $('#chat-attachment-preview');
+  const image = $('#chat-attachment-preview-image');
+  if (image) {
+    image.src = pendingChatAttachmentObjectUrl;
+    image.alt = `Vista previa de ${file.name || 'imagen adjunta'}`;
+  }
+  setText('chat-attachment-preview-name', file.name || (file.type === 'image/gif' ? 'imagen.gif' : 'imagen adjunta'));
+  preview?.classList.remove('hidden');
+  $('#attachment-menu')?.classList.add('hidden');
+  $('#composer-plus-button')?.setAttribute('aria-expanded', 'false');
+  syncAttachmentMessageLimit();
+  updateSendState();
+  $('#message-input')?.focus({ preventScroll: true });
+  return true;
+}
+
+function clearPendingChatAttachment(restoreInput = true) {
+  pendingChatAttachment = null;
+  pendingChatAttachmentGeneration++;
+  if (pendingChatAttachmentObjectUrl) {
+    try { URL.revokeObjectURL(pendingChatAttachmentObjectUrl); } catch {}
+  }
+  pendingChatAttachmentObjectUrl = null;
+  const image = $('#chat-attachment-preview-image');
+  if (image) image.removeAttribute('src');
+  $('#chat-attachment-preview')?.classList.add('hidden');
+  const fileInput = $('#chat-attachment-input');
+  if (fileInput) fileInput.value = '';
+  syncAttachmentMessageLimit();
+  updateSendState();
+  if (restoreInput) $('#message-input')?.focus({ preventScroll: true });
+}
+
+function toggleAttachmentMenu() {
+  const menu = $('#attachment-menu');
+  const button = $('#composer-plus-button');
+  if (!menu || !button || button.disabled) return;
+  if (!currentConversation) { toast('Selecciona una conversación antes de adjuntar una imagen.', 'info'); return; }
+  const opening = menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !opening);
+  button.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (opening) {
+    const rect = button.getBoundingClientRect();
+    const width = 245;
+    menu.style.width = `${Math.min(width, window.innerWidth - 20)}px`;
+    menu.style.left = `${Math.max(10, Math.min(rect.left, window.innerWidth - Math.min(width, window.innerWidth - 20) - 10))}px`;
+    menu.style.top = `${Math.max(10, rect.top - 76)}px`;
+  }
+}
+
+function closeAttachmentMenu() {
+  $('#attachment-menu')?.classList.add('hidden');
+  $('#composer-plus-button')?.setAttribute('aria-expanded', 'false');
+}
+
+async function uploadChatAttachment(file, conversationId) {
+  validateChatAttachment(file);
+  const extension = chatAttachmentExtension(file);
+  const path = `${currentUser.id}/${conversationId}/${createChatFileId()}.${extension}`;
+  const { error } = await supabase.storage.from(CHAT_MEDIA_BUCKET).upload(path, file, {
+    upsert: false,
+    cacheControl: '3600',
+    contentType: file.type,
+    metadata: { originalName: String(file.name || `imagen.${extension}`).slice(0, 180) }
+  });
+  if (error) throw error;
+  return path;
+}
+
+
 async function loadMessages(conversationId, scrollToBottom = false) {
   const requestedId = String(conversationId || '');
   if (!requestedId || !currentUser) return;
@@ -1273,8 +1464,12 @@ async function loadMessages(conversationId, scrollToBottom = false) {
   }
   if (response.error) throw response.error;
   if (String(currentUser?.id || '') !== ownerAtStart || String(currentConversation || '') !== requestedId) return;
+  if (messageLoadSequences.get(requestedId) !== sequence) return;
+  const messages = (response.data || []).map(messageObject);
+  await resolveMessageAttachmentUrls(messages);
+  if (String(currentUser?.id || '') !== ownerAtStart || String(currentConversation || '') !== requestedId) return;
   if (messageLoadSequences.get(requestedId) !== sequence) return; // Ignore out-of-order poll/realtime responses.
-  renderMessages((response.data || []).map(messageObject), scrollToBottom);
+  renderMessages(messages, scrollToBottom);
   void loadMessageReactions(requestedId).catch(error => console.debug('REACTIONS LOAD', error));
 }
 
@@ -1284,7 +1479,8 @@ function messageRenderSignature(message) {
     message?.sender_username, message?.sender_avatar_url, message?.sender_avatar_color,
     message?.reply_to, message?.reply_sender_id, message?.reply_sender_username,
     message?.reply_sender_avatar_url, message?.reply_content, message?.mentions || [],
-    !!message?.mention_everyone, message?.message_type || 'user'
+    !!message?.mention_everyone, message?.message_type || 'user',
+    message?.attachment_signed_url || '', !!message?.attachment_load_error
   ]);
 }
 
@@ -1477,6 +1673,13 @@ function renderOneMessage(message, profiles = new Map(), existingNode = null) {
     avatar_color: message.sender_avatar_color || cached.avatar_color || ''
   };
   const mentioned = !mine && messageMentionsMe(message);
+  const attachment = parseImageAttachmentContent(message.content);
+  const bodyText = attachment ? attachment.caption : String(message.content || '');
+  const imageMarkup = attachment
+    ? (message.attachment_signed_url
+      ? `<div class="message-image-attachment"><img src="${esc(message.attachment_signed_url)}" alt="Imagen adjunta" loading="lazy" decoding="async"></div>`
+      : `<div class="message-image-attachment message-image-unavailable"><span>${message.attachment_load_error ? 'No se pudo cargar esta imagen' : 'Cargando imagen…'}</span></div>`)
+    : '';
   const stamp = formatMessageTime(message.created_at);
   const exactStamp = formatExactMessageTime(message.created_at);
   const row = document.createElement('article');
@@ -1489,9 +1692,9 @@ function renderOneMessage(message, profiles = new Map(), existingNode = null) {
     <span class="message-grouped-time" aria-hidden="true">${esc(formatTime(message.created_at))}</span>
     <span class="message-avatar">${avatarHTML(sender.username, sender.avatar_url, 'private', '', sender.avatar_color)}${presenceDotHTML(message.sender_id, 'presence-dot-message')}</span>
     <div class="message-body">
-      ${message.reply_to ? `<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'private', '', message.reply_sender_avatar_color || '')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(message.reply_content || '')}</span></div></div>` : ''}
+      ${message.reply_to ? `<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'private', '', message.reply_sender_avatar_color || '')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(messagePreviewText(message.reply_content || ''))}</span></div></div>` : ''}
       <div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-time" title="${esc(exactStamp)}">${esc(stamp)}</span>${message.edited_at ? '<span class="message-edited" title="Este mensaje ha sido editado">(editado)</span>' : ''}</div>
-      <div class="message-content">${renderMessageContent(message.content, message)}${message.edited_at ? '<span class="message-edited-inline"> (editado)</span>' : ''}</div>
+      <div class="message-content">${imageMarkup}${bodyText.trim() ? `<div class="message-caption">${renderMessageContent(bodyText, message)}</div>` : ''}${message.edited_at ? '<span class="message-edited-inline"> (editado)</span>' : ''}</div>
       <div class="message-reactions" data-reactions-for="${esc(id)}"></div>
     </div>
     <div class="message-actions">
@@ -1516,7 +1719,8 @@ function startEditMessage(message, row) {
   const contentNode = $('.message-content', row);
   if (!contentNode) return;
   editingMessageId = String(message.id);
-  const initial = String(message.content || '');
+  const originalAttachment = parseImageAttachmentContent(message.content);
+  const initial = originalAttachment ? originalAttachment.caption : String(message.content || '');
   const wrap = document.createElement('div');
   wrap.className = 'message-edit-wrap';
   const editor = document.createElement('textarea');
@@ -1533,8 +1737,8 @@ function startEditMessage(message, row) {
   contentNode.replaceWith(wrap);
   const finishLocal = () => {
     if (String(editingMessageId) === String(message.id)) editingMessageId = null;
-    const replacement = document.createElement('div'); replacement.className = 'message-content'; replacement.innerHTML = renderMessageContent(initial, message);
-    wrap.replaceWith(replacement);
+    // Restore the untouched original content node, including any image preview and reactions.
+    if (wrap.isConnected) wrap.replaceWith(contentNode);
   };
   cancel.addEventListener('click', finishLocal);
   save.addEventListener('click', async () => {
@@ -1552,11 +1756,13 @@ function startEditMessage(message, row) {
 }
 
 async function saveMessageEdit(message, updatedContent, row) {
-  const content = String(updatedContent || '').trim();
-  if (!content) throw new Error('El mensaje no puede estar vacío.');
-  if (content.length > 2000) throw new Error('El mensaje no puede superar los 2000 caracteres.');
+  const originalAttachment = parseImageAttachmentContent(message.content);
+  const editedText = String(updatedContent || '').trim();
+  if (!editedText && !originalAttachment) throw new Error('El mensaje no puede estar vacío.');
+  const content = originalAttachment ? makeImageAttachmentContent(originalAttachment.path, editedText) : editedText;
+  if (content.length > 2000) throw new Error('El mensaje editado es demasiado largo.');
   const conversationId = String(message.conversation_id || currentConversation || '');
-  const derived = deriveMentions(content);
+  const derived = deriveMentions(editedText);
   const mentionedIds = new Set(derived.ids.filter(isValidUuid));
   // Responder también notifica/resalta al autor original de la respuesta.
   const replySenderId = String(message.reply_sender_id || '');
@@ -1577,6 +1783,8 @@ async function saveMessageEdit(message, updatedContent, row) {
     ...message,
     ...updated,
     content,
+    attachment_signed_url: message.attachment_signed_url || '',
+    attachment_load_error: !!message.attachment_load_error,
     edited_at: updated.edited_at || new Date().toISOString(),
     mentions: Array.isArray(updated.mentions) ? updated.mentions : [...mentionedIds],
     mention_everyone: Object.prototype.hasOwnProperty.call(updated, 'mention_everyone') ? !!updated.mention_everyone : !!derived.everyone
@@ -1605,7 +1813,7 @@ const row=$(`[data-message-id="${CSS.escape(String(id))}"]`,$('#messages')); if(
 function setReplyTo(message) {
 replyTarget = message;
 setText('replying-name', `@${message.sender_username || 'usuario'}`);
-setText('replying-content', message.content || '');
+setText('replying-content', messagePreviewText(message.content || ''));
 $('#reply-bar')?.classList.remove('hidden');
 $('#message-input')?.focus();
 }
@@ -1731,8 +1939,9 @@ function updateMessageCharacterCount() {
 function updateSendState() {
   const input = $('#message-input');
   const button = $('#send-button');
-  if (button) button.disabled = !currentConversation || sendInFlight || !String(input?.value || '').trim();
+  if (button) button.disabled = !currentConversation || sendInFlight || (!String(input?.value || '').trim() && !pendingChatAttachment);
   updateMessageCharacterCount();
+  updateKeyboardSuggestions();
 }
 
 function deriveMentions(content) {
@@ -1753,23 +1962,53 @@ async function sendMessage() {
   if (sendInFlight || !currentUser || !currentConversation) return;
   const input = $('#message-input');
   const rawDraft = String(input?.value || '');
-  const content = rawDraft.trim();
-  if (!content) return;
+  const textContent = rawDraft.trim();
+  const sendingAttachment = pendingChatAttachment;
+  const attachmentGeneration = pendingChatAttachmentGeneration;
+  if (!textContent && !sendingAttachment) return;
+  if (sendingAttachment && textContent.length > CHAT_MESSAGE_WITH_IMAGE_MAX_TEXT) {
+    toast(`El texto con imagen no puede superar ${CHAT_MESSAGE_WITH_IMAGE_MAX_TEXT} caracteres.`, 'error');
+    return;
+  }
+  if (!sendingAttachment && textContent.length > CHAT_MESSAGE_MAX_CHARS) {
+    toast(`El mensaje no puede superar ${CHAT_MESSAGE_MAX_CHARS} caracteres.`, 'error');
+    return;
+  }
   const conversationId = String(currentConversation);
   const sendingReply = replyTarget;
   const button = $('#send-button');
   let persisted = false;
+  let uploadedPath = '';
+  // Capture the current chat's mentions before awaiting Storage; the user may click another chat meanwhile.
+  const derived = deriveMentions(textContent);
+  const safeMentions = new Set(derived.ids.filter(isValidUuid));
+  const replySenderId = String(sendingReply?.sender_id || '');
+  if (isValidUuid(replySenderId) && replySenderId !== String(currentUser.id)) safeMentions.add(replySenderId);
   sendInFlight = true;
   if (button) button.disabled = true;
+  $('#composer-plus-button')?.setAttribute('disabled', 'disabled');
   try {
-    const derived = deriveMentions(content);
-    const safeMentions = new Set(derived.ids.filter(isValidUuid));
-    const replySenderId = String(sendingReply?.sender_id || '');
-    if (isValidUuid(replySenderId) && replySenderId !== String(currentUser.id)) safeMentions.add(replySenderId);
-
+    let contentToPersist = textContent;
+    // Upload privately first; only the object path (never a public URL) is stored in messages.
+    if (sendingAttachment) {
+      const path = `${currentUser.id}/${conversationId}/${createChatFileId()}.${chatAttachmentExtension(sendingAttachment)}`;
+      const imageMarkerLength = makeImageAttachmentContent(path, '').length;
+      if (textContent.length + imageMarkerLength + (textContent ? 1 : 0) > CHAT_MESSAGE_MAX_CHARS) {
+        throw new Error('El texto es demasiado largo para adjuntarlo a esta imagen.');
+      }
+      uploadedPath = path;
+      const { error: uploadError } = await supabase.storage.from(CHAT_MEDIA_BUCKET).upload(path, sendingAttachment, {
+        upsert: false,
+        cacheControl: '3600',
+        contentType: sendingAttachment.type,
+        metadata: { originalName: String(sendingAttachment.name || `imagen.${chatAttachmentExtension(sendingAttachment)}`).slice(0, 180) }
+      });
+      if (uploadError) throw uploadError;
+      contentToPersist = makeImageAttachmentContent(path, textContent);
+    }
     const { data, error } = await supabase.rpc('xifre_send_message', {
       p_conversation_id: conversationId,
-      p_content: content,
+      p_content: contentToPersist,
       p_reply_to: sendingReply?.id || null,
       p_mentions: [...safeMentions],
       p_mention_everyone: !!derived.everyone
@@ -1778,12 +2017,16 @@ async function sendMessage() {
     persisted = true;
     messageLoadSequences.set(conversationId, (messageLoadSequences.get(conversationId) || 0) + 1);
     const sent = Array.isArray(data) ? data[0] : data;
+    if (uploadedPath && sent) {
+      try { sent.attachment_signed_url = await getSignedChatMediaUrl(uploadedPath); sent.attachment_load_error = false; }
+      catch (error) { sent.attachment_signed_url = ''; sent.attachment_load_error = true; console.warn('NEW IMAGE SIGN URL', error); }
+    }
     if (String(currentConversation) !== conversationId) {
+      if (pendingChatAttachment === sendingAttachment && sendingAttachment) clearPendingChatAttachment(false);
       toast('El mensaje se ha enviado en la conversación anterior.', 'success');
       return;
     }
 
-    // Clear the exact submitted draft immediately after server confirmation, before UI refreshes.
     if (input && input.value === rawDraft) {
       input.value = '';
       resizeMessageInput();
@@ -1792,7 +2035,9 @@ async function sendMessage() {
       $('#mention-picker')?.classList.add('hidden');
       stopTypingBroadcast();
     }
-
+    if (sendingAttachment && pendingChatAttachment === sendingAttachment && pendingChatAttachmentGeneration === attachmentGeneration) {
+      clearPendingChatAttachment(false);
+    }
     if (sent?.id) {
       if (sendingReply) {
         sent.reply_sender_id = sent.reply_sender_id || sendingReply.sender_id;
@@ -1806,15 +2051,19 @@ async function sendMessage() {
     }
     const box = $('#messages');
     if (box) box.scrollTop = box.scrollHeight;
+    if (textContent) recordComposerWordUsage(textContent);
 
-    // Best-effort refresh is separate from send success; never ask the user to resend
-    // a message which the server has already stored.
+    // A list/read-state refresh must never make an already-sent message appear unsent.
     const refreshes = await Promise.allSettled([
       loadConversations(),
       supabase.rpc('xifre_mark_read', { p_conversation_id: conversationId })
     ]);
     for (const result of refreshes) if (result.status === 'rejected' || result.value?.error) console.warn('POST-SEND REFRESH', result.reason || result.value?.error);
   } catch (error) {
+    if (uploadedPath && !persisted) {
+      try { await supabase.storage.from(CHAT_MEDIA_BUCKET).remove([uploadedPath]); }
+      catch (cleanupError) { console.warn('ORPHAN IMAGE CLEANUP', cleanupError); }
+    }
     if (persisted) {
       console.warn('MESSAGE SENT; UI RECOVERY', error);
       toast('El mensaje se ha enviado, pero no se ha actualizado la vista. No hace falta reenviarlo.', 'info');
@@ -1824,7 +2073,9 @@ async function sendMessage() {
     }
   } finally {
     sendInFlight = false;
+    $('#composer-plus-button')?.removeAttribute('disabled');
     updateSendState();
+    if (input?.isConnected && currentConversation) input.focus({ preventScroll: true });
   }
 }
 /* ------------------------------------------------------------------------ */
@@ -2095,7 +2346,7 @@ if (messagePoll) clearInterval(messagePoll);
 messagePoll = null;
 if (typingStopTimer) clearTimeout(typingStopTimer);
 typingStopTimer = null;
-setTypingVisible(false);
+clearRemoteTypingUsers();
 }
 
 function setupMessageChannel(conversationId) {
@@ -2139,24 +2390,62 @@ function setupMessageChannel(conversationId) {
   }, 3000);
 }
 
-function setupTypingChannel(conversationId) {
-if (typingChannel) supabase.removeChannel(typingChannel);
-setTypingVisible(false);
-typingChannel = supabase.channel(`xifre:typing:${conversationId}`, { config: { private: true, broadcast: { self: false } } })
-.on('broadcast', { event: 'typing' }, payload => {
-const senderId = String(payload.payload?.user_id || '');
-if (!senderId || senderId === String(currentUser.id)) return;
-if (payload.payload?.typing) {
-const sender = currentMembers.find(m => String(m.user_id) === senderId);
-setTypingVisible(true, sender?.username || payload.payload?.username || 'Alguien');
-setTimeout(() => setTypingVisible(false, sender?.username || ''), 3500);
-} else {
-setTypingVisible(false);
+function clearRemoteTypingUsers() {
+  for (const timer of remoteTypingTimers.values()) clearTimeout(timer);
+  remoteTypingTimers.clear();
+  remoteTypingUsers.clear();
+  setTypingVisible(false);
 }
-})
-.subscribe(status => {
-if (status === 'SUBSCRIBED') stopTypingBroadcast();
-});
+
+function refreshTypingIndicator() {
+  const names = [...remoteTypingUsers.values()].map(item => item.username).filter(Boolean);
+  const count = names.length;
+  const el = $('#typing-indicator');
+  if (!el) return;
+  el.classList.toggle('hidden', count === 0);
+  if (!count) return;
+  let label;
+  if (count >= 3) label = 'Varias personas están escribiendo...';
+  else if (count === 2) label = `${names[0]} y ${names[1]} están escribiendo...`;
+  else label = `${names[0]} está escribiendo...`;
+  setText('typing-text', label);
+  el.setAttribute('aria-label', label);
+}
+
+function setupTypingChannel(conversationId) {
+  if (typingChannel) supabase.removeChannel(typingChannel);
+  clearRemoteTypingUsers();
+  const channelConversationId = String(conversationId);
+  typingChannel = supabase.channel(`xifre:typing:${channelConversationId}`, { config: { private: true, broadcast: { self: false } } })
+    .on('broadcast', { event: 'typing' }, event => {
+      if (String(currentConversation || '') !== channelConversationId) return;
+      const payload = event?.payload || {};
+      const senderId = String(payload.user_id || '');
+      if (!senderId || senderId === String(currentUser?.id || '')) return; // never count our own typing
+      if (!payload.typing) {
+        remoteTypingUsers.delete(senderId);
+        const oldTimer = remoteTypingTimers.get(senderId);
+        if (oldTimer) clearTimeout(oldTimer);
+        remoteTypingTimers.delete(senderId);
+        refreshTypingIndicator();
+        return;
+      }
+      const member = currentMembers.find(item => getMemberId(item) === senderId);
+      const username = String(member?.username || payload.username || 'Alguien');
+      remoteTypingUsers.set(senderId, { username, lastSeen: Date.now() });
+      const oldTimer = remoteTypingTimers.get(senderId);
+      if (oldTimer) clearTimeout(oldTimer);
+      remoteTypingTimers.set(senderId, setTimeout(() => {
+        remoteTypingUsers.delete(senderId);
+        remoteTypingTimers.delete(senderId);
+        refreshTypingIndicator();
+      }, 4200));
+      refreshTypingIndicator();
+    })
+    .subscribe(status => {
+      if (status === 'SUBSCRIBED') stopTypingBroadcast();
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') clearRemoteTypingUsers();
+    });
 }
 
 async function broadcastTyping(isTyping) {
@@ -2182,10 +2471,10 @@ void broadcastTyping(false);
 }
 
 function setTypingVisible(visible, username = '') {
-const el = $('#typing-indicator');
-if (!el) return;
-el.classList.toggle('hidden', !visible);
-if (visible) setText('typing-text', `${username} está escribiendo...`);
+  const el = $('#typing-indicator');
+  if (!el) return;
+  el.classList.toggle('hidden', !visible);
+  if (visible && username) setText('typing-text', `${username} está escribiendo...`);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -2629,6 +2918,270 @@ function closeModal(id) {
 $(`#${id}`)?.classList.add('hidden');
 }
 
+/* ------------------------------------------------------------------------ */
+/* Catalan on-screen keyboard + locally learned word suggestions             */
+/* ------------------------------------------------------------------------ */
+const CATALAN_COMMON_WORDS = (`que no de la el a i en un una es per amb del els les això aquest aquesta aquests aquestes aquell aquella aquells aquelles com més però també ja sí si perquè quan què qui on hi ho jo tu ell ella nosaltres vosaltres ells elles em et es ens us li els les se me te la li ho li'n n'hi d'hi m' t' s' som ets és soc sóc estic està estan estem esteu ser estar haver tenir fer dir anar venir veure saber poder voler donar quedar posar parlar pensar passar trobar arribar deixar portar mirar necessitar ajudar intentar semblar tornar sentir viure treballar jugar estudiar llegir escriure menjar beure dormir caminar sortir entrar obrir tancar venir anar fer dir tenir posar fer-ho avui ahir demà ara després abans sempre mai sovint potser gaire molt massa poc prou millor pitjor bé malament aquí allà davant darrere dins fora amunt avall lluny prop casa escola classe pati carrer ciutat poble país món dia dies setmana mes any hora hores minut minuts moment temps tarda matí nit migdia vespre matinada dilluns dimarts dimecres dijous divendres dissabte diumenge gener febrer març abril maig juny juliol agost setembre octubre novembre desembre hola adeu adéu gràcies merci sisplau siusplau perdó perdona perdoneu bon dia bona tarda bona nit fins després fins demà fins aviat què tal com estàs com va tot molt bé tot bé perfecte genial guai d'acord acord vale d'acord clar exacte correcte cap problema no passa res ho sento no ho sé no ho entenc entenc entès crec penso vull voldria puc pots podem podeu poden tenim tenim-ne anem fem fem-ho digues explica pregunta resposta missatge missatges grup grups amic amiga amics amigues persona persones usuari usuària nom cognom foto perfil compte missió tasca deures feina projecte examen nota professor professora alumne alumna escola institut classe assignatura català castellà anglès matemàtiques ciències història geografia música educació esport futbol bàsquet videojoc joc jocs música cançó pel·lícula sèrie llibre ordinador mòbil telèfon internet pàgina web aplicació programa fitxer imatge foto vídeo arxiu document enllaç problema error solució ajuda pregunta resposta idea coses cosa alguna alguna cosa res tot tothom ningú algú cadascú mateix mateixa diferents iguals primer segon tercer últim altra altre altres mateixos mateixos nova nou noves nous petit petita petits petites gran grans llarg llarga curt curta fàcil difícil interessant important necessari possible impossible ràpid ràpida lent lenta bon bona bons bones dolent dolenta dolents dolentes divertit divertida feliç content contenta trist trista cansat cansada ocupat ocupada lliure disponible connectat connectada en línia offline online preparat preparada llest llesta correcte correcte correcte millorament demanar enviar rebre afegir eliminar canviar guardar pujar baixar compartir oblidar recordar esperar començar acabar continuar parar provar funcionar arreglar crear actualitzar canviar comprovar revisar mirar trobar buscar cercar escollir triar decidir respondre contestar acceptar rebutjar convidar afegir sol·licitar instal·lar descarregar executar guardar carregar imprimir copiar enganxar moure seleccionar obrir guardar tancar mostrar amagar activar desactivar permetre utilitzar usar fer servir entrar sortir iniciar sessió tancar sessió m'agrada m'agraden m'encanta m'encanten no m'agrada està bé està malament és veritat de debò segur segurament pot ser clar que sí clar que no fins i tot per això per tant en canvi per exemple sobretot almenys de moment a més a més igualment també tampoc encara ja que encara que tot i que mentre perquè doncs llavors així encara aviat tarda massa de seguida gairebé només especialment exactament simplement bàsicament normalment probablement segurament realment literalment personalment sincerament francament potser no ho crec no ho recordo no m'importa m'importa no tinc ni idea tinc una idea ara mateix un moment un segon espera espera'm ara torno ara vinc què passa què vols què necessites què fem on ets on anem quan quedem a quina hora quin dia quina cosa quin problema quina solució ho miro t'ho miro t'ajudo t'ho envio t'ho passo te'l passo te la passo ho he fet ja ho he vist ho he enviat ho tinc no ho tinc encara no ja està fet falta falten minuts segons estona una estona una mica una mica més moltíssim bastant gairebé prou`).split(/\s+/u);
+
+const CATALAN_KEYBOARD_LAYOUTS = {
+  letters: [
+    ['1','2','3','4','5','6','7','8','9','0'],
+    ['q','w','e','r','t','y','u','i','o','p'],
+    ['a','s','d','f','g','h','j','k','l','ç'],
+    ['SHIFT','z','x','c','v','b','n','m','BACKSPACE'],
+    ['?123','à','è','é','í','ï','ò','ó','ú','ü'],
+    ['·',',','APOSTROPHE','SPACE','.','ENTER']
+  ],
+  symbols: [
+    ['1','2','3','4','5','6','7','8','9','0'],
+    ['@','#','€','%','&','-','+','(',')','/'],
+    ['*','"',':',';','!','?','¿','¡','BACKSPACE'],
+    ['ABC','_','\\','|','~','<','>','=','[',']'],
+    ['·',',','APOSTROPHE','SPACE','.','ENTER']
+  ]
+};
+
+function keyboardUsageStorageKey() {
+  return `xifre_cat_keyboard_usage_${String(currentUser?.id || 'local')}`;
+}
+function getKeyboardWordUsage() {
+  const owner = String(currentUser?.id || 'local');
+  if (keyboardWordUsageCache && keyboardWordUsageOwner === owner) return keyboardWordUsageCache;
+  let usage = {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(keyboardUsageStorageKey()) || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) usage = parsed;
+  } catch { usage = {}; }
+  keyboardWordUsageOwner = owner;
+  keyboardWordUsageCache = usage;
+  return usage;
+}
+function normalizeCatalanWord(word) {
+  return String(word || '').toLocaleLowerCase('ca').normalize('NFC');
+}
+function normalizeCatalanPrefix(word) {
+  return normalizeCatalanWord(word).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function recordComposerWordUsage(text) {
+  const usage = getKeyboardWordUsage();
+  const words = String(text || '').match(/[\p{L}·'’-]{2,32}/gu) || [];
+  for (const word of words) {
+    const normalized = normalizeCatalanWord(word);
+    usage[normalized] = Math.min(9999, Number(usage[normalized] || 0) + 1);
+  }
+  const entries = Object.entries(usage).sort((a,b) => Number(b[1]) - Number(a[1])).slice(0, 1200);
+  keyboardWordUsageCache = Object.fromEntries(entries);
+  try { localStorage.setItem(keyboardUsageStorageKey(), JSON.stringify(keyboardWordUsageCache)); } catch {}
+}
+function keyboardWordContext() {
+  const input = $('#message-input');
+  if (!input) return { prefix: '', start: 0, end: 0 };
+  const value = String(input.value || '');
+  const cursor = input.selectionStart ?? value.length;
+  const left = value.slice(0, cursor).match(/[\p{L}·'’-]+$/u)?.[0] || '';
+  const right = value.slice(cursor).match(/^[\p{L}·'’-]+/u)?.[0] || '';
+  return { prefix: left, start: cursor - left.length, end: cursor + right.length };
+}
+function keyboardSuggestionWords(prefix) {
+  const usage = getKeyboardWordUsage();
+  const common = [...new Set(CATALAN_COMMON_WORDS.filter(word => word.length > 0))];
+  const normalizedPrefix = normalizeCatalanPrefix(prefix);
+  const baseRank = new Map(common.map((word, index) => [normalizeCatalanWord(word), index]));
+  const learnedWords = Object.keys(usage);
+  const pool = [...new Set([...learnedWords, ...common])];
+  let words = normalizedPrefix
+    ? pool.filter(word => normalizeCatalanPrefix(word).startsWith(normalizedPrefix))
+    : pool.slice(0, 80);
+  words.sort((a,b) => {
+    const useDelta = Number(usage[normalizeCatalanWord(b)] || 0) - Number(usage[normalizeCatalanWord(a)] || 0);
+    if (useDelta) return useDelta;
+    return (baseRank.get(normalizeCatalanWord(a)) ?? 10000) - (baseRank.get(normalizeCatalanWord(b)) ?? 10000);
+  });
+  // Keep up to three distinct options and avoid suggesting the same normalized token twice.
+  const unique = [];
+  const seen = new Set();
+  for (const word of words) {
+    const key = normalizeCatalanWord(word);
+    if (!key || seen.has(key)) continue;
+    seen.add(key); unique.push(word);
+    if (unique.length === 3) break;
+  }
+  return unique;
+}
+function updateKeyboardSuggestions() {
+  const box = $('#keyboard-suggestions');
+  if (!box) return;
+  const context = keyboardWordContext();
+  const words = keyboardSuggestionWords(context.prefix);
+  box.innerHTML = '';
+  words.forEach(word => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'keyboard-suggestion';
+    button.dataset.keyboardSuggestion = word;
+    button.textContent = word;
+    box.appendChild(button);
+  });
+  if (!words.length) {
+    const fallback = document.createElement('span');
+    fallback.className = 'keyboard-suggestion-empty';
+    fallback.textContent = 'Escriu per veure suggeriments';
+    box.appendChild(fallback);
+  }
+}
+function renderCatalanKeyboard() {
+  const target = $('#catalan-keyboard-rows');
+  if (!target) return;
+  target.innerHTML = '';
+  const layout = keyboardSymbols ? CATALAN_KEYBOARD_LAYOUTS.symbols : CATALAN_KEYBOARD_LAYOUTS.letters;
+  layout.forEach(keys => {
+    const row = document.createElement('div');
+    row.className = 'catalan-keyboard-row';
+    for (const rawKey of keys) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'catalan-key';
+      let key = rawKey;
+      if (rawKey === 'SHIFT') { button.dataset.keyboardAction = 'shift'; button.classList.add('keyboard-special'); key = keyboardShift ? '⇧✓' : '⇧'; }
+      else if (rawKey === 'BACKSPACE') { button.dataset.keyboardAction = 'backspace'; button.classList.add('keyboard-special'); key = '⌫'; }
+      else if (rawKey === 'SPACE') { button.dataset.keyboardAction = 'space'; button.classList.add('keyboard-space'); key = 'Espai'; }
+      else if (rawKey === 'ENTER') { button.dataset.keyboardAction = 'enter'; button.classList.add('keyboard-special'); key = '↵'; }
+      else if (rawKey === '?123' || rawKey === 'ABC') { button.dataset.keyboardAction = 'symbols'; button.classList.add('keyboard-mode'); key = rawKey; }
+      else if (rawKey === 'APOSTROPHE') { key = '’'; button.dataset.keyboardKey = "'"; }
+      else button.dataset.keyboardKey = rawKey;
+      button.textContent = keyboardShift && /^[a-zçàèéíïòóúü]$/u.test(key) ? key.toLocaleUpperCase('ca') : key;
+      if (rawKey === 'SHIFT') button.title = 'Majúscules';
+      if (rawKey === 'BACKSPACE') button.title = 'Esborrar';
+      if (rawKey === 'SPACE') button.title = 'Espai';
+      if (rawKey === 'ENTER') button.title = 'Salt de línia';
+      row.appendChild(button);
+    }
+    target.appendChild(row);
+  });
+}
+function positionCatalanKeyboard() {
+  const popover = $('#catalan-keyboard-popover');
+  const button = $('#composer-keyboard-button');
+  if (!popover || !button || !keyboardOpen) return;
+  const rect = button.getBoundingClientRect();
+  const width = Math.min(580, window.innerWidth - 20);
+  popover.style.width = `${width}px`;
+  let left = Math.max(10, Math.min(rect.right - width, window.innerWidth - width - 10));
+  let top = rect.top - popover.offsetHeight - 8;
+  if (top < 8) top = Math.min(window.innerHeight - popover.offsetHeight - 8, rect.bottom + 8);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.max(8, top)}px`;
+}
+function openCatalanKeyboard() {
+  const popover = $('#catalan-keyboard-popover');
+  if (!popover) return;
+  keyboardOpen = true;
+  popover.classList.remove('hidden');
+  $('#composer-keyboard-button')?.setAttribute('aria-expanded', 'true');
+  renderCatalanKeyboard();
+  updateKeyboardSuggestions();
+  requestAnimationFrame(positionCatalanKeyboard);
+}
+function closeCatalanKeyboard() {
+  keyboardOpen = false;
+  $('#catalan-keyboard-popover')?.classList.add('hidden');
+  $('#composer-keyboard-button')?.setAttribute('aria-expanded', 'false');
+}
+function toggleCatalanKeyboard() {
+  if (keyboardOpen) closeCatalanKeyboard();
+  else if (!currentConversation) toast('Selecciona una conversación para escribir.', 'info');
+  else openCatalanKeyboard();
+}
+function insertIntoComposer(text, usageSuggestion = false) {
+  const input = $('#message-input');
+  if (!input || input.disabled) return;
+  const value = String(input.value || '');
+  const start = input.selectionStart ?? value.length;
+  const end = input.selectionEnd ?? start;
+  let insert = String(text ?? '');
+  if (usageSuggestion) {
+    const context = keyboardWordContext();
+    const left = context.start;
+    const right = context.end;
+    const suffix = value.slice(right);
+    const addSpace = !suffix || (!/^\s/u.test(suffix) && !/^[,.;:!?…)}\]]/u.test(suffix));
+    insert = `${insert}${addSpace ? ' ' : ''}`;
+    input.value = value.slice(0, left) + insert + suffix;
+    const cursor = left + insert.length;
+    input.focus({ preventScroll: true }); input.setSelectionRange(cursor, cursor);
+    recordComposerWordUsage(String(text));
+  } else {
+    input.value = value.slice(0, start) + insert + value.slice(end);
+    const cursor = start + insert.length;
+    input.focus({ preventScroll: true }); input.setSelectionRange(cursor, cursor);
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  resizeMessageInput();
+  updateMentionPicker();
+  updateSendState();
+  scheduleTyping();
+  positionCatalanKeyboard();
+}
+function performCatalanKeyboardAction(action, rawKey = '') {
+  const input = $('#message-input');
+  if (!input || input.disabled) return;
+  if (action === 'shift') {
+    keyboardShift = !keyboardShift;
+    renderCatalanKeyboard();
+    updateKeyboardSuggestions();
+    return;
+  }
+  if (action === 'symbols') {
+    keyboardSymbols = !keyboardSymbols;
+    keyboardShift = false;
+    renderCatalanKeyboard();
+    return;
+  }
+  if (action === 'space') { insertIntoComposer(' '); keyboardShift = false; renderCatalanKeyboard(); return; }
+  if (action === 'enter') { insertIntoComposer('\n'); keyboardShift = false; renderCatalanKeyboard(); return; }
+  if (action === 'backspace') {
+    const value = String(input.value || '');
+    let start = input.selectionStart ?? value.length;
+    const end = input.selectionEnd ?? start;
+    if (start === end && start > 0) {
+      const before = value.slice(0, start);
+      const previousCodePoint = Array.from(before).pop() || '';
+      start -= previousCodePoint.length;
+    }
+    input.value = value.slice(0, start) + value.slice(end);
+    input.focus({ preventScroll: true }); input.setSelectionRange(start, start);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    resizeMessageInput(); updateMentionPicker(); updateSendState(); scheduleTyping();
+    return;
+  }
+  const key = String(rawKey || '');
+  if (!key) return;
+  const character = keyboardShift ? key.toLocaleUpperCase('ca') : key;
+  insertIntoComposer(character);
+  if (keyboardShift && /^[a-zçàèéíïòóúü]$/iu.test(key)) {
+    keyboardShift = false;
+    renderCatalanKeyboard();
+  }
+}
+
+$('#composer-keyboard-button')?.addEventListener('click', event => {
+  event.preventDefault(); event.stopPropagation(); toggleCatalanKeyboard();
+});
+$('#catalan-keyboard-close')?.addEventListener('click', closeCatalanKeyboard);
+$('#catalan-keyboard-popover')?.addEventListener('click', event => {
+  const suggestion = event.target.closest('[data-keyboard-suggestion]');
+  if (suggestion) { insertIntoComposer(suggestion.dataset.keyboardSuggestion || '', true); return; }
+  const key = event.target.closest('[data-keyboard-key]');
+  if (key) { performCatalanKeyboardAction('', key.dataset.keyboardKey || ''); return; }
+  const action = event.target.closest('[data-keyboard-action]');
+  if (action) performCatalanKeyboardAction(action.dataset.keyboardAction || '');
+});
+$('#message-input')?.addEventListener('keyup', event => {
+  if (['ArrowLeft','ArrowRight','Home','End','Control','Shift','Alt'].includes(event.key)) updateKeyboardSuggestions();
+});
+$('#message-input')?.addEventListener('click', updateKeyboardSuggestions);
+window.addEventListener('resize', () => { positionCatalanKeyboard(); if (!$('#attachment-menu')?.classList.contains('hidden')) closeAttachmentMenu(); });
+
 function resetChatView() {
 conversationOpenSequence++;
 stopChatRealtime();
@@ -2638,6 +3191,9 @@ avatarInto($('#chat-avatar'), 'XIFRE', null, 'private');
 $('#chat-info-button')?.classList.add('hidden');
 $('#message-input').disabled = true;
 $('#message-input').value = '';
+clearPendingChatAttachment(false);
+closeAttachmentMenu();
+closeCatalanKeyboard();
 resizeMessageInput();
 updateMessageCharacterCount();
 $('#send-button').disabled = true;
@@ -2719,7 +3275,7 @@ else if (type === 'save-group-settings') void saveGroupSettings();
 else if (type === 'add-group-members') void addGroupMembers();
 else if (type === 'request-delete-group') void deleteGroup();
 else if (type === 'save-profile-settings') void saveProfileSettings();
-else if (type === 'composer-placeholder') return;
+else if (type === 'composer-placeholder') { event.preventDefault(); toggleAttachmentMenu(); }
 else if (type === 'confirm-external-link') confirmExternalLink();
 else if (type === 'cancel-external-link') closeExternalLinkWarning();
 else if (type === 'resend') void resendConfirmation();
@@ -2754,6 +3310,8 @@ document.addEventListener('click', event => {
 if (!event.target.closest('#message-menu')) closeMessageMenu();
 if (!event.target.closest('#conversation-menu')) closeConversationMenu();
 if (!event.target.closest('#emoji-picker-popover') && !event.target.closest('#composer-emoji-button') && !event.target.closest('[data-message-action="react"]') && !event.target.closest('.message-reaction-add')) closeEmojiPicker();
+if (!event.target.closest('#catalan-keyboard-popover') && !event.target.closest('#composer-keyboard-button')) closeCatalanKeyboard();
+if (!event.target.closest('#attachment-menu') && !event.target.closest('#composer-plus-button') && !event.target.closest('#upload-chat-attachment')) closeAttachmentMenu();
 }, true);
 
 $('#friend-search')?.addEventListener('input', e => searchPeople(e.target.value));
@@ -2824,6 +3382,47 @@ $('#remove-group-avatar')?.addEventListener('click', () => {
   setModalMessage('group-settings-message', 'La foto se quitará al guardar los cambios.', '');
 });
 
+$('#composer-plus-button')?.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  toggleAttachmentMenu();
+});
+$('#upload-chat-attachment')?.addEventListener('click', event => {
+  event.preventDefault();
+  closeAttachmentMenu();
+  $('#chat-attachment-input')?.click();
+});
+$('#chat-attachment-input')?.addEventListener('change', event => {
+  const input = event.target;
+  const file = input.files?.[0];
+  if (file) setPendingChatAttachment(file);
+  input.value = '';
+});
+$('#remove-chat-attachment')?.addEventListener('click', () => clearPendingChatAttachment(true));
+$('#message-input')?.addEventListener('paste', event => {
+  const items = [...(event.clipboardData?.items || [])];
+  const imageItem = items.find(item => String(item.type || '').startsWith('image/'));
+  const file = imageItem?.getAsFile?.();
+  if (file) {
+    event.preventDefault();
+    setPendingChatAttachment(file);
+  }
+});
+for (const dropTarget of [$('#messages'), $('#message-form')].filter(Boolean)) {
+  dropTarget.addEventListener('dragover', event => {
+    const hasImage = [...(event.dataTransfer?.items || [])].some(item => item.kind === 'file' && String(item.type || '').startsWith('image/'));
+    if (hasImage) { event.preventDefault(); $('#main-screen .center-pane')?.classList.add('chat-drag-over'); }
+  });
+  dropTarget.addEventListener('dragleave', event => {
+    if (!dropTarget.contains(event.relatedTarget)) $('#main-screen .center-pane')?.classList.remove('chat-drag-over');
+  });
+  dropTarget.addEventListener('drop', event => {
+    $('#main-screen .center-pane')?.classList.remove('chat-drag-over');
+    const file = [...(event.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));
+    if (file) { event.preventDefault(); setPendingChatAttachment(file); }
+  });
+}
+
 $('#message-form')?.addEventListener('submit', event => { event.preventDefault(); void sendMessage(); });
 $('#message-input')?.addEventListener('input', () => {
 resizeMessageInput();
@@ -2832,6 +3431,7 @@ currentMentionIds.clear(); // mentions are recalculated from current text on sen
 mentionEverywhere = false;
 updateMentionPicker();
 updateSendState();
+updateKeyboardSuggestions();
 if (value) scheduleTyping(); else stopTypingBroadcast();
 });
 $('#message-input')?.addEventListener('keydown', event => {
