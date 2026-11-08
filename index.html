@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261108-v21-2">
+<link rel="stylesheet" href="style.css?v=20261108-alpha-1">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -58,12 +58,41 @@
 </section>
 
 <section id="main-screen" class="main-screen">
+<nav class="xifre-appbar" aria-label="Barra de aplicaciones">
+  <div class="appbar-brand">
+    <span class="appbar-logo">XIFRE</span>
+    <span class="appbar-version">ALPHA 1</span>
+  </div>
+  <div class="appbar-launchers" aria-label="Aplicaciones">
+    <button id="app-chat-button" class="app-launcher app-launcher-chat active" type="button" data-platform-app="chat" aria-label="Abrir CHAT" title="CHAT">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.2 5.5h15.6a1.7 1.7 0 0 1 1.7 1.7v9.1a1.7 1.7 0 0 1-1.7 1.7H9l-5.3 2.6V7.2a1.7 1.7 0 0 1 .5-1.2Z"/><path d="M7.5 10h9M7.5 13.5h6"/></svg>
+    </button>
+    <button id="app-inventory-button" class="app-launcher app-launcher-inventory" type="button" data-platform-app="inventory" aria-label="Abrir Inventario" title="Inventario">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5 8.3 4h7.4L17 7.5l2.5 1.2v10.1a1.7 1.7 0 0 1-1.7 1.7H6.2a1.7 1.7 0 0 1-1.7-1.7V8.7L7 7.5Z"/><path d="M8 4.5c.2 2.1 1.5 3.3 4 3.3s3.8-1.2 4-3.3M9 12h6M12 9.5v5"/></svg>
+    </button>
+  </div>
+  <div class="appbar-tools">
+    <div class="appbar-clock" aria-live="off">
+      <span id="appbar-date">—</span>
+      <strong id="appbar-time">--:--</strong>
+    </div>
+    <button id="app-admin-button" class="appbar-tool-button hidden" type="button" data-action="open-inventory-admin" aria-label="Administración de XIFRE" title="Administración">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 19 6v5.3c0 4.1-2.7 7.2-7 9.2-4.3-2-7-5.1-7-9.2V6l7-2.5Z"/><path d="m9 12 2 2 4-4"/></svg>
+    </button>
+    <button id="app-updates-button" class="appbar-updates-button" type="button" data-action="open-updates" aria-label="¿Qué hay de nuevo?" title="Actualizaciones">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h8l3 3v12H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M15 4.5v4h3M8.5 12h6M8.5 15.5h6"/></svg>
+      <span>Actualizaciones</span>
+      <i id="updates-new-dot" class="updates-new-dot hidden"></i>
+    </button>
+  </div>
+</nav>
+<div class="xifre-app-stage">
+<div id="chat-app-view" class="app-view active">
 <div class="app-shell">
 <!-- LEFT: navigation / conversations -->
 <aside class="left-pane">
 <div class="left-pane-head">
-<div class="brand-line"><span>XIFRE</span><i></i></div>
-<div class="brand-version">pre-alpha 1.2</div>
+<div class="brand-line chat-brand-label"><span>CHAT</span><i></i></div>
 <div class="nav-actions">
 <div class="conversation-searchbar">
   <span class="conversation-search-icon" aria-hidden="true">⌕</span>
@@ -163,7 +192,94 @@
 </div>
 </aside>
 </div>
+</div>
+<section id="inventory-app-view" class="app-view inventory-app hidden" aria-label="Aplicación Inventario">
+  <header class="inventory-header">
+    <div class="inventory-header-title">
+      <span class="inventory-eyebrow">APLICACIÓN DEL SISTEMA</span>
+      <h1>Inventario</h1>
+      <p>Tu colección personal de objetos de XIFRE.</p>
+    </div>
+    <div class="inventory-header-actions">
+      <span id="inventory-total-count" class="inventory-total-count">0 objetos</span>
+      <button id="inventory-refresh-button" class="inventory-refresh-button" type="button" title="Actualizar inventario" aria-label="Actualizar inventario">↻</button>
+    </div>
+  </header>
+  <div class="inventory-layout">
+    <aside class="inventory-sidebar">
+      <div class="inventory-nav-label">TU ESPACIO</div>
+      <button class="inventory-nav-button active" type="button" data-inventory-tab="collection"><span class="inventory-nav-icon">▦</span><span>Mi colección</span><b id="inventory-nav-count">0</b></button>
+      <button class="inventory-nav-button" type="button" data-inventory-tab="trades"><span class="inventory-nav-icon">⇄</span><span>Intercambios</span><b id="inventory-trade-badge" class="hidden">0</b></button>
+      <div id="inventory-admin-nav-group" class="inventory-admin-nav-group hidden">
+        <div class="inventory-nav-label">ADMINISTRACIÓN</div>
+        <button class="inventory-nav-button inventory-admin-nav" type="button" data-inventory-tab="admin"><span class="inventory-nav-icon">◈</span><span>Panel de control</span></button>
+      </div>
+      <div class="inventory-sidebar-foot"><span class="inventory-sidebar-dot"></span> XIFRE SYSTEM APP</div>
+    </aside>
+    <div class="inventory-main">
+      <section id="inventory-panel-collection" class="inventory-panel active">
+        <div class="inventory-panel-heading"><div><h2>Mi colección</h2><p>Todos los objetos que tienes actualmente.</p></div><span id="inventory-collection-count" class="inventory-subcount">0 COPIAS</span></div>
+        <div id="inventory-grid" class="inventory-grid"><div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div></div>
+      </section>
+      <section id="inventory-panel-trades" class="inventory-panel">
+        <div id="trade-list-view">
+          <div class="inventory-panel-heading"><div><h2>Intercambios</h2><p>Intercambia objetos con tus amigos de XIFRE.</p></div></div>
+          <form id="trade-request-form" class="trade-request-card">
+            <div class="trade-request-copy"><strong>Nuevo intercambio</strong><span>Envía una solicitud a uno de tus amigos.</span></div>
+            <div class="trade-request-controls"><select id="trade-friend-select" required><option value="">Selecciona un amigo...</option></select><button class="inventory-primary-button" type="submit">Solicitar intercambio</button></div>
+          </form>
+          <div class="trade-lists-grid">
+            <section class="trade-list-block"><div class="trade-list-title"><h3>Solicitudes recibidas</h3><span id="trade-incoming-count">0</span></div><div id="trade-incoming-list" class="trade-list"><div class="inventory-inline-empty">No tienes solicitudes pendientes.</div></div></section>
+            <section class="trade-list-block"><div class="trade-list-title"><h3>En curso</h3><span id="trade-active-count">0</span></div><div id="trade-active-list" class="trade-list"><div class="inventory-inline-empty">No tienes intercambios activos.</div></div></section>
+            <section class="trade-list-block"><div class="trade-list-title"><h3>Enviadas e historial</h3><span id="trade-history-count">0</span></div><div id="trade-history-list" class="trade-list"><div class="inventory-inline-empty">Todavía no hay actividad.</div></div></section>
+          </div>
+        </div>
+        <div id="trade-workspace" class="trade-workspace hidden">
+          <div class="trade-workspace-top"><button id="trade-back-button" class="inventory-back-button" type="button">← Volver a intercambios</button><span id="trade-workspace-status" class="trade-status-pill">EN CURSO</span></div>
+          <div class="trade-workspace-heading"><div><h2>Intercambio en tiempo real</h2><p id="trade-workspace-subtitle">Preparad vuestras ofertas.</p></div><button id="trade-cancel-button" class="inventory-danger-quiet" type="button">Cancelar intercambio</button></div>
+          <div class="trade-offer-columns">
+            <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">TU OFERTA</span><h3 id="trade-own-name">Tú</h3></div><span id="trade-own-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div id="trade-own-offer" class="trade-offer-items"></div></section>
+            <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">SU OFERTA</span><h3 id="trade-other-name">Amigo</h3></div><span id="trade-other-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div id="trade-other-offer" class="trade-offer-items"></div></section>
+          </div>
+          <section class="trade-select-items"><div class="trade-select-heading"><div><h3>Tus objetos disponibles</h3><p>Marca las copias que quieras ofrecer. Los objetos reservados en otro intercambio no se pueden seleccionar.</p></div><span id="trade-selected-count">0 seleccionados</span></div><div id="trade-my-items" class="trade-select-grid"></div></section>
+          <div class="trade-workspace-actions"><span id="trade-workspace-feedback" class="trade-feedback">Los objetos solo se transferirán cuando ambos confirméis.</span><div><button id="trade-save-offer-button" class="inventory-secondary-button" type="button">Guardar oferta</button><button id="trade-confirm-button" class="inventory-primary-button" type="button">Confirmar intercambio</button></div></div>
+        </div>
+      </section>
+      <section id="inventory-panel-admin" class="inventory-panel">
+        <div class="inventory-panel-heading"><div><span class="inventory-eyebrow">ZONA PRIVADA</span><h2>Administración del inventario</h2><p>Solo las cuentas administradoras pueden gestionar los objetos del sistema.</p></div><span class="admin-secure-pill">◈ ADMIN</span></div>
+        <div class="admin-app-management"><div><strong>Aplicaciones del sistema</strong><p>Controla qué aplicaciones predeterminadas están disponibles.</p></div><div id="admin-system-apps" class="admin-system-apps"><span class="inventory-inline-empty">Cargando aplicaciones...</span></div></div>
+        <div class="admin-inventory-grid">
+          <section class="admin-card">
+            <div class="admin-card-heading"><span class="admin-card-icon">＋</span><div><h3 id="admin-item-form-title">Crear objeto</h3><p>Define el objeto que aparecerá en las colecciones.</p></div></div>
+            <form id="admin-item-form" class="admin-form">
+              <label>Nombre<input id="admin-item-name" type="text" maxlength="80" placeholder="Ej. Fragmento solar" required></label>
+              <label>Descripción<textarea id="admin-item-description" rows="3" maxlength="1000" placeholder="Describe el objeto..."></textarea></label>
+              <div class="admin-form-row"><label>Rareza<select id="admin-item-rarity" required><option value="comun">Común</option><option value="poco_comun">Poco común</option><option value="raro">Raro</option><option value="epico">Épico</option><option value="legendario">Legendario</option><option value="mitico">Mítico</option><option value="divino">Divino</option></select></label><label>Valor conceptual<input id="admin-item-value" type="number" min="0" max="9000000000000000" step="1" value="0" required></label></div>
+              <label class="admin-upload-label">Imagen del objeto <span>PNG, JPG, WEBP o GIF · máximo 8 MB</span><input id="admin-item-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+              <div id="admin-item-image-preview" class="admin-image-preview"><span>Vista previa del objeto</span></div>
+              <div class="admin-form-actions"><button id="admin-item-reset" class="inventory-secondary-button" type="button">Limpiar</button><button id="admin-item-save" class="inventory-primary-button" type="submit">Crear objeto</button></div>
+              <div id="admin-item-message" class="admin-form-message" aria-live="polite"></div>
+            </form>
+          </section>
+          <section class="admin-card admin-grant-card">
+            <div class="admin-card-heading"><span class="admin-card-icon">⇢</span><div><h3>Entregar objetos</h3><p>Asigna copias a cualquier cuenta, incluida la tuya.</p></div></div>
+            <form id="admin-grant-form" class="admin-form">
+              <label>Objeto<select id="admin-grant-item" required><option value="">Selecciona un objeto...</option></select></label>
+              <label>Buscar destinatario<input id="admin-user-search" type="search" autocomplete="off" placeholder="Username o @handle" required></label>
+              <div id="admin-user-results" class="admin-user-results"><span>Busca a un usuario para seleccionarlo.</span></div>
+              <div id="admin-selected-user" class="admin-selected-user hidden"></div>
+              <label>Cantidad de copias<input id="admin-grant-quantity" type="number" min="1" max="100" step="1" value="1" required></label>
+              <button class="inventory-primary-button admin-grant-submit" type="submit">Entregar objetos</button>
+              <div id="admin-grant-message" class="admin-form-message" aria-live="polite"></div>
+            </form>
+          </section>
+        </div>
+        <section class="admin-card admin-catalog-card"><div class="admin-card-heading"><span class="admin-card-icon">▤</span><div><h3>Catálogo de objetos</h3><p>Gestiona los objetos ya creados y consulta cuántas copias existen.</p></div></div><div id="admin-item-list" class="admin-item-list"><div class="inventory-inline-empty">Todavía no hay objetos.</div></div></section>
+      </section>
+    </div>
+  </div>
 </section>
+</div>
 
 
 <!-- CREATE GROUP -->
@@ -325,6 +441,32 @@
   </div>
 </div>
 
+<!-- RELEASE NOTES / ADMIN RELEASE EDITOR -->
+<div id="updates-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="updates-title">
+  <div class="modal-card updates-modal-card">
+    <button class="modal-close" type="button" data-action="close-modal" data-modal="updates-modal" aria-label="Cerrar">×</button>
+    <div class="modal-kicker">XIFRE · CHANGELOG</div>
+    <h2 id="updates-title">¿Qué hay de nuevo?</h2>
+    <p class="updates-intro">Novedades, mejoras y cambios de XIFRE.</p>
+    <div id="release-list" class="release-list"><div class="inventory-inline-empty">Cargando actualizaciones...</div></div>
+    <section id="release-admin-editor" class="release-admin-editor hidden">
+      <div class="release-admin-heading"><div><span class="inventory-eyebrow">ADMINISTRACIÓN</span><h3 id="release-editor-title">Publicar actualización</h3></div><span class="admin-secure-pill">◈ ADMIN</span></div>
+      <form id="release-admin-form" class="admin-form">
+        <input id="release-edit-id" type="hidden">
+        <div class="admin-form-row"><label>Versión<input id="release-version" type="text" maxlength="40" placeholder="Alpha 1.1" required></label><label>Estado<select id="release-published"><option value="true">Publicada</option><option value="false">Borrador</option></select></label></div>
+        <label>Título<input id="release-title" type="text" maxlength="120" placeholder="Título de la actualización" required></label>
+        <label>Resumen<textarea id="release-summary" rows="2" maxlength="500" placeholder="Una descripción breve..."></textarea></label>
+        <label>Contenido<textarea id="release-body" rows="6" maxlength="12000" placeholder="Escribe las novedades. Puedes separar los puntos con líneas en blanco."></textarea></label>
+        <label class="admin-upload-label">Imagen opcional <span>PNG, JPG, WEBP o GIF · máximo 8 MB</span><input id="release-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+        <div id="release-image-preview" class="admin-image-preview release-image-preview"><span>Sin imagen adjunta</span></div>
+        <div class="admin-form-actions"><button id="release-editor-reset" class="inventory-secondary-button" type="button">Nueva publicación</button><button id="release-save-button" class="inventory-primary-button" type="submit">Guardar publicación</button></div>
+        <div id="release-admin-message" class="admin-form-message" aria-live="polite"></div>
+      </form>
+    </section>
+  </div>
+</div>
+<div id="xifre-notification-stack" class="xifre-notification-stack" aria-live="polite" aria-atomic="false"></div>
+
 <!-- SETTINGS -->
 <div id="settings-modal" class="settings-overlay hidden">
 <div class="settings-shell">
@@ -371,6 +513,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261108-v21-2"></script>
+<script src="app.js?v=20261108-alpha-1"></script>
 </body>
 </html>
