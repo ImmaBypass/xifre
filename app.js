@@ -751,6 +751,8 @@ results.forEach(result => {
 if (result.status === 'rejected') console.warn('STARTUP LOAD', result.reason);
 });
 
+try { await platformInitialize(); } catch (platformError) { console.warn('XIFRE PLATFORM STARTUP', platformError); }
+
 if (conversationListPoll) clearInterval(conversationListPoll);
 conversationListPoll = setInterval(() => { if (document.visibilityState === 'visible' && currentUser) loadConversations().catch(() => {}); }, 4000);
 // Load requests as soon as the app starts, not only after opening the modal.
@@ -797,7 +799,6 @@ async function logout() {
   const confirmed = await askConfirm('Cerrar sesión', '¿Quieres cerrar tu sesión de XIFRE? Volverás a la página principal.', 'Cerrar sesión');
   if (!confirmed) return;
   logoutInFlight = true;
-  stopPresenceTracking();
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -807,6 +808,8 @@ async function logout() {
     logoutInFlight = false;
     return;
   }
+  stopPresenceTracking();
+  platformStop();
   stopChatRealtime();
   if (conversationListPoll) clearInterval(conversationListPoll);
   if (friendRequestsPoll) clearInterval(friendRequestsPoll);
@@ -3510,7 +3513,1211 @@ void loadConversations().then(async () => {
 window.addEventListener('beforeunload', () => {
 if (currentConversation) sessionStorage.setItem('xifre_current_conversation', String(currentConversation));
 });
+platformBindEvents();
 }
+
+
+/* ========================================================================
+   XIFRE ALPHA 1 — PLATFORM / SYSTEM APPS / INVENTORY / TRADING
+   Extension built on top of the V21.2 chat. Chat code above remains intact.
+   All privileged writes are performed by SECURITY DEFINER RPCs in SQL.
+   ======================================================================== */
+const XIFRE_SYSTEM_MEDIA_BUCKET = 'xifre-system-media';
+const XIFRE_SYSTEM_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
+const XIFRE_SYSTEM_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const XIFRE_RARITIES = {
+  comun: { label: 'Común', className: 'common' },
+  poco_comun: { label: 'Poco común', className: 'uncommon' },
+  raro: { label: 'Raro', className: 'rare' },
+  epico: { label: 'Épico', className: 'epic' },
+  legendario: { label: 'Legendario', className: 'legendary' },
+  mitico: { label: 'Mítico', className: 'mythic' },
+  divino: { label: 'Divino', className: 'divine' }
+};
+
+let isXifreAdmin = false;
+let platformOwnerId = null;
+let platformApps = [];
+let platformActiveApp = 'chat';
+let platformClockTimer = null;
+let platformTradeTimer = null;
+let platformTradeDetailTimer = null;
+let platformInventoryTimer = null;
+let platformTradeChannel = null;
+let platformInventoryItems = [];
+let platformAdminItems = [];
+let platformTrades = [];
+let platformTradeIdsSeen = new Set();
+let platformTradeNotifications = new Map();
+let platformActiveTradeId = null;
+let platformActiveTradeDetail = null;
+let platformTradeRefreshBusy = false;
+let platformTradeDetailBusy = false;
+let platformSessionGeneration = 0;
+let platformInventoryLoadBusy = false;
+let platformInventoryRefreshQueued = false;
+let platformAdminLoadBusy = false;
+let platformAdminRecipient = null;
+let platformAdminSearchTimer = null;
+let platformAdminSearchResults = [];
+let platformAdminEditingItemId = null;
+let platformAdminEditingItemImagePath = null;
+let platformAdminItemPreviewUrl = null;
+let platformReleaseRecords = [];
+let platformReleaseEditingId = null;
+let platformReleaseImagePath = null;
+let platformReleaseImagePreviewUrl = null;
+let platformReleaseLoadBusy = false;
+
+function platformSetMessage(id, message, type = '') {
+  const node = $(`#${id}`);
+  if (!node) return;
+  node.textContent = String(message || '');
+  node.className = `admin-form-message${type ? ` ${type}` : ''}`;
+}
+
+function platformRarity(item) {
+  const key = String(item?.rarity || 'comun');
+  return XIFRE_RARITIES[key] || XIFRE_RARITIES.comun;
+}
+
+function platformFormatValue(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(number) : '0';
+}
+
+function platformUpdateClock() {
+  const now = new Date();
+  const dateNode = $('#appbar-date');
+  const timeNode = $('#appbar-time');
+  if (dateNode) dateNode.textContent = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+  if (timeNode) timeNode.textContent = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(now);
+}
+
+async function platformInitialize() {
+  if (!currentUser || !supabase) return;
+  const owner = String(currentUser.id);
+  if (platformOwnerId === owner && platformTradeChannel) {
+    await platformLoadSystemApps();
+    platformUpdateClock();
+    return;
+  }
+  platformStop();
+  platformOwnerId = owner;
+  const generation = platformSessionGeneration;
+  isXifreAdmin = false;
+  const adminResult = await supabase.rpc('xifre_is_admin');
+  if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+  if (adminResult.error) {
+    console.warn('XIFRE PLATFORM ADMIN CHECK', adminResult.error);
+  } else {
+    isXifreAdmin = adminResult.data === true;
+  }
+  $('#app-admin-button')?.classList.toggle('hidden', !isXifreAdmin);
+  $('#inventory-admin-nav-group')?.classList.toggle('hidden', !isXifreAdmin);
+  $('#release-admin-editor')?.classList.toggle('hidden', !isXifreAdmin);
+  await platformLoadSystemApps();
+  if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+  void platformLoadReleases();
+  platformUpdateClock();
+  if (platformClockTimer) clearInterval(platformClockTimer);
+  platformClockTimer = setInterval(platformUpdateClock, 1000);
+  await platformLoadTrades(true).catch(error => console.warn('XIFRE INITIAL TRADES', error));
+  platformSetupTradeRealtime();
+  if (platformTradeTimer) clearInterval(platformTradeTimer);
+  platformTradeTimer = setInterval(() => {
+    if (currentUser && String(currentUser.id) === owner && document.visibilityState === 'visible') {
+      void platformLoadTrades(false).catch(error => console.warn('XIFRE TRADE POLL', error));
+    }
+  }, 4500);
+  if (platformTradeDetailTimer) clearInterval(platformTradeDetailTimer);
+  platformTradeDetailTimer = setInterval(() => {
+    if (currentUser && String(currentUser.id) === owner && platformActiveApp === 'inventory' && platformActiveTradeId && document.visibilityState === 'visible') {
+      void platformRefreshTradeDetail(false).catch(error => console.warn('XIFRE TRADE DETAIL POLL', error));
+    }
+  }, 2800);
+  if (platformInventoryTimer) clearInterval(platformInventoryTimer);
+  platformInventoryTimer = setInterval(() => {
+    if (currentUser && String(currentUser.id) === owner && platformActiveApp === 'inventory' && document.visibilityState === 'visible') {
+      void platformRefreshInventory().catch(error => console.warn('XIFRE INVENTORY POLL', error));
+    }
+  }, 15000);
+}
+
+function platformStop() {
+  platformSessionGeneration += 1;
+  if (platformClockTimer) clearInterval(platformClockTimer);
+  if (platformTradeTimer) clearInterval(platformTradeTimer);
+  if (platformTradeDetailTimer) clearInterval(platformTradeDetailTimer);
+  if (platformInventoryTimer) clearInterval(platformInventoryTimer);
+  platformClockTimer = null;
+  platformTradeTimer = null;
+  platformTradeDetailTimer = null;
+  platformInventoryTimer = null;
+  const channel = platformTradeChannel;
+  platformTradeChannel = null;
+  if (channel && supabase) void supabase.removeChannel(channel).catch(error => console.warn('XIFRE TRADE CHANNEL CLEANUP', error));
+  for (const timer of platformTradeNotifications.values()) clearTimeout(timer);
+  platformTradeNotifications.clear();
+  $('#xifre-notification-stack')?.replaceChildren();
+  // Never carry the previous account's selected app/admin screen into the next session.
+  $('#chat-app-view')?.classList.add('active');
+  $('#chat-app-view')?.classList.remove('hidden');
+  $('#inventory-app-view')?.classList.remove('active');
+  $('#inventory-app-view')?.classList.add('hidden');
+  $('#app-chat-button')?.classList.add('active');
+  $('#app-inventory-button')?.classList.remove('active');
+  $('#app-inventory-button')?.classList.add('hidden');
+  $('#app-admin-button')?.classList.add('hidden');
+  $('#updates-new-dot')?.classList.add('hidden');
+  $('#inventory-admin-nav-group')?.classList.add('hidden');
+  $('#release-admin-editor')?.classList.add('hidden');
+  $('#inventory-panel-collection')?.classList.add('active');
+  $('#inventory-panel-trades')?.classList.remove('active');
+  $('#inventory-panel-admin')?.classList.remove('active');
+  $('#trade-list-view')?.classList.remove('hidden');
+  $('#trade-workspace')?.classList.add('hidden');
+  platformOwnerId = null;
+  isXifreAdmin = false;
+  platformApps = [];
+  platformActiveApp = 'chat';
+  platformInventoryItems = [];
+  platformAdminItems = [];
+  platformTrades = [];
+  platformTradeIdsSeen = new Set();
+  platformActiveTradeId = null;
+  platformActiveTradeDetail = null;
+  platformAdminRecipient = null;
+  platformAdminSearchResults = [];
+  platformReleaseRecords = [];
+  platformTradeRefreshBusy = false;
+  platformTradeDetailBusy = false;
+  platformInventoryLoadBusy = false;
+  platformInventoryRefreshQueued = false;
+  platformAdminLoadBusy = false;
+  platformReleaseLoadBusy = false;
+  if (platformAdminSearchTimer) clearTimeout(platformAdminSearchTimer);
+  platformAdminSearchTimer = null;
+  if (platformAdminItemPreviewUrl) URL.revokeObjectURL(platformAdminItemPreviewUrl);
+  if (platformReleaseImagePreviewUrl) URL.revokeObjectURL(platformReleaseImagePreviewUrl);
+  platformAdminItemPreviewUrl = null;
+  platformReleaseImagePreviewUrl = null;
+  platformAdminEditingItemId = null;
+  platformAdminEditingItemImagePath = null;
+  platformReleaseEditingId = null;
+  platformReleaseImagePath = null;
+  $('#admin-item-form')?.reset();
+  $('#admin-grant-form')?.reset();
+  $('#admin-user-results').innerHTML = '<span>Busca a un usuario para seleccionarlo.</span>';
+  $('#admin-selected-user')?.classList.add('hidden');
+  $('#admin-item-list').innerHTML = '<div class="inventory-inline-empty">Todavía no hay objetos.</div>';
+  $('#admin-system-apps').innerHTML = '<span class="inventory-inline-empty">Cargando aplicaciones...</span>';
+  $('#admin-item-image-preview')?.replaceChildren(Object.assign(document.createElement('span'), { textContent: 'Vista previa del objeto' }));
+  $('#release-image-preview')?.replaceChildren(Object.assign(document.createElement('span'), { textContent: 'Sin imagen adjunta' }));
+}
+
+async function platformLoadSystemApps() {
+  if (!currentUser) return;
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  const { data, error } = await supabase.rpc('xifre_list_system_apps');
+  if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+  if (error) {
+    console.warn('XIFRE SYSTEM APPS', error);
+    return;
+  }
+  platformApps = Array.isArray(data) ? data : [];
+  const inventoryRow = platformApps.find(app => app.app_id === 'inventory');
+  const inventoryAvailable = Boolean(inventoryRow?.enabled);
+  const inventoryButton = $('#app-inventory-button');
+  inventoryButton?.classList.toggle('hidden', !inventoryAvailable && !isXifreAdmin);
+  inventoryButton?.classList.toggle('app-launcher-disabled', !inventoryAvailable);
+  inventoryButton?.setAttribute('aria-disabled', String(!inventoryAvailable && !isXifreAdmin));
+  $('#app-admin-button')?.classList.toggle('hidden', !isXifreAdmin);
+  if (isXifreAdmin) platformRenderSystemAppAdmin();
+}
+
+function platformSetApp(appId, forceAdmin = false) {
+  if (!currentUser) return;
+  if (appId === 'inventory') {
+    const app = platformApps.find(entry => entry.app_id === 'inventory');
+    if (!app?.enabled && !isXifreAdmin) {
+      toast('Esta aplicación del sistema no está disponible.', 'info');
+      return;
+    }
+  }
+  if (!['chat', 'inventory'].includes(appId)) return;
+  platformActiveApp = appId;
+  $('#chat-app-view')?.classList.toggle('active', appId === 'chat');
+  $('#chat-app-view')?.classList.toggle('hidden', appId !== 'chat');
+  $('#inventory-app-view')?.classList.toggle('active', appId === 'inventory');
+  $('#inventory-app-view')?.classList.toggle('hidden', appId !== 'inventory');
+  $('#app-chat-button')?.classList.toggle('active', appId === 'chat');
+  $('#app-inventory-button')?.classList.toggle('active', appId === 'inventory');
+  if (appId === 'inventory') {
+    if (forceAdmin && isXifreAdmin) platformSetInventoryTab('admin');
+    void platformRefreshInventory();
+    void platformLoadTrades(false);
+  }
+}
+
+function platformSetInventoryTab(tab) {
+  const valid = tab === 'collection' || tab === 'trades' || (tab === 'admin' && isXifreAdmin);
+  if (!valid) {
+    if (tab === 'admin') toast('Esta zona está reservada a administradores.', 'error');
+    return;
+  }
+  $$('[data-inventory-tab]').forEach(button => button.classList.toggle('active', button.dataset.inventoryTab === tab));
+  $('#inventory-panel-collection')?.classList.toggle('active', tab === 'collection');
+  $('#inventory-panel-trades')?.classList.toggle('active', tab === 'trades');
+  $('#inventory-panel-admin')?.classList.toggle('active', tab === 'admin');
+  if (tab === 'trades') {
+    $('#trade-list-view')?.classList.remove('hidden');
+    $('#trade-workspace')?.classList.add('hidden');
+    void platformLoadTrades(false);
+    platformPopulateFriendSelect();
+  }
+  if (tab === 'admin') void platformLoadAdminData();
+}
+
+async function platformSignImagePaths(paths) {
+  const unique = [...new Set((paths || []).filter(path => typeof path === 'string' && path.trim()))];
+  const mapped = new Map();
+  if (!unique.length || !supabase) return mapped;
+  const { data, error } = await supabase.storage.from(XIFRE_SYSTEM_MEDIA_BUCKET).createSignedUrls(unique, 86400);
+  if (error) {
+    console.warn('XIFRE MEDIA SIGN', error);
+    return mapped;
+  }
+  (data || []).forEach(row => {
+    const path = String(row.path || '');
+    const url = row.signedUrl || row.signedURL || '';
+    if (path && url) mapped.set(path, url);
+  });
+  return mapped;
+}
+
+function platformImageMarkup(url, name, className = '') {
+  if (!url) return `<div class="platform-image-fallback ${esc(className)}"><span>✧</span></div>`;
+  return `<div class="platform-image-frame ${esc(className)}"><img src="${esc(url)}" alt="${esc(name || 'Objeto') }" loading="lazy" decoding="async"></div>`;
+}
+
+async function platformRefreshInventory() {
+  if (!currentUser) return;
+  if (platformInventoryLoadBusy) {
+    platformInventoryRefreshQueued = true;
+    return;
+  }
+  platformInventoryLoadBusy = true;
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  try {
+    const { data, error } = await supabase.rpc('xifre_get_my_inventory');
+    if (error) throw error;
+    if (!currentUser || String(currentUser.id) !== owner) return;
+    platformInventoryItems = Array.isArray(data) ? data : [];
+    const urls = await platformSignImagePaths(platformInventoryItems.map(item => item.image_path));
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+    platformInventoryItems = platformInventoryItems.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+    platformRenderInventory();
+  } catch (error) {
+    console.error('XIFRE LOAD INVENTORY', error);
+    const grid = $('#inventory-grid');
+    if (grid) grid.innerHTML = `<div class="inventory-empty inventory-error"><span>!</span><strong>No se pudo cargar el inventario</strong><p>${esc(friendlyError(error))}</p></div>`;
+  } finally {
+    platformInventoryLoadBusy = false;
+    if (platformInventoryRefreshQueued && currentUser) {
+      platformInventoryRefreshQueued = false;
+      queueMicrotask(() => { void platformRefreshInventory(); });
+    }
+  }
+}
+
+function platformRenderInventory() {
+  const rows = platformInventoryItems;
+  setText('inventory-total-count', `${rows.length} ${rows.length === 1 ? 'objeto' : 'objetos'}`);
+  setText('inventory-nav-count', String(rows.length));
+  setText('inventory-collection-count', `${rows.length} ${rows.length === 1 ? 'COPIA' : 'COPIAS'}`);
+  const grid = $('#inventory-grid');
+  if (!grid) return;
+  if (!rows.length) {
+    grid.innerHTML = '<div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div>';
+    return;
+  }
+  grid.innerHTML = rows.map(item => {
+    const rarity = platformRarity(item);
+    const reserved = Boolean(item.reserved);
+    return `<article class="inventory-item-card rarity-${esc(rarity.className)} ${reserved ? 'is-reserved' : ''}">
+      <div class="inventory-item-image">${platformImageMarkup(item.image_url, item.name)}</div>
+      <div class="inventory-item-copy"><div class="inventory-item-meta"><span class="inventory-rarity-pill rarity-pill-${esc(rarity.className)}">${esc(rarity.label)}</span><span class="inventory-item-value">${esc(platformFormatValue(item.value))} V</span></div>
+      <h3>${esc(item.name)}</h3><p>${esc(item.description || 'Sin descripción.')}</p>
+      <div class="inventory-item-footer"><span>${reserved ? 'Reservado en un intercambio' : 'En tu colección'}</span><span>✦</span></div></div>
+    </article>`;
+  }).join('');
+}
+
+async function platformUploadImage(file, folder) {
+  if (!(file instanceof File)) throw new Error('Selecciona una imagen.');
+  if (!XIFRE_SYSTEM_MEDIA_TYPES.has(file.type)) throw new Error('Formato no admitido. Usa PNG, JPG, WEBP o GIF.');
+  if (file.size <= 0 || file.size > XIFRE_SYSTEM_MEDIA_MAX_BYTES) throw new Error('La imagen debe ocupar menos de 8 MB.');
+  const extensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+  const id = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${folder}/${id}.${extensions[file.type]}`;
+  const { error } = await supabase.storage.from(XIFRE_SYSTEM_MEDIA_BUCKET).upload(path, file, {
+    cacheControl: '3600', upsert: false, contentType: file.type
+  });
+  if (error) throw error;
+  return path;
+}
+
+async function platformDeleteImage(path) {
+  if (!path || !supabase) return;
+  const { error } = await supabase.storage.from(XIFRE_SYSTEM_MEDIA_BUCKET).remove([path]);
+  if (error) console.warn('XIFRE OLD IMAGE CLEANUP', error);
+}
+
+function platformSetPreview(containerId, file, currentPath = '') {
+  const container = $(`#${containerId}`);
+  if (!container) return;
+  if (platformAdminItemPreviewUrl && containerId === 'admin-item-image-preview') URL.revokeObjectURL(platformAdminItemPreviewUrl);
+  if (platformReleaseImagePreviewUrl && containerId === 'release-image-preview') URL.revokeObjectURL(platformReleaseImagePreviewUrl);
+  if (containerId === 'admin-item-image-preview') platformAdminItemPreviewUrl = null;
+  if (containerId === 'release-image-preview') platformReleaseImagePreviewUrl = null;
+  container.replaceChildren();
+  if (file) {
+    const url = URL.createObjectURL(file);
+    if (containerId === 'admin-item-image-preview') platformAdminItemPreviewUrl = url;
+    if (containerId === 'release-image-preview') platformReleaseImagePreviewUrl = url;
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = 'Vista previa';
+    container.appendChild(image);
+    return;
+  }
+  if (currentPath) {
+    void platformSignImagePaths([currentPath]).then(urls => {
+      const url = urls.get(currentPath);
+      if (!url || !container.isConnected || container.childElementCount) return;
+      const image = document.createElement('img');
+      image.src = url;
+      image.alt = 'Imagen actual';
+      container.appendChild(image);
+    });
+    return;
+  }
+  const hint = document.createElement('span');
+  hint.textContent = containerId === 'release-image-preview' ? 'Sin imagen adjunta' : 'Vista previa del objeto';
+  container.appendChild(hint);
+}
+
+async function platformLoadAdminData() {
+  if (!isXifreAdmin || !currentUser || platformAdminLoadBusy) return;
+  platformAdminLoadBusy = true;
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  try {
+    const { data, error } = await supabase.rpc('xifre_admin_list_items');
+    if (error) throw error;
+    platformAdminItems = Array.isArray(data) ? data : [];
+    const urls = await platformSignImagePaths(platformAdminItems.map(item => item.image_path));
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || !isXifreAdmin) return;
+    platformAdminItems = platformAdminItems.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+    platformRenderAdminItems();
+    platformPopulateGrantItemSelect();
+    platformRenderSystemAppAdmin();
+  } catch (error) {
+    console.error('XIFRE ADMIN ITEMS', error);
+    const list = $('#admin-item-list');
+    if (list) list.innerHTML = `<div class="inventory-inline-empty">No se pudo cargar el catálogo: ${esc(friendlyError(error))}</div>`;
+  } finally {
+    platformAdminLoadBusy = false;
+  }
+}
+
+function platformRenderAdminItems() {
+  const list = $('#admin-item-list');
+  if (!list) return;
+  if (!platformAdminItems.length) {
+    list.innerHTML = '<div class="inventory-inline-empty">Todavía no has creado ningún objeto.</div>';
+    return;
+  }
+  list.innerHTML = platformAdminItems.map(item => {
+    const rarity = platformRarity(item);
+    return `<article class="admin-item-row ${item.active ? '' : 'is-disabled'}">
+      <div class="admin-item-row-image">${platformImageMarkup(item.image_url, item.name)}</div>
+      <div class="admin-item-row-copy"><strong>${esc(item.name)}</strong><span>${esc(rarity.label)} · ${esc(platformFormatValue(item.value))} V · ${esc(String(item.owned_count || 0))} copias</span><small>${item.active ? 'Activo' : 'Desactivado'}</small></div>
+      <div class="admin-item-row-actions"><button type="button" class="inventory-secondary-button compact" data-admin-edit-item="${esc(item.id)}">Editar</button><button type="button" class="inventory-secondary-button compact" data-admin-toggle-item="${esc(item.id)}" data-enabled="${item.active ? 'false' : 'true'}">${item.active ? 'Desactivar' : 'Activar'}</button></div>
+    </article>`;
+  }).join('');
+}
+
+function platformPopulateGrantItemSelect() {
+  const select = $('#admin-grant-item');
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = '<option value="">Selecciona un objeto...</option>' + platformAdminItems.filter(item => item.active).map(item => `<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}</option>`).join('');
+  if (selected && platformAdminItems.some(item => item.id === selected && item.active)) select.value = selected;
+}
+
+function platformRenderSystemAppAdmin() {
+  const host = $('#admin-system-apps');
+  if (!host || !isXifreAdmin) return;
+  if (!platformApps.length) {
+    host.innerHTML = '<span class="inventory-inline-empty">No hay aplicaciones disponibles.</span>';
+    return;
+  }
+  host.innerHTML = platformApps.map(app => `<div class="admin-app-toggle-row"><span><strong>${esc(app.title || app.app_id)}</strong><small>${app.app_id === 'chat' ? 'Mensajería principal' : 'Colección e intercambios'}</small></span><button type="button" class="admin-toggle ${app.enabled ? 'enabled' : ''}" data-admin-app-toggle="${esc(app.app_id)}" data-enabled="${app.enabled ? 'false' : 'true'}" ${app.app_id === 'chat' ? 'disabled title="CHAT siempre está disponible"' : ''} aria-label="${app.enabled ? 'Desactivar' : 'Activar'} ${esc(app.title)}"><i></i></button></div>`).join('');
+}
+
+async function platformToggleSystemApp(appId, enabled) {
+  if (!isXifreAdmin) return toast('No tienes permisos de administrador.', 'error');
+  try {
+    const { error } = await supabase.rpc('xifre_admin_set_system_app', { p_app_id: appId, p_enabled: enabled });
+    if (error) throw error;
+    await platformLoadSystemApps();
+    platformRenderSystemAppAdmin();
+    toast(`Aplicación ${enabled ? 'activada' : 'desactivada'}.`, 'success');
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+  }
+}
+
+function platformResetItemForm() {
+  const form = $('#admin-item-form');
+  if (form) form.reset();
+  platformAdminEditingItemId = null;
+  platformAdminEditingItemImagePath = null;
+  const button = $('#admin-item-save');
+  if (button) button.textContent = 'Crear objeto';
+  setText('admin-item-form-title', 'Crear objeto');
+  platformSetMessage('admin-item-message', '');
+  platformSetPreview('admin-item-image-preview', null, '');
+}
+
+function platformEditItem(itemId) {
+  if (!isXifreAdmin) return;
+  const item = platformAdminItems.find(row => String(row.id) === String(itemId));
+  if (!item) return toast('No se ha encontrado ese objeto.', 'error');
+  platformAdminEditingItemId = item.id;
+  platformAdminEditingItemImagePath = item.image_path || null;
+  $('#admin-item-name').value = item.name || '';
+  $('#admin-item-description').value = item.description || '';
+  $('#admin-item-rarity').value = item.rarity || 'comun';
+  $('#admin-item-value').value = String(item.value || 0);
+  $('#admin-item-image').value = '';
+  setText('admin-item-form-title', 'Editar objeto');
+  setText('admin-item-save', 'Guardar cambios');
+  platformSetPreview('admin-item-image-preview', null, item.image_path || '');
+  platformSetMessage('admin-item-message', 'Editando el objeto seleccionado.', 'info');
+  $('#admin-item-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function platformSaveItem(event) {
+  event.preventDefault();
+  if (!isXifreAdmin) return toast('No tienes permisos para crear objetos.', 'error');
+  const button = $('#admin-item-save');
+  const file = $('#admin-item-image')?.files?.[0] || null;
+  let uploadedPath = null;
+  let saveRpcStarted = false;
+  const wasEditing = Boolean(platformAdminEditingItemId);
+  setLoading(button, true);
+  platformSetMessage('admin-item-message', 'Guardando objeto...', 'info');
+  try {
+    const name = String($('#admin-item-name')?.value || '').trim();
+    const description = String($('#admin-item-description')?.value || '').trim();
+    const rarity = String($('#admin-item-rarity')?.value || 'comun');
+    const valueText = String($('#admin-item-value')?.value || '');
+    if (!name) throw new Error('Escribe un nombre para el objeto.');
+    if (!/^\d+$/.test(valueText) || !Number.isSafeInteger(Number(valueText)) || Number(valueText) < 0) throw new Error('Introduce un valor entero válido.');
+    if (file) uploadedPath = await platformUploadImage(file, 'items');
+    const imagePath = uploadedPath || platformAdminEditingItemImagePath;
+    if (!imagePath) throw new Error('Selecciona una imagen para el objeto.');
+    saveRpcStarted = true;
+    const { data, error } = await supabase.rpc('xifre_admin_save_item', {
+      p_item_id: platformAdminEditingItemId,
+      p_name: name,
+      p_description: description,
+      p_rarity: rarity,
+      p_value: Number(valueText),
+      p_image_path: imagePath
+    });
+    if (error) throw error;
+    if (uploadedPath && platformAdminEditingItemImagePath && uploadedPath !== platformAdminEditingItemImagePath) {
+      await platformDeleteImage(platformAdminEditingItemImagePath);
+    }
+    platformResetItemForm();
+    await platformLoadAdminData();
+    await platformRefreshInventory();
+    toast(wasEditing ? 'Objeto actualizado.' : 'Objeto creado.', 'success');
+  } catch (error) {
+    if (uploadedPath && !saveRpcStarted) await platformDeleteImage(uploadedPath);
+    console.error('XIFRE SAVE ITEM', error);
+    platformSetMessage('admin-item-message', friendlyError(error), 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+async function platformToggleItem(itemId, enabled) {
+  if (!isXifreAdmin) return;
+  try {
+    const { error } = await supabase.rpc('xifre_admin_set_item_active', { p_item_id: itemId, p_active: enabled });
+    if (error) throw error;
+    await platformLoadAdminData();
+    toast(`Objeto ${enabled ? 'activado' : 'desactivado'}.`, 'success');
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+  }
+}
+
+function platformRenderAdminUserResults(rows) {
+  const host = $('#admin-user-results');
+  if (!host) return;
+  platformAdminSearchResults = rows || [];
+  if (!rows?.length) {
+    host.innerHTML = '<span>No se han encontrado usuarios.</span>';
+    return;
+  }
+  host.innerHTML = rows.map(user => `<button type="button" class="admin-user-result" data-admin-user-id="${esc(user.id)}"><strong>${esc(user.username || 'Usuario')}</strong><small>@${esc(user.email_handle || user.username || 'usuario')}</small></button>`).join('');
+}
+
+async function platformSearchAdminUsers(query) {
+  if (!isXifreAdmin) return;
+  if (platformAdminSearchTimer) clearTimeout(platformAdminSearchTimer);
+  const value = String(query || '').trim().replace(/^@+/, '');
+  platformAdminRecipient = null;
+  $('#admin-selected-user')?.classList.add('hidden');
+  if (value.length < 2) {
+    const host = $('#admin-user-results');
+    if (host) host.innerHTML = '<span>Escribe al menos 2 caracteres.</span>';
+    return;
+  }
+  const host = $('#admin-user-results');
+  if (host) host.innerHTML = '<span>Buscando usuarios...</span>';
+  const owner = String(currentUser?.id || '');
+  const generation = platformSessionGeneration;
+  platformAdminSearchTimer = setTimeout(async () => {
+    try {
+      const { data, error } = await supabase.rpc('xifre_admin_search_users', { p_query: value });
+      if (error) throw error;
+      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || !isXifreAdmin) return;
+      if (String($('#admin-user-search')?.value || '').trim().replace(/^@+/, '') !== value) return;
+      platformRenderAdminUserResults(data || []);
+    } catch (error) {
+      if (generation === platformSessionGeneration && currentUser && String(currentUser.id) === owner && isXifreAdmin && host) host.innerHTML = `<span>${esc(friendlyError(error))}</span>`;
+    }
+  }, 220);
+}
+
+function platformSelectAdminUser(userId) {
+  if (!isXifreAdmin) return;
+  const user = platformAdminSearchResults.find(row => String(row.id) === String(userId));
+  if (!user) return;
+  platformAdminRecipient = user;
+  const selected = $('#admin-selected-user');
+  if (selected) {
+    selected.textContent = `Destinatario: ${user.username || 'Usuario'} · @${user.email_handle || user.username || 'usuario'}`;
+    selected.classList.remove('hidden');
+  }
+  const results = $('#admin-user-results');
+  if (results) results.innerHTML = '<span>Destinatario seleccionado.</span>';
+}
+
+async function platformGrantItem(event) {
+  event.preventDefault();
+  if (!isXifreAdmin) return toast('No tienes permisos para entregar objetos.', 'error');
+  const itemId = String($('#admin-grant-item')?.value || '');
+  const quantity = Number($('#admin-grant-quantity')?.value || 0);
+  const button = $('#admin-grant-form button[type="submit"]');
+  setLoading(button, true);
+  platformSetMessage('admin-grant-message', 'Entregando objetos...', 'info');
+  try {
+    if (!itemId) throw new Error('Selecciona un objeto.');
+    if (!platformAdminRecipient?.id) throw new Error('Busca y selecciona un destinatario.');
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) throw new Error('La cantidad debe estar entre 1 y 100.');
+    const { data, error } = await supabase.rpc('xifre_admin_grant_item', {
+      p_target_user: platformAdminRecipient.id,
+      p_item_id: itemId,
+      p_quantity: quantity
+    });
+    if (error) throw error;
+    platformSetMessage('admin-grant-message', `Se han entregado ${Number(data || quantity)} copias correctamente.`, 'success');
+    const ownGrant = String(platformAdminRecipient.id) === String(currentUser.id);
+    $('#admin-grant-form')?.reset();
+    platformAdminRecipient = null;
+    $('#admin-selected-user')?.classList.add('hidden');
+    $('#admin-user-results').innerHTML = '<span>Busca a otro destinatario para continuar.</span>';
+    await platformLoadAdminData();
+    if (ownGrant) await platformRefreshInventory();
+    toast('Objetos entregados correctamente.', 'success');
+  } catch (error) {
+    console.error('XIFRE GRANT ITEM', error);
+    platformSetMessage('admin-grant-message', friendlyError(error), 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+function platformPopulateFriendSelect() {
+  const select = $('#trade-friend-select');
+  if (!select) return;
+  const selected = select.value;
+  const friends = [...(friendCache || [])].sort((a, b) => String(a.username || '').localeCompare(String(b.username || ''), 'es'));
+  select.innerHTML = '<option value="">Selecciona un amigo...</option>' + friends.map(friend => `<option value="${esc(friend.id)}">${esc(friend.username || friend.display_name || 'Usuario')}</option>`).join('');
+  if (selected && friends.some(friend => String(friend.id) === selected)) select.value = selected;
+}
+
+async function platformCreateTradeRequest(event) {
+  event.preventDefault();
+  const recipientId = String($('#trade-friend-select')?.value || '');
+  const button = $('#trade-request-form button[type="submit"]');
+  if (!recipientId) return toast('Selecciona primero a un amigo.', 'info');
+  setLoading(button, true);
+  try {
+    const { data, error } = await supabase.rpc('xifre_create_trade_request', { p_recipient_id: recipientId });
+    if (error) throw error;
+    $('#trade-request-form')?.reset();
+    toast('Solicitud de intercambio enviada.', 'success');
+    await platformLoadTrades(false);
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+async function platformLoadTrades(showNotifications = true) {
+  if (!currentUser || platformTradeRefreshBusy) return;
+  platformTradeRefreshBusy = true;
+  const generation = platformSessionGeneration;
+  try {
+    const owner = String(currentUser.id);
+    const { data, error } = await supabase.rpc('xifre_list_my_trades');
+    if (error) throw error;
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+    platformTrades = Array.isArray(data) ? data : [];
+    platformRenderTrades();
+    const incoming = platformTrades.filter(trade => trade.status === 'pending' && String(trade.recipient_id) === owner);
+    setText('inventory-trade-badge', String(incoming.length));
+    $('#inventory-trade-badge')?.classList.toggle('hidden', incoming.length === 0);
+    if (showNotifications && document.visibilityState === 'visible') {
+      for (const trade of incoming) {
+        const id = String(trade.id);
+        if (platformTradeIdsSeen.has(id)) continue;
+        platformTradeIdsSeen.add(id);
+        const age = Date.now() - new Date(trade.created_at || 0).getTime();
+        if (Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000) platformShowTradeNotification(trade);
+      }
+    } else {
+      incoming.forEach(trade => platformTradeIdsSeen.add(String(trade.id)));
+    }
+    if (platformActiveTradeId && !platformTrades.some(trade => String(trade.id) === String(platformActiveTradeId) && trade.status === 'active')) {
+      const active = platformTrades.find(trade => String(trade.id) === String(platformActiveTradeId));
+      if (active && active.status !== 'active') {
+        $('#trade-workspace-status').textContent = String(active.status || '').toUpperCase();
+        $('#trade-workspace-feedback').textContent = active.status === 'completed' ? 'Intercambio completado. Los objetos ya están en los nuevos inventarios.' : 'Este intercambio ya no está activo.';
+      }
+    }
+  } catch (error) {
+    console.warn('XIFRE LOAD TRADES', error);
+  } finally {
+    platformTradeRefreshBusy = false;
+  }
+}
+
+function platformRenderTrades() {
+  const me = String(currentUser?.id || '');
+  const incoming = platformTrades.filter(trade => trade.status === 'pending' && String(trade.recipient_id) === me);
+  const active = platformTrades.filter(trade => trade.status === 'active');
+  const history = platformTrades.filter(trade => trade.status !== 'active' && !(trade.status === 'pending' && String(trade.recipient_id) === me));
+  setText('trade-incoming-count', String(incoming.length));
+  setText('trade-active-count', String(active.length));
+  setText('trade-history-count', String(history.length));
+  const incomingHost = $('#trade-incoming-list');
+  const activeHost = $('#trade-active-list');
+  const historyHost = $('#trade-history-list');
+  if (incomingHost) incomingHost.innerHTML = incoming.length ? incoming.map(trade => `<article class="trade-list-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>Quiere intercambiar objetos contigo</span><small>${esc(platformDateLabel(trade.created_at))}</small></div><div class="trade-list-actions"><button type="button" class="inventory-primary-button compact" data-trade-response="accept" data-trade-id="${esc(trade.id)}">Aceptar</button><button type="button" class="inventory-secondary-button compact" data-trade-response="reject" data-trade-id="${esc(trade.id)}">Rechazar</button></div></article>`).join('') : '<div class="inventory-inline-empty">No tienes solicitudes pendientes.</div>';
+  if (activeHost) activeHost.innerHTML = active.length ? active.map(trade => `<article class="trade-list-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>Intercambio en curso</span><small>${trade.sender_confirmed && trade.recipient_confirmed ? 'Confirmado por ambas partes' : 'Esperando ofertas y confirmaciones'}</small></div><button type="button" class="inventory-primary-button compact" data-open-trade="${esc(trade.id)}">Abrir</button></article>`).join('') : '<div class="inventory-inline-empty">No tienes intercambios activos.</div>';
+  if (historyHost) historyHost.innerHTML = history.length ? history.map(trade => {
+    const status = platformTradeStatusLabel(trade.status);
+    const isOutgoing = String(trade.sender_id) === me && trade.status === 'pending';
+    return `<article class="trade-list-row trade-history-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>${esc(status)}</span><small>${esc(platformDateLabel(trade.created_at))}</small></div>${isOutgoing ? `<button type="button" class="inventory-secondary-button compact" data-cancel-trade="${esc(trade.id)}">Cancelar</button>` : ''}</article>`;
+  }).join('') : '<div class="inventory-inline-empty">Todavía no hay actividad.</div>';
+}
+
+function platformDateLabel(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function platformTradeStatusLabel(status) {
+  const labels = { pending: 'Solicitud enviada', active: 'En curso', completed: 'Completado', rejected: 'Rechazado', cancelled: 'Cancelado', expired: 'Caducado' };
+  return labels[status] || 'Estado desconocido';
+}
+
+function platformShowTradeNotification(trade) {
+  const stack = $('#xifre-notification-stack');
+  if (!stack || !currentUser || document.visibilityState !== 'visible') return;
+  const id = String(trade.id);
+  if (stack.querySelector(`[data-trade-notification="${CSS.escape(id)}"]`)) return;
+  const node = document.createElement('article');
+  node.className = 'xifre-trade-notification';
+  node.dataset.tradeNotification = id;
+  const copy = document.createElement('div');
+  copy.className = 'xifre-trade-notification-copy';
+  const kicker = document.createElement('span');
+  kicker.textContent = 'NUEVA SOLICITUD';
+  const title = document.createElement('strong');
+  title.textContent = `${trade.partner_username || 'Un amigo'} quiere intercambiar contigo`;
+  const detail = document.createElement('small');
+  detail.textContent = 'Esta notificación desaparece en 10 segundos.';
+  copy.append(kicker, title, detail);
+  const actions = document.createElement('div');
+  actions.className = 'xifre-trade-notification-actions';
+  const accept = document.createElement('button');
+  accept.type = 'button'; accept.textContent = 'Aceptar'; accept.dataset.tradeResponse = 'accept'; accept.dataset.tradeId = id; accept.className = 'inventory-primary-button compact';
+  const reject = document.createElement('button');
+  reject.type = 'button'; reject.textContent = 'Rechazar'; reject.dataset.tradeResponse = 'reject'; reject.dataset.tradeId = id; reject.className = 'inventory-secondary-button compact';
+  actions.append(accept, reject);
+  node.append(copy, actions);
+  stack.appendChild(node);
+  requestAnimationFrame(() => node.classList.add('show'));
+  const timer = setTimeout(() => {
+    node.classList.remove('show');
+    setTimeout(() => node.remove(), 260);
+    platformTradeNotifications.delete(id);
+  }, 10000);
+  platformTradeNotifications.set(id, timer);
+}
+
+function platformRemoveTradeNotification(tradeId) {
+  const id = String(tradeId);
+  const timer = platformTradeNotifications.get(id);
+  if (timer) clearTimeout(timer);
+  platformTradeNotifications.delete(id);
+  const node = $(`[data-trade-notification="${CSS.escape(id)}"]`);
+  if (node) node.remove();
+}
+
+async function platformRespondTrade(tradeId, accept) {
+  platformRemoveTradeNotification(tradeId);
+  try {
+    const { data, error } = await supabase.rpc('xifre_respond_trade_request', { p_trade_id: tradeId, p_accept: Boolean(accept) });
+    if (error) throw error;
+    await platformLoadTrades(false);
+    if (data === 'active') {
+      toast('Solicitud aceptada. Ya podéis preparar vuestras ofertas.', 'success');
+      platformSetApp('inventory');
+      platformSetInventoryTab('trades');
+      await platformOpenTradeWorkspace(tradeId);
+    } else if (data === 'expired') {
+      toast('La solicitud ha caducado.', 'info');
+    } else {
+      toast('Solicitud rechazada.', 'info');
+    }
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+    await platformLoadTrades(false);
+  }
+}
+
+async function platformCancelTrade(tradeId) {
+  const confirmed = await askConfirm('Cancelar intercambio', '¿Seguro que quieres cancelar este intercambio? Las ofertas dejarán de estar reservadas.', 'Cancelar intercambio');
+  if (!confirmed) return;
+  try {
+    const { error } = await supabase.rpc('xifre_cancel_trade', { p_trade_id: tradeId });
+    if (error) throw error;
+    if (String(platformActiveTradeId) === String(tradeId)) {
+      platformActiveTradeId = null;
+      platformActiveTradeDetail = null;
+      $('#trade-workspace').classList.add('hidden');
+      $('#trade-list-view').classList.remove('hidden');
+    }
+    await platformLoadTrades(false);
+    await platformRefreshInventory();
+    toast('Intercambio cancelado.', 'success');
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+  }
+}
+
+function platformSetupTradeRealtime() {
+  if (!currentUser || !supabase) return;
+  if (platformTradeChannel) void supabase.removeChannel(platformTradeChannel);
+  const owner = String(currentUser.id);
+  const channel = supabase.channel(`xifre-alpha1-trades-${owner}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'xifre_trades' }, () => {
+      void platformLoadTrades(true);
+      if (platformActiveTradeId) void platformRefreshTradeDetail(false);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'xifre_trade_offers' }, () => {
+      if (platformActiveTradeId) void platformRefreshTradeDetail(false);
+    })
+    .subscribe((status, error) => {
+      if (status === 'SUBSCRIBED') console.info('XIFRE TRADE REALTIME SUBSCRIBED');
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('XIFRE TRADE REALTIME', status, error || '');
+    });
+  platformTradeChannel = channel;
+}
+
+async function platformOpenTradeWorkspace(tradeId) {
+  platformActiveTradeId = String(tradeId);
+  platformSetApp('inventory');
+  platformSetInventoryTab('trades');
+  $('#trade-list-view')?.classList.add('hidden');
+  $('#trade-workspace')?.classList.remove('hidden');
+  $('#trade-workspace-feedback').textContent = 'Cargando intercambio...';
+  await platformRefreshTradeDetail(true);
+}
+
+async function platformRefreshTradeDetail(withInventory = false) {
+  if (!platformActiveTradeId || !currentUser || platformTradeDetailBusy) return;
+  platformTradeDetailBusy = true;
+  const tradeId = String(platformActiveTradeId);
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  try {
+    const { data, error } = await supabase.rpc('xifre_get_trade_detail', { p_trade_id: tradeId });
+    if (error) {
+      console.warn('XIFRE TRADE DETAIL', error);
+      if (withInventory && generation === platformSessionGeneration) toast(friendlyError(error), 'error');
+      return;
+    }
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
+    if (!data?.trade) return;
+    let nextDetail = data;
+    if (withInventory) {
+      const { data: inventory, error: inventoryError } = await supabase.rpc('xifre_get_my_inventory');
+      if (inventoryError) throw inventoryError;
+      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
+      const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
+      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
+      platformInventoryItems = (inventory || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+      platformRenderInventory();
+      nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
+    } else {
+      const urls = await platformSignImagePaths((data.offers || []).map(item => item.image_path));
+      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
+      nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
+    }
+    platformActiveTradeDetail = nextDetail;
+    platformRenderTradeWorkspace();
+  } catch (error) {
+    console.error('XIFRE TRADE DETAIL', error);
+    if (withInventory && generation === platformSessionGeneration) toast(friendlyError(error), 'error');
+  } finally {
+    platformTradeDetailBusy = false;
+  }
+}
+
+function platformRenderTradeWorkspace() {
+  const detail = platformActiveTradeDetail;
+  const me = String(currentUser?.id || '');
+  if (!detail?.trade || !me) return;
+  const trade = detail.trade;
+  const ownOffer = (detail.offers || []).filter(item => String(item.user_id) === me);
+  const otherOffer = (detail.offers || []).filter(item => String(item.user_id) !== me);
+  const ownName = String(currentUser.id) === String(trade.sender_id) ? detail.sender?.username : detail.recipient?.username;
+  const otherName = String(currentUser.id) === String(trade.sender_id) ? detail.recipient?.username : detail.sender?.username;
+  const ownConfirmed = String(currentUser.id) === String(trade.sender_id) ? trade.sender_confirmed : trade.recipient_confirmed;
+  const otherConfirmed = String(currentUser.id) === String(trade.sender_id) ? trade.recipient_confirmed : trade.sender_confirmed;
+  setText('trade-own-name', `${ownName || 'Tú'} (tú)`);
+  setText('trade-other-name', otherName || 'Amigo');
+  setText('trade-own-confirmed', ownConfirmed ? 'Confirmado' : 'Sin confirmar');
+  setText('trade-other-confirmed', otherConfirmed ? 'Confirmado' : 'Sin confirmar');
+  $('#trade-own-confirmed')?.classList.toggle('confirmed', Boolean(ownConfirmed));
+  $('#trade-other-confirmed')?.classList.toggle('confirmed', Boolean(otherConfirmed));
+  setText('trade-workspace-subtitle', `Intercambio con ${otherName || 'tu amigo'}. Los objetos solo se transferirán después de las dos confirmaciones.`);
+  setText('trade-workspace-status', trade.status === 'active' ? 'EN CURSO' : String(trade.status || '').toUpperCase());
+  const active = trade.status === 'active';
+  $('#trade-cancel-button')?.classList.toggle('hidden', !active);
+  $('#trade-save-offer-button')?.classList.toggle('hidden', !active);
+  $('#trade-confirm-button')?.classList.toggle('hidden', !active);
+  if (trade.status === 'completed') setText('trade-workspace-feedback', 'Intercambio completado. Los objetos ya se han transferido a ambos inventarios.');
+  else if (!active) setText('trade-workspace-feedback', 'Este intercambio ha terminado y ya no admite cambios.');
+  else if (ownConfirmed && otherConfirmed) setText('trade-workspace-feedback', 'Ambas partes han confirmado. El intercambio se está completando.');
+  else if (ownConfirmed) setText('trade-workspace-feedback', 'Has confirmado. Esperando a que la otra persona confirme.');
+  else if (otherConfirmed) setText('trade-workspace-feedback', 'La otra persona ya ha confirmado. Revisa tu oferta y confirma para completar.');
+  else setText('trade-workspace-feedback', 'Guarda tu oferta y confirma cuando estés de acuerdo. Si alguien modifica su oferta, se reinician las dos confirmaciones.');
+  const renderOffer = items => items.length ? items.map(item => {
+    const rarity = platformRarity(item);
+    return `<div class="trade-offer-item rarity-${esc(rarity.className)}">${platformImageMarkup(item.image_url, item.name)}<span><strong>${esc(item.name)}</strong><small>${esc(rarity.label)} · ${esc(platformFormatValue(item.value))} V</small></span></div>`;
+  }).join('') : '<div class="trade-offer-empty">Todavía no hay objetos en esta oferta.</div>';
+  const ownOfferHost = $('#trade-own-offer');
+  const otherOfferHost = $('#trade-other-offer');
+  if (ownOfferHost) ownOfferHost.innerHTML = renderOffer(ownOffer);
+  if (otherOfferHost) otherOfferHost.innerHTML = renderOffer(otherOffer);
+
+  const offeredIds = new Set(ownOffer.map(item => String(item.instance_id)));
+  const availableHost = $('#trade-my-items');
+  const available = platformInventoryItems.filter(item => !item.reserved || String(item.reserved_trade_id) === String(trade.id));
+  if (!availableHost) return;
+  if (!available.length) {
+    availableHost.innerHTML = '<div class="inventory-inline-empty">No tienes objetos disponibles para ofrecer.</div>';
+  } else {
+    availableHost.innerHTML = available.map(item => {
+      const rarity = platformRarity(item);
+      return `<label class="trade-select-item rarity-${esc(rarity.className)}"><input type="checkbox" data-trade-instance="${esc(item.instance_id)}" ${offeredIds.has(String(item.instance_id)) ? 'checked' : ''} ${!active ? 'disabled' : ''}><span class="trade-select-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-select-copy"><strong>${esc(item.name)}</strong><small>${esc(rarity.label)} · ${esc(platformFormatValue(item.value))} V</small></span></label>`;
+    }).join('');
+  }
+  platformUpdateTradeSelectionCount();
+  const confirmButton = $('#trade-confirm-button');
+  if (confirmButton) {
+    confirmButton.disabled = Boolean(ownConfirmed) || !active;
+    confirmButton.textContent = ownConfirmed ? 'Esperando confirmación' : 'Confirmar intercambio';
+  }
+}
+
+function platformUpdateTradeSelectionCount() {
+  const selected = $$('[data-trade-instance]:checked').length;
+  setText('trade-selected-count', `${selected} seleccionados`);
+}
+
+async function platformSaveTradeOffer() {
+  if (!platformActiveTradeId) return;
+  const button = $('#trade-save-offer-button');
+  const ids = $$('[data-trade-instance]:checked').map(node => node.dataset.tradeInstance).filter(isValidUuid);
+  setLoading(button, true);
+  try {
+    const { error } = await supabase.rpc('xifre_set_trade_offer', { p_trade_id: platformActiveTradeId, p_inventory_item_ids: ids });
+    if (error) throw error;
+    await platformRefreshTradeDetail(true);
+    await platformLoadTrades(false);
+    toast('Oferta guardada. Las dos partes deben volver a confirmar.', 'success');
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+    await platformRefreshTradeDetail(true).catch(() => {});
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+async function platformConfirmTrade() {
+  if (!platformActiveTradeId) return;
+  const button = $('#trade-confirm-button');
+  setLoading(button, true);
+  try {
+    const { data, error } = await supabase.rpc('xifre_confirm_trade', { p_trade_id: platformActiveTradeId });
+    if (error) throw error;
+    if (data === 'completed') {
+      toast('¡Intercambio completado! Los objetos ya se han transferido.', 'success');
+      await platformRefreshInventory();
+    } else if (data === 'expired') {
+      toast('El intercambio ha caducado y los objetos ya no están reservados.', 'info');
+    } else {
+      toast('Tu confirmación se ha guardado. Falta la otra persona.', 'success');
+    }
+    await platformRefreshTradeDetail(true);
+    await platformLoadTrades(false);
+  } catch (error) {
+    toast(friendlyError(error), 'error');
+    await platformRefreshTradeDetail(true).catch(() => {});
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+function platformBackToTradeList() {
+  platformActiveTradeId = null;
+  platformActiveTradeDetail = null;
+  $('#trade-workspace')?.classList.add('hidden');
+  $('#trade-list-view')?.classList.remove('hidden');
+  void platformLoadTrades(false);
+}
+
+function platformReleaseSeenKey() {
+  return `xifre-last-release-seen:${String(currentUser?.id || 'guest')}`;
+}
+
+function platformGetLastReleaseSeen() {
+  try { return localStorage.getItem(platformReleaseSeenKey()) || ''; } catch { return ''; }
+}
+
+function platformSetLastReleaseSeen(value) {
+  try { localStorage.setItem(platformReleaseSeenKey(), String(value || '')); } catch (error) { console.warn('XIFRE RELEASE SEEN STORAGE', error); }
+}
+
+async function platformOpenUpdates() {
+  openModal('updates-modal');
+  $('#updates-new-dot')?.classList.add('hidden');
+  await platformLoadReleases();
+  const latest = platformReleaseRecords[0];
+  if (latest?.id) platformSetLastReleaseSeen(latest.id);
+}
+
+async function platformLoadReleases() {
+  if (!currentUser || platformReleaseLoadBusy) return;
+  platformReleaseLoadBusy = true;
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  try {
+    const { data, error } = await supabase.from('xifre_release_notes').select('id,version,title,summary,body,image_path,published,created_at,updated_at').order('created_at', { ascending: false });
+    if (error) throw error;
+    platformReleaseRecords = Array.isArray(data) ? data : [];
+    const urls = await platformSignImagePaths(platformReleaseRecords.map(row => row.image_path));
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+    platformReleaseRecords = platformReleaseRecords.map(row => ({ ...row, image_url: urls.get(row.image_path) || '' }));
+    platformRenderReleases();
+    const latest = platformReleaseRecords[0];
+    const lastSeen = platformGetLastReleaseSeen();
+    $('#updates-new-dot')?.classList.toggle('hidden', !latest?.id || String(latest.id) === lastSeen);
+  } catch (error) {
+    console.error('XIFRE LOAD RELEASES', error);
+    const host = $('#release-list');
+    if (host) host.innerHTML = `<div class="inventory-inline-empty">No se pudieron cargar las actualizaciones: ${esc(friendlyError(error))}</div>`;
+  } finally {
+    platformReleaseLoadBusy = false;
+  }
+}
+
+function platformRenderReleases() {
+  const host = $('#release-list');
+  if (!host) return;
+  const rows = platformReleaseRecords.filter(row => row.published || isXifreAdmin);
+  if (!rows.length) {
+    host.innerHTML = '<div class="inventory-inline-empty">Todavía no hay actualizaciones publicadas.</div>';
+    return;
+  }
+  host.innerHTML = rows.map((row, index) => `<article class="release-entry ${index === 0 ? 'release-entry-latest' : ''}">
+    <div class="release-entry-top"><span class="release-version-pill">${esc(row.version)}</span><time>${esc(platformDateLabel(row.created_at))}</time>${isXifreAdmin && !row.published ? '<span class="release-draft-pill">BORRADOR</span>' : ''}</div>
+    <h3>${esc(row.title)}</h3><p class="release-summary">${esc(row.summary || '')}</p>
+    ${row.image_url ? `<img class="release-image" src="${esc(row.image_url)}" alt="Imagen de ${esc(row.title)}" loading="lazy">` : ''}
+    <div class="release-body">${esc(row.body || '')}</div>
+    ${isXifreAdmin ? `<button type="button" class="inventory-secondary-button compact release-edit-button" data-edit-release="${esc(row.id)}">Editar publicación</button>` : ''}
+  </article>`).join('');
+}
+
+function platformResetReleaseEditor() {
+  $('#release-admin-form')?.reset();
+  platformReleaseEditingId = null;
+  platformReleaseImagePath = null;
+  setText('release-editor-title', 'Publicar actualización');
+  setText('release-save-button', 'Guardar publicación');
+  platformSetMessage('release-admin-message', '');
+  platformSetPreview('release-image-preview', null, '');
+}
+
+function platformEditRelease(releaseId) {
+  if (!isXifreAdmin) return;
+  const row = platformReleaseRecords.find(entry => String(entry.id) === String(releaseId));
+  if (!row) return toast('No se ha encontrado esa publicación.', 'error');
+  platformReleaseEditingId = row.id;
+  platformReleaseImagePath = row.image_path || null;
+  $('#release-version').value = row.version || '';
+  $('#release-published').value = String(Boolean(row.published));
+  $('#release-title').value = row.title || '';
+  $('#release-summary').value = row.summary || '';
+  $('#release-body').value = row.body || '';
+  $('#release-image').value = '';
+  setText('release-editor-title', 'Editar publicación');
+  setText('release-save-button', 'Guardar cambios');
+  platformSetPreview('release-image-preview', null, row.image_path || '');
+  platformSetMessage('release-admin-message', 'Editando la publicación seleccionada.', 'info');
+  $('#release-admin-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function platformSaveRelease(event) {
+  event.preventDefault();
+  if (!isXifreAdmin) return toast('Solo los administradores pueden publicar actualizaciones.', 'error');
+  const button = $('#release-save-button');
+  const file = $('#release-image')?.files?.[0] || null;
+  let uploadedPath = null;
+  let saveRpcStarted = false;
+  setLoading(button, true);
+  platformSetMessage('release-admin-message', 'Guardando publicación...', 'info');
+  try {
+    if (file) uploadedPath = await platformUploadImage(file, 'releases');
+    const imagePath = uploadedPath || platformReleaseImagePath;
+    saveRpcStarted = true;
+    const { error } = await supabase.rpc('xifre_admin_save_release', {
+      p_id: platformReleaseEditingId,
+      p_version: String($('#release-version')?.value || '').trim(),
+      p_title: String($('#release-title')?.value || '').trim(),
+      p_summary: String($('#release-summary')?.value || '').trim(),
+      p_body: String($('#release-body')?.value || ''),
+      p_image_path: imagePath,
+      p_published: $('#release-published')?.value === 'true'
+    });
+    if (error) throw error;
+    if (uploadedPath && platformReleaseImagePath && uploadedPath !== platformReleaseImagePath) await platformDeleteImage(platformReleaseImagePath);
+    platformResetReleaseEditor();
+    await platformLoadReleases();
+    toast('Actualización guardada.', 'success');
+  } catch (error) {
+    if (uploadedPath && !saveRpcStarted) await platformDeleteImage(uploadedPath);
+    console.error('XIFRE SAVE RELEASE', error);
+    platformSetMessage('release-admin-message', friendlyError(error), 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+function platformBindEvents() {
+  document.addEventListener('click', event => {
+    const appButton = event.target.closest('[data-platform-app]');
+    if (appButton) {
+      event.preventDefault();
+      platformSetApp(appButton.dataset.platformApp);
+      return;
+    }
+    const action = event.target.closest('[data-action]');
+    if (action?.dataset.action === 'open-updates') {
+      event.preventDefault();
+      void platformOpenUpdates();
+      return;
+    }
+    if (action?.dataset.action === 'open-inventory-admin') {
+      event.preventDefault();
+      if (!isXifreAdmin) return toast('No tienes permisos de administrador.', 'error');
+      platformSetApp('inventory', true);
+      return;
+    }
+    const inventoryTab = event.target.closest('[data-inventory-tab]');
+    if (inventoryTab) {
+      platformSetInventoryTab(inventoryTab.dataset.inventoryTab);
+      return;
+    }
+    const editItem = event.target.closest('[data-admin-edit-item]');
+    if (editItem) { platformEditItem(editItem.dataset.adminEditItem); return; }
+    const toggleItem = event.target.closest('[data-admin-toggle-item]');
+    if (toggleItem) { void platformToggleItem(toggleItem.dataset.adminToggleItem, toggleItem.dataset.enabled === 'true'); return; }
+    const toggleApp = event.target.closest('[data-admin-app-toggle]');
+    if (toggleApp) { void platformToggleSystemApp(toggleApp.dataset.adminAppToggle, toggleApp.dataset.enabled === 'true'); return; }
+    const targetUser = event.target.closest('[data-admin-user-id]');
+    if (targetUser) { platformSelectAdminUser(targetUser.dataset.adminUserId); return; }
+    const response = event.target.closest('[data-trade-response]');
+    if (response) { void platformRespondTrade(response.dataset.tradeId, response.dataset.tradeResponse === 'accept'); return; }
+    const openTrade = event.target.closest('[data-open-trade]');
+    if (openTrade) { void platformOpenTradeWorkspace(openTrade.dataset.openTrade); return; }
+    const cancelTrade = event.target.closest('[data-cancel-trade]');
+    if (cancelTrade) { void platformCancelTrade(cancelTrade.dataset.cancelTrade); return; }
+    const editRelease = event.target.closest('[data-edit-release]');
+    if (editRelease) { platformEditRelease(editRelease.dataset.editRelease); return; }
+  });
+
+  $('#inventory-refresh-button')?.addEventListener('click', () => {
+    void platformRefreshInventory();
+    void platformLoadTrades(false);
+  });
+  $('#trade-request-form')?.addEventListener('submit', event => void platformCreateTradeRequest(event));
+  $('#trade-back-button')?.addEventListener('click', platformBackToTradeList);
+  $('#trade-cancel-button')?.addEventListener('click', () => { if (platformActiveTradeId) void platformCancelTrade(platformActiveTradeId); });
+  $('#trade-save-offer-button')?.addEventListener('click', () => void platformSaveTradeOffer());
+  $('#trade-confirm-button')?.addEventListener('click', () => void platformConfirmTrade());
+  $('#trade-my-items')?.addEventListener('change', event => {
+    if (event.target.matches('[data-trade-instance]')) platformUpdateTradeSelectionCount();
+  });
+  $('#admin-item-form')?.addEventListener('submit', event => void platformSaveItem(event));
+  $('#admin-item-reset')?.addEventListener('click', platformResetItemForm);
+  $('#admin-item-image')?.addEventListener('change', event => platformSetPreview('admin-item-image-preview', event.target.files?.[0] || null, platformAdminEditingItemImagePath || ''));
+  $('#admin-user-search')?.addEventListener('input', event => void platformSearchAdminUsers(event.target.value));
+  $('#admin-grant-form')?.addEventListener('submit', event => void platformGrantItem(event));
+  $('#release-admin-form')?.addEventListener('submit', event => void platformSaveRelease(event));
+  $('#release-editor-reset')?.addEventListener('click', platformResetReleaseEditor);
+  $('#release-image')?.addEventListener('change', event => platformSetPreview('release-image-preview', event.target.files?.[0] || null, platformReleaseImagePath || ''));
+}
+
+
 
 async function init() {
 bind();
@@ -3540,6 +4747,7 @@ return;
 }
 if (event === 'SIGNED_OUT') {
 stopPresenceTracking();
+platformStop();
 currentUser = null;
 currentProfile = null;
 appStarted = false;
