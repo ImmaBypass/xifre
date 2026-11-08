@@ -197,7 +197,7 @@ function getPresenceStatus(userId) {
   const now = Date.now();
   const activelyVisible = records.some(record => {
     const last = parsePresenceTimestamp(record.last_active_at);
-    return record.visible === true && (record.status === 'online' || record.status == null) && last > 0 && now - last < PRESENCE_IDLE_MS;
+    return record.visible !== false && (record.status === 'online' || record.status == null) && last > 0 && now - last >= -30000 && now - last < PRESENCE_IDLE_MS;
   });
   return activelyVisible ? 'online' : 'away';
 }
@@ -218,22 +218,46 @@ function renderPresenceIndicators() {
 
 function rebuildPresencePayloads() {
   const next = new Map();
+  const addPresence = (rawKey, rawMeta) => {
+    const meta = rawMeta && typeof rawMeta === 'object' ? rawMeta : {};
+    // Supabase normally returns the tracked payload directly. These fallbacks
+    // also tolerate wrappers used by different Realtime client/server builds.
+    const nested = [meta.payload, meta.data, meta.presence].find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+    const record = { ...meta, ...nested };
+    const keyParts = String(rawKey || '').split(':');
+    const candidates = [
+      record.user_id, record.userId, record.user?.id,
+      meta.user_id, meta.userId, meta.user?.id,
+      keyParts[0]
+    ];
+    const id = candidates.map(value => String(value || '').trim()).find(value => isValidUuid(value)) || '';
+    if (!id) return;
+    if (!next.has(id)) next.set(id, []);
+    const rows = next.get(id);
+    const tabId = String(record.tab_id || record.tabId || '');
+    const duplicate = rows.some(existing => tabId
+      ? String(existing.tab_id || existing.tabId || '') === tabId
+      : existing === record);
+    if (!duplicate) rows.push(record);
+  };
+
   if (presenceChannel) {
-    const state = presenceChannel.presenceState() || {};
-    for (const [presenceKey, rawMetas] of Object.entries(state)) {
-      const metas = Array.isArray(rawMetas) ? rawMetas : (rawMetas ? [rawMetas] : []);
-      for (const meta of metas) {
-        // Supabase Presence returns an array of tracked metadata per presence key.
-        // Use the payload user id first, falling back to our stable userId:tabId key.
-        const keyUserId = String(presenceKey || '').split(':')[0];
-        const id = String(meta?.user_id || meta?.userId || meta?.user?.id || keyUserId || '');
-        if (!isValidUuid(id)) continue;
-        if (!next.has(id)) next.set(id, []);
-        next.get(id).push(meta || {});
+    try {
+      const state = presenceChannel.presenceState() || {};
+      if (Array.isArray(state)) {
+        state.forEach((meta, index) => addPresence(meta?.presence_ref || meta?.user_id || String(index), meta));
+      } else {
+        for (const [presenceKey, rawMetas] of Object.entries(state)) {
+          const metas = Array.isArray(rawMetas) ? rawMetas : (rawMetas ? [rawMetas] : []);
+          metas.forEach(meta => addPresence(presenceKey, meta));
+        }
       }
+    } catch (error) {
+      console.warn('PRESENCE STATE READ', error);
     }
   }
-  // Keep the local tab's latest state until the server sync catches up.
+
+  // Keep this tab's optimistic state until the server sync contains it.
   if (presenceOwnerId) {
     const local = (presencePayloads.get(presenceOwnerId) || []).find(item => item.tab_id === presenceTabId);
     if (local) {
@@ -305,9 +329,11 @@ async function setupPresenceTracking() {
       if (sessionResult.error) throw sessionResult.error;
       if (!currentUser || String(currentUser.id) !== requestedOwner) return;
       const accessToken = sessionResult.data?.session?.access_token;
-      if (accessToken) await supabase.realtime.setAuth(accessToken);
+      if (!accessToken) throw new Error('No hay access token para autorizar Presence.');
+      await supabase.realtime.setAuth(accessToken);
     } catch (error) {
       console.warn('PRESENCE AUTH', error);
+      return;
     }
     if (!currentUser || String(currentUser.id) !== requestedOwner) return;
 
@@ -315,7 +341,7 @@ async function setupPresenceTracking() {
     const channel = supabase.channel(topic, {
       config: {
         private: true,
-        presence: { enabled: true, key: `${requestedOwner}:${presenceTabId}` }
+        presence: { key: `${requestedOwner}:${presenceTabId}` }
       }
     });
     presenceChannel = channel;
@@ -326,10 +352,12 @@ async function setupPresenceTracking() {
       .subscribe((status, error) => {
         if (channel !== presenceChannel) return;
         if (status === 'SUBSCRIBED') {
+          console.info('PRESENCE CHANNEL SUBSCRIBED', topic);
           presenceLastTrackAt = 0;
           void trackPresence(true);
-          // Reconcile after the server has applied the initial presence sync.
-          setTimeout(() => { if (channel === presenceChannel) rebuildPresencePayloads(); }, 250);
+          rebuildPresencePayloads();
+          // Reconcile again after the initial server sync has settled.
+          setTimeout(() => { if (channel === presenceChannel) rebuildPresencePayloads(); }, 500);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn('PRESENCE CHANNEL', status, error || '');
         }
