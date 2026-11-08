@@ -1217,3 +1217,9 @@ html[data-theme="light"] .chat-link:hover { color: #0056a7; }
 .chat-attachment-preview { gap:0; padding:8px 42px 8px 8px; width:fit-content; max-width:min(420px,100%); }
 .chat-attachment-preview-copy { display:none !important; }
 .chat-attachment-preview > img { width:auto; height:auto; max-width:min(360px,70vw); max-height:220px; object-fit:contain; border-radius:8px; }
+
+
+/* XIFRE V21.2 — force presence colors to win over generic avatar/status rules. */
+.presence-dot.presence-offline { background-color: #80848e !important; }
+.presence-dot.presence-online { background-color: #23a559 !important; }
+.presence-dot.presence-away { background-color: #f0b232 !important; }
