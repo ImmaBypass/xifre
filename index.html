@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261111-inventory-2">
+<link rel="stylesheet" href="style.css?v=20261112-shop-3">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -69,6 +69,9 @@
     </button>
     <button id="app-inventory-button" class="app-launcher app-launcher-inventory" type="button" data-platform-app="inventory" aria-label="Abrir Inventario" title="Inventario">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5 8.3 4h7.4L17 7.5l2.5 1.2v10.1a1.7 1.7 0 0 1-1.7 1.7H6.2a1.7 1.7 0 0 1-1.7-1.7V8.7L7 7.5Z"/><path d="M8 4.5c.2 2.1 1.5 3.3 4 3.3s3.8-1.2 4-3.3M9 12h6M12 9.5v5"/></svg>
+    </button>
+    <button id="app-shop-button" class="app-launcher app-launcher-shop" type="button" data-platform-app="shop" aria-label="Abrir Tienda" title="Tienda XIFRE">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18l-1.5-5H4.5L3 9Z"/><path d="M5 9v11h14V9M9 20v-7h6v7M3 9c0 2 3 2 4 0 1 2 4 2 5 0 1 2 4 2 5 0 1 2 4 2 4 0"/></svg>
     </button>
   </div>
   <div class="appbar-tools">
@@ -219,6 +222,7 @@
     <div class="inventory-main">
       <section id="inventory-panel-collection" class="inventory-panel active">
         <div class="inventory-panel-heading"><div><h2>Mi colección</h2><p>Selecciona un objeto para ver su ficha, rareza y descripción.</p></div><span id="inventory-collection-count" class="inventory-subcount">0 COPIAS</span></div>
+        <div class="inventory-collection-hint"><span class="inventory-hint-dot"></span> Las copias idénticas se agrupan; los objetos siguen siendo individuales para intercambios y cajas.</div>
         <div id="inventory-grid" class="inventory-grid"><div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div></div>
       </section>
       <section id="inventory-panel-trades" class="inventory-panel">
@@ -238,11 +242,11 @@
           <div class="trade-workspace-top"><button id="trade-back-button" class="inventory-back-button" type="button">← Volver a intercambios</button><span id="trade-workspace-status" class="trade-status-pill">EN CURSO</span></div>
           <div class="trade-workspace-heading"><div><h2>Preparar intercambio</h2><p id="trade-workspace-subtitle">Preparad vuestras ofertas.</p></div><button id="trade-cancel-button" class="inventory-danger-quiet" type="button">Cancelar intercambio</button></div>
           <div class="trade-offer-columns">
-            <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">TU OFERTA</span><h3 id="trade-own-name">Tú</h3></div><span id="trade-own-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div id="trade-own-offer" class="trade-offer-items"></div></section>
-            <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">SU OFERTA</span><h3 id="trade-other-name">Amigo</h3></div><span id="trade-other-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div id="trade-other-offer" class="trade-offer-items"></div></section>
+            <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">TU OFERTA</span><h3 id="trade-own-name">Tú</h3></div><span id="trade-own-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div class="trade-offer-total">Valor total <strong id="trade-own-total">0</strong></div><div id="trade-own-offer" class="trade-offer-items"></div></section>
+            <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">SU OFERTA</span><h3 id="trade-other-name">Amigo</h3></div><span id="trade-other-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div class="trade-offer-total">Valor total <strong id="trade-other-total">0</strong></div><div id="trade-other-offer" class="trade-offer-items"></div></section>
           </div>
           <section class="trade-select-items"><div class="trade-select-heading"><div><h3>Elige qué quieres ofrecer</h3><p>Haz clic en un objeto para añadirlo o quitarlo. Se guarda automáticamente. Los objetos de otros intercambios no están disponibles.</p></div><span id="trade-selected-count" aria-live="polite">0 ofrecidos</span></div><div id="trade-my-items" class="trade-select-grid"></div></section>
-          <div class="trade-workspace-actions"><span id="trade-workspace-feedback" class="trade-feedback" aria-live="polite">Los objetos solo se transferirán cuando ambos confirméis.</span><div><button id="trade-save-offer-button" class="inventory-secondary-button hidden" type="button">Reintentar guardar</button><button id="trade-confirm-button" class="inventory-primary-button" type="button">Confirmar intercambio</button></div></div>
+          <div class="trade-workspace-actions"><span id="trade-workspace-feedback" class="trade-feedback" aria-live="polite">Los dos debéis confirmar, aunque uno no ofrezca objetos (regalo).</span><div><button id="trade-save-offer-button" class="inventory-secondary-button hidden" type="button">Reintentar guardar</button><button id="trade-confirm-button" class="inventory-primary-button" type="button">Confirmar intercambio</button></div></div>
         </div>
       </section>
       <section id="inventory-panel-admin" class="inventory-panel">
@@ -255,6 +259,14 @@
               <label>Nombre<input id="admin-item-name" type="text" maxlength="80" placeholder="Ej. Fragmento solar" required></label>
               <label>Descripción<textarea id="admin-item-description" rows="3" maxlength="1000" placeholder="Describe el objeto..."></textarea></label>
               <div class="admin-form-row"><label>Rareza<select id="admin-item-rarity" required><option value="comun">Común</option><option value="poco_comun">Poco común</option><option value="raro">Raro</option><option value="epico">Épico</option><option value="legendario">Legendario</option><option value="mitico">Mítico</option><option value="divino">Divino</option></select></label><label>Valor conceptual<input id="admin-item-value" type="number" min="0" max="9000000000000000" step="1" value="0" required></label></div>
+              <label class="xifre-check-row"><input id="admin-item-is-box" type="checkbox"><span>Este objeto es una caja consumible</span></label>
+              <div id="admin-box-config" class="admin-box-config hidden">
+                <strong>Contenido de la caja · probabilidades (%)</strong>
+                <p>Elige objetos ya creados y reparte un 100% de probabilidades. No se permiten cajas dentro de cajas.</p>
+                <div id="admin-box-drops" class="admin-box-drops"></div>
+                <button id="admin-box-add-drop" type="button" class="inventory-secondary-button compact">+ Añadir premio</button>
+                <span id="admin-box-probability" class="admin-box-probability">Total: 0%</span>
+              </div>
               <label class="admin-upload-label">Imagen del objeto <span>PNG, JPG, WEBP o GIF · máximo 8 MB</span><input id="admin-item-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
               <div id="admin-item-image-preview" class="admin-image-preview"><span>Vista previa del objeto</span></div>
               <div class="admin-form-actions"><button id="admin-item-reset" class="inventory-secondary-button" type="button">Limpiar</button><button id="admin-item-save" class="inventory-primary-button" type="submit">Crear objeto</button></div>
@@ -279,9 +291,56 @@
     </div>
   </div>
 </section>
+
+<section id="shop-app-view" class="app-view shop-app hidden" aria-label="Tienda de XIFRE">
+  <header class="shop-header">
+    <div><span class="shop-eyebrow">XIFRE · SISTEMA</span><h1>La Tienda<span class="shop-header-spark">✦</span></h1><p>Descubre objetos, ofertas especiales y cajas sorpresa.</p></div>
+    <div class="shop-header-controls">
+      <div class="shop-wallet" aria-live="polite"><span>MI SALDO</span><strong id="shop-wallet-balance">0.00€</strong><button class="shop-wallet-help" type="button" aria-label="Información sobre el saldo" title="Ganas 0.05€ virtuales por cada minuto de actividad en XIFRE. Los segundos se guardan para la siguiente visita. Sin valor real.">?</button>
+        <div class="shop-wallet-tooltip">Gana <b>0.05€</b> virtuales por minuto usando XIFRE activamente. Los segundos se acumulan entre visitas. No es dinero real.</div>
+      </div>
+      <button id="shop-refresh" type="button" class="shop-refresh" title="Actualizar tienda" aria-label="Actualizar tienda">↻</button>
+    </div>
+  </header>
+  <div class="shop-scroller">
+    <div class="shop-intro"><span>OBJETOS DESTACADOS</span><p>Tu próxima adquisición puede estar aquí.</p></div>
+    <div id="shop-featured" class="shop-featured"></div>
+    <div class="shop-section-heading"><div><span>EXPLORA EL CATÁLOGO</span><h2>Ofertas y artículos</h2></div><span id="shop-count">0 artículos</span></div>
+    <div id="shop-products" class="shop-products"></div>
+    <section id="shop-admin" class="shop-admin hidden">
+      <div class="shop-admin-top"><span>◈ ADMINISTRACIÓN</span><h2>Gestionar tienda</h2><p>Crea ofertas visibles para todos. El saldo y las compras se gestionan en Supabase.</p></div>
+      <div class="shop-admin-layout">
+        <form id="shop-admin-form" class="shop-admin-card">
+          <h3 id="shop-admin-form-title">Nueva oferta</h3>
+          <label>Objeto<select id="shop-admin-item" required><option value="">Elige un objeto</option></select></label>
+          <div class="shop-admin-form-row"><label>Precio virtual (€)<input id="shop-admin-price" type="number" step="0.01" min="0" value="1.00" required></label><label>Posición<select id="shop-admin-placement"><option value="featured">Principal (grande)</option><option value="standard">Normal</option><option value="special">Especial</option></select></label></div>
+          <div class="shop-admin-form-row"><label>Estilo<select id="shop-admin-theme"><option value="indigo">Azul</option><option value="gold">Dorado</option><option value="rose">Rosa</option><option value="cyan">Turquesa</option><option value="green">Verde</option><option value="violet">Violeta</option></select></label><label>Cartel de marketing<input id="shop-admin-badge" type="text" maxlength="28" placeholder="¡OFERTA! / LIMITADO"></label></div>
+          <div class="shop-admin-form-row"><label>Existencias (vacío = ilimitadas)<input id="shop-admin-stock" type="number" min="0" max="1000000" placeholder="Ilimitadas"></label><div class="shop-admin-toggles"><label><input id="shop-admin-glow" type="checkbox" checked> Brillo especial</label><label><input id="shop-admin-active" type="checkbox" checked> Visible</label></div></div>
+          <div class="shop-admin-actions"><button type="button" id="shop-admin-reset" class="inventory-secondary-button">Limpiar</button><button type="submit" id="shop-admin-save" class="inventory-primary-button">Publicar oferta</button></div>
+          <p id="shop-admin-message" class="shop-admin-message"></p>
+        </form>
+        <div class="shop-admin-card">
+          <h3>Entregar saldo</h3><p>Abona créditos virtuales a la cuenta de un usuario.</p>
+          <form id="shop-money-form"><label>Buscar usuario<input type="search" id="shop-money-search" autocomplete="off" placeholder="Nombre o @usuario" required></label><div id="shop-money-results" class="shop-money-results">Escribe al menos 2 letras para buscar.</div><div id="shop-money-selected" class="shop-money-selected hidden"></div><label>Importe (€)<input id="shop-money-amount" type="number" step="0.01" min="0.01" value="1.00" required></label><button id="shop-money-submit" type="submit" class="inventory-primary-button">Entregar saldo</button></form>
+          <p id="shop-money-message" class="shop-admin-message"></p>
+        </div>
+      </div>
+      <div class="shop-admin-card shop-admin-catalog"><h3>Ofertas creadas</h3><div id="shop-admin-list"></div></div>
+    </section>
+    <footer class="shop-footer">✦ XIFRE STORE · Moneda ficticia sin valor real · Los premios de las cajas tienen probabilidades públicas.</footer>
+  </div>
+</section>
 </div>
 
 
+
+<div id="box-opening-modal" class="modal hidden box-opening-modal" role="dialog" aria-modal="true" aria-labelledby="box-opening-title">
+ <div class="modal-card box-opening-card"><button type="button" id="box-opening-close" class="modal-close" aria-label="Cerrar">×</button>
+ <span class="shop-eyebrow">XIFRE · APERTURA DE CAJA</span><h2 id="box-opening-title">Descubriendo tu premio...</h2>
+ <div class="box-reel-window" id="box-reel-window"><div class="box-reel-strip" id="box-reel-strip"></div><span class="box-reel-marker"></span></div>
+ <div id="box-opening-result" class="box-opening-result hidden"></div><p id="box-opening-hint">El premio se determina en el servidor antes de comenzar la animación.</p>
+ <button id="box-opening-done" class="inventory-primary-button hidden" type="button">Volver a mi inventario</button></div>
+</div>
 <!-- ITEM DETAILS: shared by collection, trade offers and admin catalog -->
 <div id="item-details-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="item-details-name">
   <div class="modal-card item-details-card">
@@ -293,6 +352,8 @@
       <div class="item-details-value-wrap"><span>VALOR</span><strong id="item-details-value">0</strong></div>
       <div class="item-details-section"><strong>Descripción</strong><p id="item-details-description">Sin descripción.</p></div>
       <p id="item-details-status" class="item-details-status"></p>
+      <div id="item-box-preview" class="item-box-preview hidden"></div>
+      <button id="item-open-box-button" type="button" class="inventory-primary-button item-open-box-button hidden">✦ Abrir caja</button>
       <button class="inventory-primary-button item-details-close" type="button" data-action="close-modal" data-modal="item-details-modal">Cerrar</button>
     </div>
   </div>
@@ -537,6 +598,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261111-inventory-2"></script>
+<script src="app.js?v=20261112-shop-3"></script>
 </body>
 </html>
