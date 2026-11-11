@@ -3568,6 +3568,22 @@ let platformReleaseEditingId = null;
 let platformReleaseImagePath = null;
 let platformReleaseImagePreviewUrl = null;
 let platformReleaseLoadBusy = false;
+let platformDisplayVersionTimer = null;
+let platformVersionWarned = false;
+const platformImageSignedUrlCache = new Map();
+let platformInventoryRenderKey = '';
+let platformTradeListRenderKey = '';
+let platformTradeDraftTradeId = null;
+let platformTradeOfferDraft = null;
+let platformTradeOfferDraftDirty = false;
+let platformTradeOfferMutationBusy = false;
+let platformTradeOfferRevision = 0;
+let platformTradeOfferRetryNeeded = false;
+let platformTradeMutationTicket = 0;
+let platformTradeDetailQueued = false;
+let platformTradeDetailRenderKey = '';
+let platformTradeOpenSequence = 0;
+
 
 function platformSetMessage(id, message, type = '') {
   const node = $(`#${id}`);
@@ -3584,6 +3600,99 @@ function platformRarity(item) {
 function platformFormatValue(value) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(number) : '0';
+}
+
+async function platformLoadDisplayVersion() {
+  if (!currentUser || !supabase) return;
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  const { data, error } = await supabase.from('xifre_platform_settings').select('display_version').eq('id', 1).maybeSingle();
+  if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+  if (error) {
+    // Keep the default visible if the small SQL migration hasn't been installed yet.
+    if (!platformVersionWarned) console.info('XIFRE VERSION: aplica la migración de configuración.', error.message);
+    platformVersionWarned = true;
+    return;
+  }
+  platformVersionWarned = false;
+  const version = String(data?.display_version || 'Alpha 1').trim() || 'Alpha 1';
+  setText('appbar-version', version.toLocaleUpperCase('es-ES'));
+  const editor = $('#platform-display-version');
+  if (isXifreAdmin && editor && document.activeElement !== editor) editor.value = version;
+}
+
+async function platformSaveDisplayVersion(event) {
+  event.preventDefault();
+  if (!isXifreAdmin || !currentUser) return;
+  const button = $('#platform-version-save');
+  const version = String($('#platform-display-version')?.value || '').trim();
+  if (!version || version.length > 40) return platformSetMessage('platform-version-message', 'Escribe una versión de entre 1 y 40 caracteres.', 'error');
+  setLoading(button, true);
+  try {
+    const { data, error } = await supabase.rpc('xifre_admin_set_display_version', { p_version: version });
+    if (error) throw error;
+    setText('appbar-version', String(data || version).toLocaleUpperCase('es-ES'));
+    platformSetMessage('platform-version-message', 'Versión actualizada para todos los usuarios.', 'success');
+    toast('Versión de XIFRE actualizada.', 'success');
+  } catch (error) {
+    platformSetMessage('platform-version-message', `${friendlyError(error)}. Comprueba que has ejecutado el SQL nuevo.`, 'error');
+  } finally {
+    setLoading(button, false);
+  }
+}
+
+function platformApplyMarkup(host, markup) {
+  if (!host) return;
+  if (host.__xifreMarkup === markup) return;
+  const oldScrollTop = host.scrollTop;
+  host.innerHTML = markup;
+  host.__xifreMarkup = markup;
+  if (oldScrollTop) host.scrollTop = oldScrollTop;
+}
+
+function platformItemKey(item) {
+  return String(item?.instance_id || item?.id || '');
+}
+
+function platformItemCardMarkup(item, { mode = 'collection', disabled = false, selected = false } = {}) {
+  const rarity = platformRarity(item);
+  const instanceId = platformItemKey(item);
+  const isReserved = Boolean(item.reserved);
+  const rarityClass = `rarity-${esc(rarity.className)}`;
+  const image = platformImageMarkup(item.image_url, item.name);
+  if (mode === 'trade') {
+    return `<div class="trade-select-item xifre-mini-item ${rarityClass} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" data-trade-tile="${esc(instanceId)}">
+      <button type="button" class="trade-select-hitarea" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled ? 'disabled' : ''} title="${selected ? 'Quitar de la oferta' : 'Añadir a la oferta'}"><span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong><span class="mini-item-selection">${disabled ? 'No disponible' : (selected ? '✓ En tu oferta' : '+ Ofrecer')}</span></button>
+      <button type="button" class="mini-item-info" data-open-item="${esc(instanceId)}" data-item-source="trade" title="Detalles de ${esc(item.name)}" aria-label="Ver detalles de ${esc(item.name)}">ⓘ</button>
+    </div>`;
+  }
+  return `<button type="button" class="inventory-item-card xifre-mini-item ${rarityClass} ${isReserved ? 'is-reserved' : ''}" data-open-item="${esc(instanceId)}" data-item-source="collection" title="Ver detalles de ${esc(item.name)}">
+    <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong>${isReserved ? '<span class="mini-item-lock">Reservado</span>' : ''}
+  </button>`;
+}
+
+function platformFindItemForDetails(key, source) {
+  const list = source === 'admin' ? platformAdminItems : (source === 'trade'
+    ? [...platformInventoryItems, ...(platformActiveTradeDetail?.offers || [])]
+    : platformInventoryItems);
+  return list.find(item => platformItemKey(item) === String(key)) || null;
+}
+
+function platformOpenItemDetails(key, source = 'collection') {
+  const item = platformFindItemForDetails(key, source);
+  if (!item) return toast('Ese objeto ya no está disponible.', 'info');
+  const rarity = platformRarity(item);
+  const modal = $('#item-details-modal');
+  modal.className = `modal hidden rarity-${rarity.className}`;
+  const hero = $('#item-details-hero');
+  if (hero) hero.innerHTML = platformImageMarkup(item.image_url, item.name);
+  setText('item-details-name', item.name || 'Objeto');
+  setText('item-details-value', platformFormatValue(item.value));
+  setText('item-details-rarity', rarity.label);
+  setText('item-details-description', item.description || 'Sin descripción.');
+  const reserved = Boolean(item.reserved);
+  setText('item-details-status', reserved ? 'Este ejemplar está reservado en un intercambio.' : source === 'admin' ? 'Objeto del catálogo de XIFRE.' : 'Objeto de XIFRE.');
+  openModal('item-details-modal');
 }
 
 function platformUpdateClock() {
@@ -3620,6 +3729,11 @@ async function platformInitialize() {
   if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
   void platformLoadReleases();
   platformUpdateClock();
+  void platformLoadDisplayVersion();
+  if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
+  platformDisplayVersionTimer = setInterval(() => {
+    if (currentUser && String(currentUser.id) === owner && document.visibilityState === 'visible') void platformLoadDisplayVersion();
+  }, 45000);
   if (platformClockTimer) clearInterval(platformClockTimer);
   platformClockTimer = setInterval(platformUpdateClock, 1000);
   await platformLoadTrades(true).catch(error => console.warn('XIFRE INITIAL TRADES', error));
@@ -3650,6 +3764,8 @@ function platformStop() {
   if (platformTradeTimer) clearInterval(platformTradeTimer);
   if (platformTradeDetailTimer) clearInterval(platformTradeDetailTimer);
   if (platformInventoryTimer) clearInterval(platformInventoryTimer);
+  if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
+  platformDisplayVersionTimer = null;
   platformClockTimer = null;
   platformTradeTimer = null;
   platformTradeDetailTimer = null;
@@ -3696,6 +3812,21 @@ function platformStop() {
   platformInventoryRefreshQueued = false;
   platformAdminLoadBusy = false;
   platformReleaseLoadBusy = false;
+  platformInventoryRenderKey = '';
+  platformTradeListRenderKey = '';
+  platformTradeDraftTradeId = null;
+  platformTradeOfferDraft = null;
+  platformTradeOfferDraftDirty = false;
+  platformTradeOfferMutationBusy = false;
+  platformTradeOfferRevision += 1;
+  platformTradeMutationTicket += 1;
+  platformTradeOfferRetryNeeded = false;
+  platformTradeDetailQueued = false;
+  platformTradeDetailRenderKey = '';
+  platformTradeOpenSequence += 1;
+  platformImageSignedUrlCache.clear();
+  setText('appbar-version', 'ALPHA 1');
+  if ($('#platform-display-version')) $('#platform-display-version').value = 'Alpha 1';
   if (platformAdminSearchTimer) clearTimeout(platformAdminSearchTimer);
   platformAdminSearchTimer = null;
   if (platformAdminItemPreviewUrl) URL.revokeObjectURL(platformAdminItemPreviewUrl);
@@ -3714,6 +3845,10 @@ function platformStop() {
   $('#admin-system-apps').innerHTML = '<span class="inventory-inline-empty">Cargando aplicaciones...</span>';
   $('#admin-item-image-preview')?.replaceChildren(Object.assign(document.createElement('span'), { textContent: 'Vista previa del objeto' }));
   $('#release-image-preview')?.replaceChildren(Object.assign(document.createElement('span'), { textContent: 'Sin imagen adjunta' }));
+  for (const id of ['inventory-grid','trade-my-items','trade-own-offer','trade-other-offer','trade-incoming-list','trade-active-list','trade-history-list','admin-item-list','release-list']) {
+    const node = $('#'+id);
+    if (node) delete node.__xifreMarkup;
+  }
 }
 
 async function platformLoadSystemApps() {
@@ -3767,6 +3902,7 @@ function platformSetInventoryTab(tab) {
     if (tab === 'admin') toast('Esta zona está reservada a administradores.', 'error');
     return;
   }
+  platformLeaveTradeWorkspace(false);
   $$('[data-inventory-tab]').forEach(button => button.classList.toggle('active', button.dataset.inventoryTab === tab));
   $('#inventory-panel-collection')?.classList.toggle('active', tab === 'collection');
   $('#inventory-panel-trades')?.classList.toggle('active', tab === 'trades');
@@ -3779,24 +3915,34 @@ function platformSetInventoryTab(tab) {
   }
   if (tab === 'admin') void platformLoadAdminData();
 }
-
 async function platformSignImagePaths(paths) {
   const unique = [...new Set((paths || []).filter(path => typeof path === 'string' && path.trim()))];
   const mapped = new Map();
   if (!unique.length || !supabase) return mapped;
-  const { data, error } = await supabase.storage.from(XIFRE_SYSTEM_MEDIA_BUCKET).createSignedUrls(unique, 86400);
+  const now = Date.now();
+  const missing = [];
+  for (const path of unique) {
+    const cached = platformImageSignedUrlCache.get(path);
+    if (cached && cached.expiresAt > now) mapped.set(path, cached.url);
+    else missing.push(path);
+  }
+  if (!missing.length) return mapped;
+  const { data, error } = await supabase.storage.from(XIFRE_SYSTEM_MEDIA_BUCKET).createSignedUrls(missing, 86400);
   if (error) {
     console.warn('XIFRE MEDIA SIGN', error);
     return mapped;
   }
-  (data || []).forEach(row => {
-    const path = String(row.path || '');
+  (data || []).forEach((row, index) => {
+    const path = String(row.path || missing[index] || '');
     const url = row.signedUrl || row.signedURL || '';
-    if (path && url) mapped.set(path, url);
+    if (path && url) {
+      mapped.set(path, url);
+      // Signed links are valid for 24h. Refresh them 1h before expiration.
+      platformImageSignedUrlCache.set(path, { url, expiresAt: now + 23 * 60 * 60 * 1000 });
+    }
   });
   return mapped;
 }
-
 function platformImageMarkup(url, name, className = '') {
   if (!url) return `<div class="platform-image-fallback ${esc(className)}"><span>✧</span></div>`;
   return `<div class="platform-image-frame ${esc(className)}"><img src="${esc(url)}" alt="${esc(name || 'Objeto') }" loading="lazy" decoding="async"></div>`;
@@ -3814,16 +3960,20 @@ async function platformRefreshInventory() {
   try {
     const { data, error } = await supabase.rpc('xifre_get_my_inventory');
     if (error) throw error;
-    if (!currentUser || String(currentUser.id) !== owner) return;
-    platformInventoryItems = Array.isArray(data) ? data : [];
-    const urls = await platformSignImagePaths(platformInventoryItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
-    platformInventoryItems = platformInventoryItems.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+    const rawItems = Array.isArray(data) ? data : [];
+    const urls = await platformSignImagePaths(rawItems.map(item => item.image_path));
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
+    platformInventoryItems = rawItems.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
     platformRenderInventory();
+    // Don't redraw the entire trade workspace: its item selection is interactive.
+    if (platformActiveTradeId && !platformTradeOfferMutationBusy) platformRenderTradeAvailableItems();
   } catch (error) {
     console.error('XIFRE LOAD INVENTORY', error);
-    const grid = $('#inventory-grid');
-    if (grid) grid.innerHTML = `<div class="inventory-empty inventory-error"><span>!</span><strong>No se pudo cargar el inventario</strong><p>${esc(friendlyError(error))}</p></div>`;
+    if (!platformInventoryItems.length) {
+      const grid = $('#inventory-grid');
+      if (grid) platformApplyMarkup(grid, `<div class="inventory-empty inventory-error"><span>!</span><strong>No se pudo cargar el inventario</strong><p>${esc(friendlyError(error))}</p></div>`);
+    }
   } finally {
     platformInventoryLoadBusy = false;
     if (platformInventoryRefreshQueued && currentUser) {
@@ -3832,7 +3982,6 @@ async function platformRefreshInventory() {
     }
   }
 }
-
 function platformRenderInventory() {
   const rows = platformInventoryItems;
   setText('inventory-total-count', `${rows.length} ${rows.length === 1 ? 'objeto' : 'objetos'}`);
@@ -3840,22 +3989,11 @@ function platformRenderInventory() {
   setText('inventory-collection-count', `${rows.length} ${rows.length === 1 ? 'COPIA' : 'COPIAS'}`);
   const grid = $('#inventory-grid');
   if (!grid) return;
-  if (!rows.length) {
-    grid.innerHTML = '<div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div>';
-    return;
-  }
-  grid.innerHTML = rows.map(item => {
-    const rarity = platformRarity(item);
-    const reserved = Boolean(item.reserved);
-    return `<article class="inventory-item-card rarity-${esc(rarity.className)} ${reserved ? 'is-reserved' : ''}">
-      <div class="inventory-item-image">${platformImageMarkup(item.image_url, item.name)}</div>
-      <div class="inventory-item-copy"><div class="inventory-item-meta"><span class="inventory-rarity-pill rarity-pill-${esc(rarity.className)}">${esc(rarity.label)}</span><span class="inventory-item-value">${esc(platformFormatValue(item.value))} V</span></div>
-      <h3>${esc(item.name)}</h3><p>${esc(item.description || 'Sin descripción.')}</p>
-      <div class="inventory-item-footer"><span>${reserved ? 'Reservado en un intercambio' : 'En tu colección'}</span><span>✦</span></div></div>
-    </article>`;
-  }).join('');
+  const markup = rows.length
+    ? rows.map(item => platformItemCardMarkup(item)).join('')
+    : '<div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div>';
+  platformApplyMarkup(grid, markup);
 }
-
 async function platformUploadImage(file, folder) {
   if (!(file instanceof File)) throw new Error('Selecciona una imagen.');
   if (!XIFRE_SYSTEM_MEDIA_TYPES.has(file.type)) throw new Error('Formato no admitido. Usa PNG, JPG, WEBP o GIF.');
@@ -3938,19 +4076,18 @@ function platformRenderAdminItems() {
   const list = $('#admin-item-list');
   if (!list) return;
   if (!platformAdminItems.length) {
-    list.innerHTML = '<div class="inventory-inline-empty">Todavía no has creado ningún objeto.</div>';
+    platformApplyMarkup(list, '<div class="inventory-inline-empty">Todavía no has creado ningún objeto.</div>');
     return;
   }
-  list.innerHTML = platformAdminItems.map(item => {
+  platformApplyMarkup(list, platformAdminItems.map(item => {
     const rarity = platformRarity(item);
-    return `<article class="admin-item-row ${item.active ? '' : 'is-disabled'}">
-      <div class="admin-item-row-image">${platformImageMarkup(item.image_url, item.name)}</div>
-      <div class="admin-item-row-copy"><strong>${esc(item.name)}</strong><span>${esc(rarity.label)} · ${esc(platformFormatValue(item.value))} V · ${esc(String(item.owned_count || 0))} copias</span><small>${item.active ? 'Activo' : 'Desactivado'}</small></div>
+    return `<article class="admin-item-row rarity-${esc(rarity.className)} ${item.active ? '' : 'is-disabled'}">
+      <button type="button" class="admin-item-row-image" data-open-item="${esc(item.id)}" data-item-source="admin" title="Ver ficha de ${esc(item.name)}">${platformImageMarkup(item.image_url, item.name)}</button>
+      <div class="admin-item-row-copy"><strong>${esc(item.name)}</strong><span>${esc(rarity.label)} · <b>${esc(platformFormatValue(item.value))}</b> · ${esc(String(item.owned_count || 0))} copias</span><small>${item.active ? 'Disponible' : 'Desactivado'}</small></div>
       <div class="admin-item-row-actions"><button type="button" class="inventory-secondary-button compact" data-admin-edit-item="${esc(item.id)}">Editar</button><button type="button" class="inventory-secondary-button compact" data-admin-toggle-item="${esc(item.id)}" data-enabled="${item.active ? 'false' : 'true'}">${item.active ? 'Desactivar' : 'Activar'}</button></div>
     </article>`;
-  }).join('');
+  }).join(''));
 }
-
 function platformPopulateGrantItemSelect() {
   const select = $('#admin-grant-item');
   if (!select) return;
@@ -4196,10 +4333,11 @@ async function platformLoadTrades(showNotifications = true) {
     if (error) throw error;
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
     platformTrades = Array.isArray(data) ? data : [];
-    platformRenderTrades();
     const incoming = platformTrades.filter(trade => trade.status === 'pending' && String(trade.recipient_id) === owner);
     setText('inventory-trade-badge', String(incoming.length));
     $('#inventory-trade-badge')?.classList.toggle('hidden', incoming.length === 0);
+    // The list is re-rendered only on actual data changes. This preserves scroll and hover.
+    platformRenderTrades();
     if (showNotifications && document.visibilityState === 'visible') {
       for (const trade of incoming) {
         const id = String(trade.id);
@@ -4208,15 +4346,10 @@ async function platformLoadTrades(showNotifications = true) {
         const age = Date.now() - new Date(trade.created_at || 0).getTime();
         if (Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000) platformShowTradeNotification(trade);
       }
-    } else {
-      incoming.forEach(trade => platformTradeIdsSeen.add(String(trade.id)));
-    }
+    } else incoming.forEach(trade => platformTradeIdsSeen.add(String(trade.id)));
     if (platformActiveTradeId && !platformTrades.some(trade => String(trade.id) === String(platformActiveTradeId) && trade.status === 'active')) {
-      const active = platformTrades.find(trade => String(trade.id) === String(platformActiveTradeId));
-      if (active && active.status !== 'active') {
-        $('#trade-workspace-status').textContent = String(active.status || '').toUpperCase();
-        $('#trade-workspace-feedback').textContent = active.status === 'completed' ? 'Intercambio completado. Los objetos ya están en los nuevos inventarios.' : 'Este intercambio ya no está activo.';
-      }
+      // Fetch the final state rather than leaving a stale 'active' workspace behind.
+      void platformRefreshTradeDetail(false);
     }
   } catch (error) {
     console.warn('XIFRE LOAD TRADES', error);
@@ -4224,7 +4357,6 @@ async function platformLoadTrades(showNotifications = true) {
     platformTradeRefreshBusy = false;
   }
 }
-
 function platformRenderTrades() {
   const me = String(currentUser?.id || '');
   const incoming = platformTrades.filter(trade => trade.status === 'pending' && String(trade.recipient_id) === me);
@@ -4233,18 +4365,14 @@ function platformRenderTrades() {
   setText('trade-incoming-count', String(incoming.length));
   setText('trade-active-count', String(active.length));
   setText('trade-history-count', String(history.length));
-  const incomingHost = $('#trade-incoming-list');
-  const activeHost = $('#trade-active-list');
-  const historyHost = $('#trade-history-list');
-  if (incomingHost) incomingHost.innerHTML = incoming.length ? incoming.map(trade => `<article class="trade-list-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>Quiere intercambiar objetos contigo</span><small>${esc(platformDateLabel(trade.created_at))}</small></div><div class="trade-list-actions"><button type="button" class="inventory-primary-button compact" data-trade-response="accept" data-trade-id="${esc(trade.id)}">Aceptar</button><button type="button" class="inventory-secondary-button compact" data-trade-response="reject" data-trade-id="${esc(trade.id)}">Rechazar</button></div></article>`).join('') : '<div class="inventory-inline-empty">No tienes solicitudes pendientes.</div>';
-  if (activeHost) activeHost.innerHTML = active.length ? active.map(trade => `<article class="trade-list-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>Intercambio en curso</span><small>${trade.sender_confirmed && trade.recipient_confirmed ? 'Confirmado por ambas partes' : 'Esperando ofertas y confirmaciones'}</small></div><button type="button" class="inventory-primary-button compact" data-open-trade="${esc(trade.id)}">Abrir</button></article>`).join('') : '<div class="inventory-inline-empty">No tienes intercambios activos.</div>';
-  if (historyHost) historyHost.innerHTML = history.length ? history.map(trade => {
+  platformApplyMarkup($('#trade-incoming-list'), incoming.length ? incoming.map(trade => `<article class="trade-list-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>Te invita a intercambiar</span><small>${esc(platformDateLabel(trade.created_at))}</small></div><div class="trade-list-actions"><button type="button" class="inventory-primary-button compact" data-trade-response="accept" data-trade-id="${esc(trade.id)}">Aceptar</button><button type="button" class="inventory-secondary-button compact" data-trade-response="reject" data-trade-id="${esc(trade.id)}">Rechazar</button></div></article>`).join('') : '<div class="inventory-inline-empty">No tienes solicitudes pendientes.</div>');
+  platformApplyMarkup($('#trade-active-list'), active.length ? active.map(trade => `<article class="trade-list-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>Intercambio en curso</span><small>${trade.sender_confirmed && trade.recipient_confirmed ? 'Confirmado por ambas partes' : 'Prepara la oferta y confírmala'}</small></div><button type="button" class="inventory-primary-button compact" data-open-trade="${esc(trade.id)}">Continuar →</button></article>`).join('') : '<div class="inventory-inline-empty">No tienes intercambios activos.</div>');
+  platformApplyMarkup($('#trade-history-list'), history.length ? history.map(trade => {
     const status = platformTradeStatusLabel(trade.status);
-    const isOutgoing = String(trade.sender_id) === me && trade.status === 'pending';
-    return `<article class="trade-list-row trade-history-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>${esc(status)}</span><small>${esc(platformDateLabel(trade.created_at))}</small></div>${isOutgoing ? `<button type="button" class="inventory-secondary-button compact" data-cancel-trade="${esc(trade.id)}">Cancelar</button>` : ''}</article>`;
-  }).join('') : '<div class="inventory-inline-empty">Todavía no hay actividad.</div>';
+    const outgoing = String(trade.sender_id) === me && trade.status === 'pending';
+    return `<article class="trade-list-row trade-history-row"><div class="trade-list-copy"><strong>${esc(trade.partner_username || 'Usuario')}</strong><span>${esc(status)}</span><small>${esc(platformDateLabel(trade.created_at))}</small></div>${outgoing ? `<button type="button" class="inventory-secondary-button compact" data-cancel-trade="${esc(trade.id)}">Cancelar</button>` : ''}</article>`;
+  }).join('') : '<div class="inventory-inline-empty">Todavía no hay actividad.</div>');
 }
-
 function platformDateLabel(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -4327,12 +4455,7 @@ async function platformCancelTrade(tradeId) {
   try {
     const { error } = await supabase.rpc('xifre_cancel_trade', { p_trade_id: tradeId });
     if (error) throw error;
-    if (String(platformActiveTradeId) === String(tradeId)) {
-      platformActiveTradeId = null;
-      platformActiveTradeDetail = null;
-      $('#trade-workspace').classList.add('hidden');
-      $('#trade-list-view').classList.remove('hidden');
-    }
+    if (String(platformActiveTradeId) === String(tradeId)) platformLeaveTradeWorkspace(true);
     await platformLoadTrades(false);
     await platformRefreshInventory();
     toast('Intercambio cancelado.', 'success');
@@ -4361,170 +4484,264 @@ function platformSetupTradeRealtime() {
 }
 
 async function platformOpenTradeWorkspace(tradeId) {
-  platformActiveTradeId = String(tradeId);
+  if (!isValidUuid(tradeId)) return toast('Intercambio no válido.', 'error');
   platformSetApp('inventory');
   platformSetInventoryTab('trades');
+  platformActiveTradeId = String(tradeId);
+  platformTradeOpenSequence += 1;
+  platformTradeDraftTradeId = null;
+  platformTradeOfferDraft = null;
+  platformTradeOfferDraftDirty = false;
+  platformTradeOfferRetryNeeded = false;
+  platformTradeOfferRevision += 1;
+  platformTradeDetailRenderKey = '';
   $('#trade-list-view')?.classList.add('hidden');
   $('#trade-workspace')?.classList.remove('hidden');
-  $('#trade-workspace-feedback').textContent = 'Cargando intercambio...';
+  setText('trade-workspace-feedback', 'Cargando intercambio...');
   await platformRefreshTradeDetail(true);
 }
-
 async function platformRefreshTradeDetail(withInventory = false) {
-  if (!platformActiveTradeId || !currentUser || platformTradeDetailBusy) return;
+  if (!platformActiveTradeId || !currentUser) return;
+  if (platformTradeDetailBusy || platformTradeOfferMutationBusy) {
+    if (withInventory) platformTradeDetailQueued = true;
+    return;
+  }
   platformTradeDetailBusy = true;
   const tradeId = String(platformActiveTradeId);
   const owner = String(currentUser.id);
   const generation = platformSessionGeneration;
+  const revision = platformTradeOfferRevision;
   try {
     const { data, error } = await supabase.rpc('xifre_get_trade_detail', { p_trade_id: tradeId });
-    if (error) {
-      console.warn('XIFRE TRADE DETAIL', error);
-      if (withInventory && generation === platformSessionGeneration) toast(friendlyError(error), 'error');
-      return;
-    }
-    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
-    if (!data?.trade) return;
-    let nextDetail = data;
+    if (error) throw error;
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId || revision !== platformTradeOfferRevision) return;
+    if (!data?.trade) throw new Error('El intercambio ya no está disponible.');
+    let inventory = null;
     if (withInventory) {
-      const { data: inventory, error: inventoryError } = await supabase.rpc('xifre_get_my_inventory');
-      if (inventoryError) throw inventoryError;
-      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
-      const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
-      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
-      platformInventoryItems = (inventory || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+      const response = await supabase.rpc('xifre_get_my_inventory');
+      if (response.error) throw response.error;
+      inventory = Array.isArray(response.data) ? response.data : [];
+    }
+    const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
+    if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId || revision !== platformTradeOfferRevision || platformTradeOfferMutationBusy) return;
+    if (inventory) {
+      platformInventoryItems = inventory.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
       platformRenderInventory();
-      nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
-    } else {
-      const urls = await platformSignImagePaths((data.offers || []).map(item => item.image_path));
-      if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
-      nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
+    }
+    const nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
+    const ownOfferIds = (nextDetail.offers || []).filter(item => String(item.user_id) === owner).map(item => String(item.instance_id));
+    if (platformTradeDraftTradeId !== tradeId || !platformTradeOfferDraft || !platformTradeOfferDraftDirty) {
+      platformTradeOfferDraft = new Set(ownOfferIds);
+      platformTradeDraftTradeId = tradeId;
     }
     platformActiveTradeDetail = nextDetail;
     platformRenderTradeWorkspace();
   } catch (error) {
-    console.error('XIFRE TRADE DETAIL', error);
-    if (withInventory && generation === platformSessionGeneration) toast(friendlyError(error), 'error');
+    console.warn('XIFRE TRADE DETAIL', error);
+    if (withInventory && generation === platformSessionGeneration && String(platformActiveTradeId) === tradeId) {
+      toast(friendlyError(error), 'error');
+      setText('trade-workspace-feedback', 'No se pudo cargar el intercambio. Prueba a volver a abrirlo.');
+    }
   } finally {
     platformTradeDetailBusy = false;
+    if (platformTradeDetailQueued && currentUser && platformActiveTradeId && !platformTradeOfferMutationBusy) {
+      platformTradeDetailQueued = false;
+      queueMicrotask(() => { void platformRefreshTradeDetail(true); });
+    }
   }
 }
-
 function platformRenderTradeWorkspace() {
   const detail = platformActiveTradeDetail;
   const me = String(currentUser?.id || '');
-  if (!detail?.trade || !me) return;
+  if (!detail?.trade || !me || String(detail.trade.id) !== String(platformActiveTradeId)) return;
   const trade = detail.trade;
   const ownOffer = (detail.offers || []).filter(item => String(item.user_id) === me);
   const otherOffer = (detail.offers || []).filter(item => String(item.user_id) !== me);
-  const ownName = String(currentUser.id) === String(trade.sender_id) ? detail.sender?.username : detail.recipient?.username;
-  const otherName = String(currentUser.id) === String(trade.sender_id) ? detail.recipient?.username : detail.sender?.username;
-  const ownConfirmed = String(currentUser.id) === String(trade.sender_id) ? trade.sender_confirmed : trade.recipient_confirmed;
-  const otherConfirmed = String(currentUser.id) === String(trade.sender_id) ? trade.recipient_confirmed : trade.sender_confirmed;
-  setText('trade-own-name', `${ownName || 'Tú'} (tú)`);
+  const isSender = me === String(trade.sender_id);
+  const ownName = isSender ? detail.sender?.username : detail.recipient?.username;
+  const otherName = isSender ? detail.recipient?.username : detail.sender?.username;
+  const ownConfirmed = isSender ? trade.sender_confirmed : trade.recipient_confirmed;
+  const otherConfirmed = isSender ? trade.recipient_confirmed : trade.sender_confirmed;
+  const active = trade.status === 'active';
+  setText('trade-own-name', `${ownName || 'Usuario'} (tú)`);
   setText('trade-other-name', otherName || 'Amigo');
-  setText('trade-own-confirmed', ownConfirmed ? 'Confirmado' : 'Sin confirmar');
-  setText('trade-other-confirmed', otherConfirmed ? 'Confirmado' : 'Sin confirmar');
+  setText('trade-own-confirmed', ownConfirmed ? 'Confirmado ✓' : 'Sin confirmar');
+  setText('trade-other-confirmed', otherConfirmed ? 'Confirmado ✓' : 'Sin confirmar');
   $('#trade-own-confirmed')?.classList.toggle('confirmed', Boolean(ownConfirmed));
   $('#trade-other-confirmed')?.classList.toggle('confirmed', Boolean(otherConfirmed));
-  setText('trade-workspace-subtitle', `Intercambio con ${otherName || 'tu amigo'}. Los objetos solo se transferirán después de las dos confirmaciones.`);
-  setText('trade-workspace-status', trade.status === 'active' ? 'EN CURSO' : String(trade.status || '').toUpperCase());
-  const active = trade.status === 'active';
+  setText('trade-workspace-subtitle', `Con ${otherName || 'tu amigo'}. Añade objetos abajo y, cuando estés listo, confirma.`);
+  setText('trade-workspace-status', active ? 'EN CURSO' : platformTradeStatusLabel(trade.status).toLocaleUpperCase('es-ES'));
   $('#trade-cancel-button')?.classList.toggle('hidden', !active);
-  $('#trade-save-offer-button')?.classList.toggle('hidden', !active);
   $('#trade-confirm-button')?.classList.toggle('hidden', !active);
-  if (trade.status === 'completed') setText('trade-workspace-feedback', 'Intercambio completado. Los objetos ya se han transferido a ambos inventarios.');
-  else if (!active) setText('trade-workspace-feedback', 'Este intercambio ha terminado y ya no admite cambios.');
-  else if (ownConfirmed && otherConfirmed) setText('trade-workspace-feedback', 'Ambas partes han confirmado. El intercambio se está completando.');
-  else if (ownConfirmed) setText('trade-workspace-feedback', 'Has confirmado. Esperando a que la otra persona confirme.');
-  else if (otherConfirmed) setText('trade-workspace-feedback', 'La otra persona ya ha confirmado. Revisa tu oferta y confirma para completar.');
-  else setText('trade-workspace-feedback', 'Guarda tu oferta y confirma cuando estés de acuerdo. Si alguien modifica su oferta, se reinician las dos confirmaciones.');
-  const renderOffer = items => items.length ? items.map(item => {
-    const rarity = platformRarity(item);
-    return `<div class="trade-offer-item rarity-${esc(rarity.className)}">${platformImageMarkup(item.image_url, item.name)}<span><strong>${esc(item.name)}</strong><small>${esc(rarity.label)} · ${esc(platformFormatValue(item.value))} V</small></span></div>`;
-  }).join('') : '<div class="trade-offer-empty">Todavía no hay objetos en esta oferta.</div>';
-  const ownOfferHost = $('#trade-own-offer');
-  const otherOfferHost = $('#trade-other-offer');
-  if (ownOfferHost) ownOfferHost.innerHTML = renderOffer(ownOffer);
-  if (otherOfferHost) otherOfferHost.innerHTML = renderOffer(otherOffer);
-
-  const offeredIds = new Set(ownOffer.map(item => String(item.instance_id)));
-  const availableHost = $('#trade-my-items');
-  const available = platformInventoryItems.filter(item => !item.reserved || String(item.reserved_trade_id) === String(trade.id));
-  if (!availableHost) return;
-  if (!available.length) {
-    availableHost.innerHTML = '<div class="inventory-inline-empty">No tienes objetos disponibles para ofrecer.</div>';
-  } else {
-    availableHost.innerHTML = available.map(item => {
-      const rarity = platformRarity(item);
-      return `<label class="trade-select-item rarity-${esc(rarity.className)}"><input type="checkbox" data-trade-instance="${esc(item.instance_id)}" ${offeredIds.has(String(item.instance_id)) ? 'checked' : ''} ${!active ? 'disabled' : ''}><span class="trade-select-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-select-copy"><strong>${esc(item.name)}</strong><small>${esc(rarity.label)} · ${esc(platformFormatValue(item.value))} V</small></span></label>`;
-    }).join('');
+  if (!platformTradeOfferMutationBusy && !platformTradeOfferDraftDirty && !platformTradeOfferRetryNeeded) {
+    if (trade.status === 'completed') setText('trade-workspace-feedback', 'Intercambio completado. Los objetos se han transferido a sus nuevos dueños.');
+    else if (!active) setText('trade-workspace-feedback', 'Este intercambio ha terminado y no admite cambios.');
+    else if (ownConfirmed && otherConfirmed) setText('trade-workspace-feedback', 'Ambos habéis confirmado. Completando intercambio...');
+    else if (ownConfirmed) setText('trade-workspace-feedback', 'Tu oferta está confirmada. Esperando a la otra persona.');
+    else if (otherConfirmed) setText('trade-workspace-feedback', 'Tu amigo ha confirmado. Comprueba su oferta antes de aceptar.');
+    else setText('trade-workspace-feedback', 'Elige los objetos que ofrecerás y después confirma. Los cambios reinician las confirmaciones.');
   }
+  const markup = items => items.length ? items.map(item => {
+    const rarity = platformRarity(item);
+    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)}" data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto"><span class="trade-offer-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(platformFormatValue(item.value))}</small></span></button>`;
+  }).join('') : '<div class="trade-offer-empty">Ningún objeto todavía</div>';
+  platformApplyMarkup($('#trade-own-offer'), markup(ownOffer));
+  platformApplyMarkup($('#trade-other-offer'), markup(otherOffer));
+  platformRenderTradeAvailableItems();
   platformUpdateTradeSelectionCount();
   const confirmButton = $('#trade-confirm-button');
   if (confirmButton) {
-    confirmButton.disabled = Boolean(ownConfirmed) || !active;
-    confirmButton.textContent = ownConfirmed ? 'Esperando confirmación' : 'Confirmar intercambio';
+    confirmButton.disabled = Boolean(ownConfirmed) || !active || platformTradeOfferMutationBusy || platformTradeOfferDraftDirty || platformTradeOfferRetryNeeded;
+    confirmButton.textContent = ownConfirmed ? 'Esperando a tu amigo' : 'Confirmar intercambio';
+  }
+}
+function platformRenderTradeAvailableItems() {
+  const host = $('#trade-my-items');
+  const detail = platformActiveTradeDetail;
+  if (!host || !detail?.trade || String(detail.trade.id) !== String(platformActiveTradeId)) return;
+  const available = platformInventoryItems.filter(item => !item.reserved || String(item.reserved_trade_id) === String(detail.trade.id));
+  const active = detail.trade.status === 'active';
+  const markup = available.length
+    ? available.map(item => platformItemCardMarkup(item, { mode: 'trade', selected: Boolean(platformTradeOfferDraft?.has(platformItemKey(item))), disabled: !active })).join('')
+    : '<div class="inventory-inline-empty">No tienes objetos disponibles para este intercambio.</div>';
+  platformApplyMarkup(host, markup);
+}
+
+function platformRefreshTradeTileStates() {
+  $$('#trade-my-items [data-trade-tile]').forEach(tile => {
+    const id = tile.dataset.tradeTile;
+    const selected = Boolean(platformTradeOfferDraft?.has(id));
+    tile.classList.toggle('is-offered', selected);
+    const button = tile.querySelector('[data-trade-toggle]');
+    if (button) {
+      button.setAttribute('aria-pressed', String(selected));
+      button.title = selected ? 'Quitar de la oferta' : 'Añadir a la oferta';
+    }
+    const label = tile.querySelector('.mini-item-selection');
+    if (label && !button?.disabled) label.textContent = selected ? '✓ En tu oferta' : '+ Ofrecer';
+  });
+  platformUpdateTradeSelectionCount();
+}
+
+function platformToggleTradeItem(itemId) {
+  const trade = platformActiveTradeDetail?.trade;
+  if (!trade || trade.status !== 'active' || String(trade.id) !== String(platformActiveTradeId)) return;
+  const item = platformInventoryItems.find(row => platformItemKey(row) === String(itemId));
+  if (!item || (item.reserved && String(item.reserved_trade_id) !== String(trade.id))) return;
+  if (!platformTradeOfferDraft) platformTradeOfferDraft = new Set();
+  if (platformTradeOfferDraft.has(String(itemId))) platformTradeOfferDraft.delete(String(itemId));
+  else platformTradeOfferDraft.add(String(itemId));
+  platformTradeOfferDraftDirty = true;
+  platformTradeOfferRetryNeeded = false;
+  platformTradeOfferRevision += 1;
+  platformRefreshTradeTileStates();
+  setText('trade-workspace-feedback', 'Guardando tu oferta...');
+  void platformSyncTradeOffer();
+}
+
+async function platformSyncTradeOffer() {
+  if (!platformActiveTradeId || !currentUser || platformTradeOfferMutationBusy || !platformTradeOfferDraft) return;
+  const tradeId = String(platformActiveTradeId);
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  const ticket = ++platformTradeMutationTicket;
+  platformTradeOfferMutationBusy = true;
+  platformTradeOfferRetryNeeded = false;
+  $('#trade-save-offer-button')?.classList.add('hidden');
+  platformUpdateTradeSelectionCount();
+  let ok = true;
+  try {
+    // Multiple rapid clicks serialize; the newest selection always wins.
+    while (platformTradeOfferDraftDirty && ticket === platformTradeMutationTicket && generation === platformSessionGeneration && currentUser && String(currentUser.id) === owner && String(platformActiveTradeId) === tradeId) {
+      platformTradeOfferDraftDirty = false;
+      const ids = [...platformTradeOfferDraft].filter(isValidUuid).sort();
+      const { error } = await supabase.rpc('xifre_set_trade_offer', { p_trade_id: tradeId, p_inventory_item_ids: ids });
+      if (error) throw error;
+    }
+  } catch (error) {
+    ok = false;
+    if (ticket === platformTradeMutationTicket && generation === platformSessionGeneration && String(platformActiveTradeId) === tradeId) {
+      platformTradeOfferDraftDirty = true;
+      platformTradeOfferRetryNeeded = true;
+      setText('trade-workspace-feedback', `No se guardó la oferta: ${friendlyError(error)}. Puedes reintentarlo.`);
+      $('#trade-save-offer-button')?.classList.remove('hidden');
+      toast('Error al guardar la oferta. Usa «Reintentar guardar».', 'error');
+    }
+  } finally {
+    if (ticket === platformTradeMutationTicket) {
+      platformTradeOfferMutationBusy = false;
+      platformUpdateTradeSelectionCount();
+    }
+  }
+  if (ticket !== platformTradeMutationTicket || generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId) return;
+  if (ok) {
+    setText('trade-workspace-feedback', 'Oferta guardada. Puedes confirmarla cuando estés de acuerdo.');
+    platformTradeDetailQueued = false;
+    await platformRefreshTradeDetail(true);
+    void platformLoadTrades(false);
   }
 }
 
 function platformUpdateTradeSelectionCount() {
-  const selected = $$('[data-trade-instance]:checked').length;
-  setText('trade-selected-count', `${selected} seleccionados`);
-}
-
-async function platformSaveTradeOffer() {
-  if (!platformActiveTradeId) return;
-  const button = $('#trade-save-offer-button');
-  const ids = $$('[data-trade-instance]:checked').map(node => node.dataset.tradeInstance).filter(isValidUuid);
-  setLoading(button, true);
-  try {
-    const { error } = await supabase.rpc('xifre_set_trade_offer', { p_trade_id: platformActiveTradeId, p_inventory_item_ids: ids });
-    if (error) throw error;
-    await platformRefreshTradeDetail(true);
-    await platformLoadTrades(false);
-    toast('Oferta guardada. Las dos partes deben volver a confirmar.', 'success');
-  } catch (error) {
-    toast(friendlyError(error), 'error');
-    await platformRefreshTradeDetail(true).catch(() => {});
-  } finally {
-    setLoading(button, false);
+  const selected = platformTradeOfferDraft?.size || 0;
+  setText('trade-selected-count', `${selected} ${selected === 1 ? 'ofrecido' : 'ofrecidos'}`);
+  const confirmButton = $('#trade-confirm-button');
+  if (confirmButton && platformActiveTradeDetail?.trade) {
+    const trade = platformActiveTradeDetail.trade;
+    const ownConfirmed = String(currentUser?.id) === String(trade.sender_id) ? trade.sender_confirmed : trade.recipient_confirmed;
+    confirmButton.disabled = trade.status !== 'active' || Boolean(ownConfirmed) || platformTradeOfferMutationBusy || platformTradeOfferDraftDirty || platformTradeOfferRetryNeeded;
   }
 }
-
+async function platformSaveTradeOffer() {
+  if (!platformActiveTradeId || !platformTradeOfferDraft) return;
+  platformTradeOfferDraftDirty = true;
+  platformTradeOfferRetryNeeded = false;
+  await platformSyncTradeOffer();
+}
 async function platformConfirmTrade() {
   if (!platformActiveTradeId) return;
+  if (platformTradeOfferMutationBusy || platformTradeOfferDraftDirty || platformTradeOfferRetryNeeded) return toast('Primero debe terminar de guardarse tu oferta.', 'info');
+  const tradeId = String(platformActiveTradeId);
   const button = $('#trade-confirm-button');
   setLoading(button, true);
   try {
-    const { data, error } = await supabase.rpc('xifre_confirm_trade', { p_trade_id: platformActiveTradeId });
+    const { data, error } = await supabase.rpc('xifre_confirm_trade', { p_trade_id: tradeId });
     if (error) throw error;
     if (data === 'completed') {
       toast('¡Intercambio completado! Los objetos ya se han transferido.', 'success');
       await platformRefreshInventory();
-    } else if (data === 'expired') {
-      toast('El intercambio ha caducado y los objetos ya no están reservados.', 'info');
-    } else {
-      toast('Tu confirmación se ha guardado. Falta la otra persona.', 'success');
-    }
+    } else if (data === 'expired') toast('El intercambio ha caducado.', 'info');
+    else toast('Confirmación guardada. Falta la otra persona.', 'success');
     await platformRefreshTradeDetail(true);
     await platformLoadTrades(false);
   } catch (error) {
     toast(friendlyError(error), 'error');
-    await platformRefreshTradeDetail(true).catch(() => {});
+    await platformRefreshTradeDetail(true);
   } finally {
     setLoading(button, false);
   }
 }
-
-function platformBackToTradeList() {
+function platformLeaveTradeWorkspace(showList = true) {
   platformActiveTradeId = null;
   platformActiveTradeDetail = null;
+  platformTradeDraftTradeId = null;
+  platformTradeOfferDraft = null;
+  platformTradeOfferDraftDirty = false;
+  platformTradeOfferRetryNeeded = false;
+  platformTradeDetailQueued = false;
+  platformTradeDetailRenderKey = '';
+  platformTradeOfferRevision += 1;
+  platformTradeMutationTicket += 1;
+  platformTradeOfferMutationBusy = false;
+  platformTradeOpenSequence += 1;
   $('#trade-workspace')?.classList.add('hidden');
-  $('#trade-list-view')?.classList.remove('hidden');
-  void platformLoadTrades(false);
+  if (showList) $('#trade-list-view')?.classList.remove('hidden');
 }
 
+function platformBackToTradeList() {
+  platformLeaveTradeWorkspace(true);
+  void platformLoadTrades(false);
+}
 function platformReleaseSeenKey() {
   return `xifre-last-release-seen:${String(currentUser?.id || 'guest')}`;
 }
@@ -4541,8 +4758,11 @@ async function platformOpenUpdates() {
   openModal('updates-modal');
   $('#updates-new-dot')?.classList.add('hidden');
   await platformLoadReleases();
-  const latest = platformReleaseRecords[0];
-  if (latest?.id) platformSetLastReleaseSeen(latest.id);
+  const latest = platformReleaseRecords.find(row => row.published);
+  if (latest?.id) {
+    platformSetLastReleaseSeen(latest.id);
+    $('#updates-new-dot')?.classList.add('hidden');
+  }
 }
 
 async function platformLoadReleases() {
@@ -4558,7 +4778,7 @@ async function platformLoadReleases() {
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
     platformReleaseRecords = platformReleaseRecords.map(row => ({ ...row, image_url: urls.get(row.image_path) || '' }));
     platformRenderReleases();
-    const latest = platformReleaseRecords[0];
+    const latest = platformReleaseRecords.find(row => row.published);
     const lastSeen = platformGetLastReleaseSeen();
     $('#updates-new-dot')?.classList.toggle('hidden', !latest?.id || String(latest.id) === lastSeen);
   } catch (error) {
@@ -4570,23 +4790,35 @@ async function platformLoadReleases() {
   }
 }
 
+function platformReleaseBodyHTML(body) {
+  const lines = String(body || '').split(/\r?\n/u);
+  if (!lines.some(line => line.trim())) return '';
+  return lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return '<div class="release-line-gap" aria-hidden="true"></div>';
+    const match = trimmed.match(/^(?:[•*\-]|\d+[.)])\s+(.+)$/u);
+    if (match) return `<p class="release-bullet"><span aria-hidden="true">•</span>${esc(match[1])}</p>`;
+    return `<p class="release-paragraph">${esc(trimmed)}</p>`;
+  }).join('');
+}
+
 function platformRenderReleases() {
   const host = $('#release-list');
   if (!host) return;
   const rows = platformReleaseRecords.filter(row => row.published || isXifreAdmin);
   if (!rows.length) {
-    host.innerHTML = '<div class="inventory-inline-empty">Todavía no hay actualizaciones publicadas.</div>';
+    platformApplyMarkup(host, '<div class="inventory-inline-empty">Todavía no hay actualizaciones publicadas.</div>');
     return;
   }
-  host.innerHTML = rows.map((row, index) => `<article class="release-entry ${index === 0 ? 'release-entry-latest' : ''}">
-    <div class="release-entry-top"><span class="release-version-pill">${esc(row.version)}</span><time>${esc(platformDateLabel(row.created_at))}</time>${isXifreAdmin && !row.published ? '<span class="release-draft-pill">BORRADOR</span>' : ''}</div>
-    <h3>${esc(row.title)}</h3><p class="release-summary">${esc(row.summary || '')}</p>
+  const latestPublished = platformReleaseRecords.find(row => row.published)?.id;
+  platformApplyMarkup(host, rows.map(row => `<article class="release-entry ${row.id === latestPublished ? 'release-entry-latest' : ''}">
+    <div class="release-entry-top"><span class="release-version-pill">${esc(row.version)}</span>${row.id === latestPublished ? '<span class="release-latest-tag">MÁS RECIENTE</span>' : ''}<time>${esc(platformDateLabel(row.created_at))}</time>${isXifreAdmin && !row.published ? '<span class="release-draft-pill">BORRADOR</span>' : ''}</div>
+    <h3>${esc(row.title)}</h3>${row.summary ? `<p class="release-summary">${esc(row.summary)}</p>` : ''}
     ${row.image_url ? `<img class="release-image" src="${esc(row.image_url)}" alt="Imagen de ${esc(row.title)}" loading="lazy">` : ''}
-    <div class="release-body">${esc(row.body || '')}</div>
+    <div class="release-body">${platformReleaseBodyHTML(row.body)}</div>
     ${isXifreAdmin ? `<button type="button" class="inventory-secondary-button compact release-edit-button" data-edit-release="${esc(row.id)}">Editar publicación</button>` : ''}
-  </article>`).join('');
+  </article>`).join(''));
 }
-
 function platformResetReleaseEditor() {
   $('#release-admin-form')?.reset();
   platformReleaseEditingId = null;
@@ -4677,6 +4909,18 @@ function platformBindEvents() {
       platformSetInventoryTab(inventoryTab.dataset.inventoryTab);
       return;
     }
+    const itemDetails = event.target.closest('[data-open-item]');
+    if (itemDetails) {
+      event.preventDefault();
+      platformOpenItemDetails(itemDetails.dataset.openItem, itemDetails.dataset.itemSource || 'collection');
+      return;
+    }
+    const tradeToggle = event.target.closest('[data-trade-toggle]');
+    if (tradeToggle) {
+      event.preventDefault();
+      platformToggleTradeItem(tradeToggle.dataset.tradeToggle);
+      return;
+    }
     const editItem = event.target.closest('[data-admin-edit-item]');
     if (editItem) { platformEditItem(editItem.dataset.adminEditItem); return; }
     const toggleItem = event.target.closest('[data-admin-toggle-item]');
@@ -4704,14 +4948,12 @@ function platformBindEvents() {
   $('#trade-cancel-button')?.addEventListener('click', () => { if (platformActiveTradeId) void platformCancelTrade(platformActiveTradeId); });
   $('#trade-save-offer-button')?.addEventListener('click', () => void platformSaveTradeOffer());
   $('#trade-confirm-button')?.addEventListener('click', () => void platformConfirmTrade());
-  $('#trade-my-items')?.addEventListener('change', event => {
-    if (event.target.matches('[data-trade-instance]')) platformUpdateTradeSelectionCount();
-  });
   $('#admin-item-form')?.addEventListener('submit', event => void platformSaveItem(event));
   $('#admin-item-reset')?.addEventListener('click', platformResetItemForm);
   $('#admin-item-image')?.addEventListener('change', event => platformSetPreview('admin-item-image-preview', event.target.files?.[0] || null, platformAdminEditingItemImagePath || ''));
   $('#admin-user-search')?.addEventListener('input', event => void platformSearchAdminUsers(event.target.value));
   $('#admin-grant-form')?.addEventListener('submit', event => void platformGrantItem(event));
+  $('#platform-version-form')?.addEventListener('submit', event => void platformSaveDisplayVersion(event));
   $('#release-admin-form')?.addEventListener('submit', event => void platformSaveRelease(event));
   $('#release-editor-reset')?.addEventListener('click', platformResetReleaseEditor);
   $('#release-image')?.addEventListener('change', event => platformSetPreview('release-image-preview', event.target.files?.[0] || null, platformReleaseImagePath || ''));
