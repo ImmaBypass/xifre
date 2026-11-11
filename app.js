@@ -77,6 +77,7 @@ let presenceLastTrackAt = 0;
 let presenceOwnerId = null;
 const presenceTabId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const PRESENCE_IDLE_MS = 5 * 60 * 1000;
+const PRESENCE_STALE_MS = 80 * 1000;
 let pendingExternalUrl = '';
 let pendingChatAttachment = null;
 let pendingChatAttachmentObjectUrl = null;
@@ -191,15 +192,15 @@ function parsePresenceTimestamp(value) {
 }
 
 function getPresenceStatus(userId) {
-  const id = String(userId || '');
-  const records = presencePayloads.get(id) || [];
-  if (!records.length) return 'offline';
+  const records = presencePayloads.get(String(userId || '')) || [];
   const now = Date.now();
-  const activelyVisible = records.some(record => {
-    const last = parsePresenceTimestamp(record.last_active_at);
-    return record.visible !== false && (record.status === 'online' || record.status == null) && last > 0 && now - last >= -30000 && now - last < PRESENCE_IDLE_MS;
+  const live = records.filter(record => {
+    const observed = parsePresenceTimestamp(record.reported_at || record.last_seen_at || record.last_active_at);
+    return observed > 0 && observed <= now + 30000 && now - observed < PRESENCE_STALE_MS;
   });
-  return activelyVisible ? 'online' : 'away';
+  if (!live.length) return 'offline';
+  if (live.some(record => record.visible !== false && record.status === 'online' && now - parsePresenceTimestamp(record.last_active_at) < PRESENCE_IDLE_MS)) return 'online';
+  return 'away';
 }
 
 function updatePresenceDot(dot) {
@@ -257,10 +258,10 @@ function rebuildPresencePayloads() {
     }
   }
 
-  // Keep this tab's optimistic state until the server sync contains it.
-  if (presenceOwnerId) {
+  // Only optimistic while local Realtime is subscribed and the record is fresh.
+  if (presenceChannel && presenceOwnerId) {
     const local = (presencePayloads.get(presenceOwnerId) || []).find(item => item.tab_id === presenceTabId);
-    if (local) {
+    if (local && Date.now() - parsePresenceTimestamp(local.reported_at) < 35000) {
       if (!next.has(presenceOwnerId)) next.set(presenceOwnerId, []);
       if (!next.get(presenceOwnerId).some(item => item.tab_id === presenceTabId)) next.get(presenceOwnerId).push(local);
     }
@@ -280,7 +281,8 @@ async function trackPresence(force = false) {
     tab_id: presenceTabId,
     visible,
     status: visible && recent ? 'online' : 'away',
-    last_active_at: presenceActivityAt
+    last_active_at: presenceActivityAt,
+    reported_at: now
   };
   presenceLastTrackAt = now;
   const ownId = String(currentUser.id);
@@ -368,7 +370,7 @@ async function setupPresenceTracking() {
     // Heartbeats keep the connected session visible; user activity determines online vs away.
     presenceTrackTimer = setInterval(() => {
       if (currentUser && String(currentUser.id) === requestedOwner) void trackPresence(true);
-    }, 30000);
+    }, 20000);
     presenceRenderTimer = setInterval(renderPresenceIndicators, 15000);
   })();
 
@@ -3263,6 +3265,10 @@ document.addEventListener('pointermove', () => {
   lastPointerPresenceNotice = now;
   notePresenceActivity();
 }, { passive: true });
+document.addEventListener('pointermove',()=>{platformWalletActivityAt=Date.now();},{passive:true});
+document.addEventListener('pointerdown',()=>{platformWalletActivityAt=Date.now();},{passive:true});
+document.addEventListener('keydown',()=>{platformWalletActivityAt=Date.now();},true);
+document.addEventListener('scroll',()=>{platformWalletActivityAt=Date.now();}, {passive:true,capture:true});
 // Un solo submit handler por formulario.
 $('#login-form')?.addEventListener('submit', event => {
 event.preventDefault();
@@ -3481,6 +3487,7 @@ $('#messages')?.addEventListener('scroll',()=>{const box=$('#messages');if(!curr
 
 document.addEventListener('keydown', event => {
 if (event.key === 'Escape') {
+if (platformBoxOpeningBusy && !$('#box-opening-modal')?.classList.contains('hidden')) {event.stopImmediatePropagation();return;}
 if (!$('#external-link-modal')?.classList.contains('hidden')) return closeExternalLinkWarning();
 if (!$('#emoji-picker-popover')?.classList.contains('hidden')) return closeEmojiPicker();
 if (!$('#message-menu').classList.contains('hidden')) return closeMessageMenu();
@@ -3583,6 +3590,26 @@ let platformTradeMutationTicket = 0;
 let platformTradeDetailQueued = false;
 let platformTradeDetailRenderKey = '';
 let platformTradeOpenSequence = 0;
+let platformBoxIds = new Set();
+let platformBoxInstances = new Set();
+let platformShopListings = [];
+let platformShopOwner = false;
+let platformShopEditingId = null;
+let platformShopBuying = new Set();
+let platformWalletBalance = 0;
+let platformWalletTimer = null;
+let platformWalletLoading = false;
+let platformWalletAccumulated = 0;
+let platformWalletTickAt = Date.now();
+let platformWalletActivityAt = Date.now();
+let platformShopSearchTimer = null;
+let platformShopSearchRows = [];
+let platformShopSelectedRecipient = null;
+let platformBoxOpeningBusy = false;
+let platformBoxSpinTimer = null;
+let platformBoxSpinToken = 0;
+let platformDetailsSequence = 0;
+
 
 
 function platformSetMessage(id, message, type = '') {
@@ -3654,20 +3681,43 @@ function platformItemKey(item) {
   return String(item?.instance_id || item?.id || '');
 }
 
-function platformItemCardMarkup(item, { mode = 'collection', disabled = false, selected = false } = {}) {
+function platformGroupSignature(item) {
+  // The grouping compares the full public item definition, not just its display name.
+  return JSON.stringify([String(item.name || ''),String(item.description || ''),String(item.rarity || ''),
+    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item))]);
+}
+function platformGroupItems(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const signature = platformGroupSignature(item);
+    if (!groups.has(signature)) groups.set(signature,{item,items:[],count:0,signature});
+    const group = groups.get(signature); group.items.push(item); group.count++;
+  }
+  return [...groups.values()];
+}
+function platformItemIsBox(item) {
+  const instance = platformItemKey(item);
+  return Boolean(item?.is_box || platformBoxInstances.has(instance) || platformBoxIds.has(String(item?.item_id || item?.id || '')));
+}
+function platformItemCardMarkup(item, { mode = 'collection', disabled = false, selected = false, count = 1 } = {}) {
   const rarity = platformRarity(item);
   const instanceId = platformItemKey(item);
-  const isReserved = Boolean(item.reserved);
-  const rarityClass = `rarity-${esc(rarity.className)}`;
-  const image = platformImageMarkup(item.image_url, item.name);
+  const image = platformImageMarkup(item.image_url,item.name);
+  const boxIcon = platformItemIsBox(item) ? '<span class="mini-item-box" title="Caja consumible">✦ CAJA</span>' : '';
+  const numericValue = Number(item?.value) || 0;
+  const valueGlow = numericValue >= 5000 ? 'value-precious' : numericValue >= 1000 ? 'value-high' : '';
   if (mode === 'trade') {
-    return `<div class="trade-select-item xifre-mini-item ${rarityClass} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" data-trade-tile="${esc(instanceId)}">
-      <button type="button" class="trade-select-hitarea" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled ? 'disabled' : ''} title="${selected ? 'Quitar de la oferta' : 'Añadir a la oferta'}"><span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong><span class="mini-item-selection">${disabled ? 'No disponible' : (selected ? '✓ En tu oferta' : '+ Ofrecer')}</span></button>
-      <button type="button" class="mini-item-info" data-open-item="${esc(instanceId)}" data-item-source="trade" title="Detalles de ${esc(item.name)}" aria-label="Ver detalles de ${esc(item.name)}">ⓘ</button>
+    return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" data-trade-tile="${esc(instanceId)}">
+      ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}
+      <button class="trade-select-hitarea" type="button" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled?'disabled':''} title="Añadir una copia">
+        <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong><span class="mini-item-selection">+ Ofrecer</span>
+      </button><button class="mini-item-info" type="button" data-open-item="${esc(instanceId)}" data-item-source="trade" aria-label="Detalles">ⓘ</button>
+      <button class="mini-item-minus hidden" type="button" data-trade-remove-group="${esc(instanceId)}" aria-label="Quitar una copia">−</button>
     </div>`;
   }
-  return `<button type="button" class="inventory-item-card xifre-mini-item ${rarityClass} ${isReserved ? 'is-reserved' : ''}" data-open-item="${esc(instanceId)}" data-item-source="collection" title="Ver detalles de ${esc(item.name)}">
-    <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong>${isReserved ? '<span class="mini-item-lock">Reservado</span>' : ''}
+  return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${valueGlow} ${item.reserved?'is-reserved':''}" data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
+    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}
+    <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong>
   </button>`;
 }
 
@@ -3679,19 +3729,26 @@ function platformFindItemForDetails(key, source) {
 }
 
 function platformOpenItemDetails(key, source = 'collection') {
-  const item = platformFindItemForDetails(key, source);
+  const item = platformFindItemForDetails(key,source);
   if (!item) return toast('Ese objeto ya no está disponible.', 'info');
   const rarity = platformRarity(item);
   const modal = $('#item-details-modal');
   modal.className = `modal hidden rarity-${rarity.className}`;
   const hero = $('#item-details-hero');
-  if (hero) hero.innerHTML = platformImageMarkup(item.image_url, item.name);
+  if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
-  setText('item-details-value', platformFormatValue(item.value));
-  setText('item-details-rarity', rarity.label);
-  setText('item-details-description', item.description || 'Sin descripción.');
-  const reserved = Boolean(item.reserved);
-  setText('item-details-status', reserved ? 'Este ejemplar está reservado en un intercambio.' : source === 'admin' ? 'Objeto del catálogo de XIFRE.' : 'Objeto de XIFRE.');
+  setText('item-details-value',platformFormatValue(item.value));
+  setText('item-details-rarity',rarity.label);
+  setText('item-details-description',item.description || 'Sin descripción.');
+  const matching = source === 'collection' ? platformInventoryItems.filter(x => platformGroupSignature(x) === platformGroupSignature(item)) : [];
+  setText('item-details-status',source==='collection' ? `En tu colección: ${matching.length} ${matching.length===1?'copia':'copias'}.` : source==='admin' ? 'Objeto del catálogo XIFRE.' : 'Objeto mostrado en intercambio.');
+  const preview = $('#item-box-preview');
+  platformDetailsSequence++;
+  preview?.classList.add('hidden');
+  const button = $('#item-open-box-button');
+  button?.classList.add('hidden');
+  button?.removeAttribute('data-box-instance');
+  if (platformItemIsBox(item)) void platformRenderBoxPreview(item,source);
   openModal('item-details-modal');
 }
 
@@ -3725,9 +3782,14 @@ async function platformInitialize() {
   $('#app-admin-button')?.classList.toggle('hidden', !isXifreAdmin);
   $('#inventory-admin-nav-group')?.classList.toggle('hidden', !isXifreAdmin);
   $('#release-admin-editor')?.classList.toggle('hidden', !isXifreAdmin);
+  await platformLoadBoxMeta();
   await platformLoadSystemApps();
   if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
   void platformLoadReleases();
+  platformShopOwner = isXifreAdmin && String(currentUser.email || '').toLowerCase() === 'samuelgil@vedrunaimmaculada.cat';
+  $('#shop-admin')?.classList.toggle('hidden',!platformShopOwner);
+  void platformLoadWallet(true);
+  platformStartWalletTimer();
   platformUpdateClock();
   void platformLoadDisplayVersion();
   if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
@@ -3765,6 +3827,11 @@ function platformStop() {
   if (platformTradeDetailTimer) clearInterval(platformTradeDetailTimer);
   if (platformInventoryTimer) clearInterval(platformInventoryTimer);
   if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
+  if (platformWalletTimer) clearInterval(platformWalletTimer);
+  platformWalletTimer=null;platformWalletAccumulated=0;platformWalletLoading=false;
+  platformBoxSpinToken++;
+  if (platformBoxSpinTimer) clearTimeout(platformBoxSpinTimer);
+  platformBoxSpinTimer=null;platformBoxOpeningBusy=false;
   platformDisplayVersionTimer = null;
   platformClockTimer = null;
   platformTradeTimer = null;
@@ -3784,6 +3851,10 @@ function platformStop() {
   $('#app-chat-button')?.classList.add('active');
   $('#app-inventory-button')?.classList.remove('active');
   $('#app-inventory-button')?.classList.add('hidden');
+  $('#app-shop-button')?.classList.remove('active');
+  $('#app-shop-button')?.classList.add('hidden');
+  $('#shop-app-view')?.classList.remove('active');
+  $('#shop-app-view')?.classList.add('hidden');
   $('#app-admin-button')?.classList.add('hidden');
   $('#updates-new-dot')?.classList.add('hidden');
   $('#inventory-admin-nav-group')?.classList.add('hidden');
@@ -3799,6 +3870,11 @@ function platformStop() {
   platformActiveApp = 'chat';
   platformInventoryItems = [];
   platformAdminItems = [];
+  platformBoxIds=new Set();platformBoxInstances=new Set();
+  platformBoxInstanceToItem.clear();platformBoxPreviewCache.clear();platformPurchaseRequestIds.clear();
+  platformShopListings=[];platformShopOwner=false;platformShopEditingId=null;platformShopBuying.clear();
+  platformWalletBalance=0;platformShopSelectedRecipient=null;platformShopSearchRows=[];
+  setText('shop-wallet-balance','0.00€');
   platformTrades = [];
   platformTradeIdsSeen = new Set();
   platformActiveTradeId = null;
@@ -3862,6 +3938,10 @@ async function platformLoadSystemApps() {
     return;
   }
   platformApps = Array.isArray(data) ? data : [];
+  const shopRow = platformApps.find(app=>app.app_id==='shop');
+  const shopAvailable=Boolean(shopRow?.enabled);
+  $('#app-shop-button')?.classList.toggle('hidden',!shopAvailable && !isXifreAdmin);
+  $('#app-shop-button')?.classList.toggle('app-launcher-disabled',!shopAvailable);
   const inventoryRow = platformApps.find(app => app.app_id === 'inventory');
   const inventoryAvailable = Boolean(inventoryRow?.enabled);
   const inventoryButton = $('#app-inventory-button');
@@ -3881,14 +3961,22 @@ function platformSetApp(appId, forceAdmin = false) {
       return;
     }
   }
-  if (!['chat', 'inventory'].includes(appId)) return;
+  if (appId === 'shop') {
+    const shop = platformApps.find(entry=>entry.app_id==='shop');
+    if (!shop?.enabled && !isXifreAdmin) return toast('La tienda no está disponible.','info');
+  }
+  if (!['chat', 'inventory', 'shop'].includes(appId)) return;
   platformActiveApp = appId;
   $('#chat-app-view')?.classList.toggle('active', appId === 'chat');
   $('#chat-app-view')?.classList.toggle('hidden', appId !== 'chat');
   $('#inventory-app-view')?.classList.toggle('active', appId === 'inventory');
   $('#inventory-app-view')?.classList.toggle('hidden', appId !== 'inventory');
+  $('#shop-app-view')?.classList.toggle('active',appId==='shop');
+  $('#shop-app-view')?.classList.toggle('hidden',appId!=='shop');
   $('#app-chat-button')?.classList.toggle('active', appId === 'chat');
   $('#app-inventory-button')?.classList.toggle('active', appId === 'inventory');
+  $('#app-shop-button')?.classList.toggle('active',appId==='shop');
+  if (appId==='shop') { void platformLoadShop();void platformLoadWallet(false); }
   if (appId === 'inventory') {
     if (forceAdmin && isXifreAdmin) platformSetInventoryTab('admin');
     void platformRefreshInventory();
@@ -3964,7 +4052,7 @@ async function platformRefreshInventory() {
     const rawItems = Array.isArray(data) ? data : [];
     const urls = await platformSignImagePaths(rawItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
-    platformInventoryItems = rawItems.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+    platformInventoryItems = rawItems.map(item => ({ ...item, is_box: platformItemIsBox(item), image_url: urls.get(item.image_path) || '' }));
     platformRenderInventory();
     // Don't redraw the entire trade workspace: its item selection is interactive.
     if (platformActiveTradeId && !platformTradeOfferMutationBusy) platformRenderTradeAvailableItems();
@@ -3983,17 +4071,15 @@ async function platformRefreshInventory() {
   }
 }
 function platformRenderInventory() {
-  const rows = platformInventoryItems;
-  setText('inventory-total-count', `${rows.length} ${rows.length === 1 ? 'objeto' : 'objetos'}`);
-  setText('inventory-nav-count', String(rows.length));
-  setText('inventory-collection-count', `${rows.length} ${rows.length === 1 ? 'COPIA' : 'COPIAS'}`);
-  const grid = $('#inventory-grid');
-  if (!grid) return;
-  const markup = rows.length
-    ? rows.map(item => platformItemCardMarkup(item)).join('')
-    : '<div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div>';
-  platformApplyMarkup(grid, markup);
+  const rows=platformInventoryItems;
+  const groups=platformGroupItems(rows);
+  setText('inventory-total-count',`${rows.length} ${rows.length===1?'objeto':'objetos'}`);
+  setText('inventory-nav-count',String(rows.length));
+  setText('inventory-collection-count',`${rows.length} ${rows.length===1?'COPIA':'COPIAS'} · ${groups.length} TIPOS`);
+  const markup=groups.length ? groups.map(group=>platformItemCardMarkup(group.item,{count:group.count})).join('') : '<div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div>';
+  platformApplyMarkup($('#inventory-grid'),markup);
 }
+
 async function platformUploadImage(file, folder) {
   if (!(file instanceof File)) throw new Error('Selecciona una imagen.');
   if (!XIFRE_SYSTEM_MEDIA_TYPES.has(file.type)) throw new Error('Formato no admitido. Usa PNG, JPG, WEBP o GIF.');
@@ -4059,9 +4145,10 @@ async function platformLoadAdminData() {
     platformAdminItems = Array.isArray(data) ? data : [];
     const urls = await platformSignImagePaths(platformAdminItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || !isXifreAdmin) return;
-    platformAdminItems = platformAdminItems.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+    platformAdminItems = platformAdminItems.map(item => ({ ...item, is_box: platformBoxIds.has(String(item.id)), image_url: urls.get(item.image_path) || '' }));
     platformRenderAdminItems();
     platformPopulateGrantItemSelect();
+    if (platformShopOwner) platformPopulateShopAdminSelect();
     platformRenderSystemAppAdmin();
   } catch (error) {
     console.error('XIFRE ADMIN ITEMS', error);
@@ -4083,7 +4170,7 @@ function platformRenderAdminItems() {
     const rarity = platformRarity(item);
     return `<article class="admin-item-row rarity-${esc(rarity.className)} ${item.active ? '' : 'is-disabled'}">
       <button type="button" class="admin-item-row-image" data-open-item="${esc(item.id)}" data-item-source="admin" title="Ver ficha de ${esc(item.name)}">${platformImageMarkup(item.image_url, item.name)}</button>
-      <div class="admin-item-row-copy"><strong>${esc(item.name)}</strong><span>${esc(rarity.label)} · <b>${esc(platformFormatValue(item.value))}</b> · ${esc(String(item.owned_count || 0))} copias</span><small>${item.active ? 'Disponible' : 'Desactivado'}</small></div>
+      <div class="admin-item-row-copy"><strong>${esc(item.name)}</strong><span>${esc(rarity.label)} · <b>${esc(platformFormatValue(item.value))}</b> · ${esc(String(item.owned_count || 0))} copias</span><small>${item.is_box ? '✦ CAJA · ' : ''}${item.active ? 'Disponible' : 'Desactivado'}</small></div>
       <div class="admin-item-row-actions"><button type="button" class="inventory-secondary-button compact" data-admin-edit-item="${esc(item.id)}">Editar</button><button type="button" class="inventory-secondary-button compact" data-admin-toggle-item="${esc(item.id)}" data-enabled="${item.active ? 'false' : 'true'}">${item.active ? 'Desactivar' : 'Activar'}</button></div>
     </article>`;
   }).join(''));
@@ -4103,7 +4190,7 @@ function platformRenderSystemAppAdmin() {
     host.innerHTML = '<span class="inventory-inline-empty">No hay aplicaciones disponibles.</span>';
     return;
   }
-  host.innerHTML = platformApps.map(app => `<div class="admin-app-toggle-row"><span><strong>${esc(app.title || app.app_id)}</strong><small>${app.app_id === 'chat' ? 'Mensajería principal' : 'Colección e intercambios'}</small></span><button type="button" class="admin-toggle ${app.enabled ? 'enabled' : ''}" data-admin-app-toggle="${esc(app.app_id)}" data-enabled="${app.enabled ? 'false' : 'true'}" ${app.app_id === 'chat' ? 'disabled title="CHAT siempre está disponible"' : ''} aria-label="${app.enabled ? 'Desactivar' : 'Activar'} ${esc(app.title)}"><i></i></button></div>`).join('');
+  host.innerHTML = platformApps.map(app => `<div class="admin-app-toggle-row"><span><strong>${esc(app.title || app.app_id)}</strong><small>${app.app_id === 'chat' ? 'Mensajería principal' : (app.app_id==='shop'?'Mercado y economía virtual':'Colección e intercambios')}</small></span><button type="button" class="admin-toggle ${app.enabled ? 'enabled' : ''}" data-admin-app-toggle="${esc(app.app_id)}" data-enabled="${app.enabled ? 'false' : 'true'}" ${app.app_id === 'chat' ? 'disabled title="CHAT siempre está disponible"' : ''} aria-label="${app.enabled ? 'Desactivar' : 'Activar'} ${esc(app.title)}"><i></i></button></div>`).join('');
 }
 
 async function platformToggleSystemApp(appId, enabled) {
@@ -4129,6 +4216,9 @@ function platformResetItemForm() {
   setText('admin-item-form-title', 'Crear objeto');
   platformSetMessage('admin-item-message', '');
   platformSetPreview('admin-item-image-preview', null, '');
+  platformToggleBoxFields();
+  $('#admin-box-drops')?.replaceChildren();
+  platformUpdateBoxPercent();
 }
 
 function platformEditItem(itemId) {
@@ -4142,6 +4232,10 @@ function platformEditItem(itemId) {
   $('#admin-item-rarity').value = item.rarity || 'comun';
   $('#admin-item-value').value = String(item.value || 0);
   $('#admin-item-image').value = '';
+  $('#admin-item-is-box').checked = Boolean(item.is_box);
+  platformToggleBoxFields();
+  $('#admin-box-drops')?.replaceChildren();
+  if (item.is_box) void platformLoadBoxEditor(item.id);
   setText('admin-item-form-title', 'Editar objeto');
   setText('admin-item-save', 'Guardar cambios');
   platformSetPreview('admin-item-image-preview', null, item.image_path || '');
@@ -4163,9 +4257,12 @@ async function platformSaveItem(event) {
     const name = String($('#admin-item-name')?.value || '').trim();
     const description = String($('#admin-item-description')?.value || '').trim();
     const rarity = String($('#admin-item-rarity')?.value || 'comun');
+    const isBox = Boolean($('#admin-item-is-box')?.checked);
+    const drops = isBox ? platformReadBoxDrops() : [];
     const valueText = String($('#admin-item-value')?.value || '');
     if (!name) throw new Error('Escribe un nombre para el objeto.');
     if (!/^\d+$/.test(valueText) || !Number.isSafeInteger(Number(valueText)) || Number(valueText) < 0) throw new Error('Introduce un valor entero válido.');
+    if (isBox && !drops.length) throw new Error('Añade premios a la caja y suma un 100%.');
     if (file) uploadedPath = await platformUploadImage(file, 'items');
     const imagePath = uploadedPath || platformAdminEditingItemImagePath;
     if (!imagePath) throw new Error('Selecciona una imagen para el objeto.');
@@ -4179,6 +4276,19 @@ async function platformSaveItem(event) {
       p_image_path: imagePath
     });
     if (error) throw error;
+    let savedId = String(data?.id || data?.item_id || data || platformAdminEditingItemId || '');
+    if (!isValidUuid(savedId)) {
+      // Legacy Alpha-1 RPC versions may return a boolean instead of the new ID.
+      // Retrieve the catalog and match the unique uploaded image rather than guessing.
+      const lookup=await supabase.rpc('xifre_admin_list_items');
+      if (lookup.error) throw lookup.error;
+      const candidate=(lookup.data || []).find(row=>String(row.image_path)===String(imagePath) && String(row.name)===name);
+      if (candidate?.id) savedId=String(candidate.id);
+    }
+    if (!isValidUuid(savedId)) throw new Error('El objeto se ha guardado, pero no se ha podido identificar su ID. Revisa el catálogo antes de continuar.');
+    const configured = await supabase.rpc('xifre_admin_configure_box',{p_item_id:savedId,p_is_box:isBox,p_drops:drops});
+    if (configured.error) throw new Error(`Objeto guardado, pero no se configuró la caja: ${friendlyError(configured.error)}. Edita el objeto e inténtalo otra vez.`);
+    await platformLoadBoxMeta();
     if (uploadedPath && platformAdminEditingItemImagePath && uploadedPath !== platformAdminEditingItemImagePath) {
       await platformDeleteImage(platformAdminEditingItemImagePath);
     }
@@ -4525,7 +4635,7 @@ async function platformRefreshTradeDetail(withInventory = false) {
     const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId || revision !== platformTradeOfferRevision || platformTradeOfferMutationBusy) return;
     if (inventory) {
-      platformInventoryItems = inventory.map(item => ({ ...item, image_url: urls.get(item.image_path) || '' }));
+      platformInventoryItems = inventory.map(item => ({ ...item, is_box: platformItemIsBox(item), image_url: urls.get(item.image_path) || '' }));
       platformRenderInventory();
     }
     const nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
@@ -4565,6 +4675,8 @@ function platformRenderTradeWorkspace() {
   const active = trade.status === 'active';
   setText('trade-own-name', `${ownName || 'Usuario'} (tú)`);
   setText('trade-other-name', otherName || 'Amigo');
+  setText('trade-own-total',platformFormatValue(ownOffer.reduce((sum,item)=>sum+Number(item.value||0),0)));
+  setText('trade-other-total',platformFormatValue(otherOffer.reduce((sum,item)=>sum+Number(item.value||0),0)));
   setText('trade-own-confirmed', ownConfirmed ? 'Confirmado ✓' : 'Sin confirmar');
   setText('trade-other-confirmed', otherConfirmed ? 'Confirmado ✓' : 'Sin confirmar');
   $('#trade-own-confirmed')?.classList.toggle('confirmed', Boolean(ownConfirmed));
@@ -4579,7 +4691,7 @@ function platformRenderTradeWorkspace() {
     else if (ownConfirmed && otherConfirmed) setText('trade-workspace-feedback', 'Ambos habéis confirmado. Completando intercambio...');
     else if (ownConfirmed) setText('trade-workspace-feedback', 'Tu oferta está confirmada. Esperando a la otra persona.');
     else if (otherConfirmed) setText('trade-workspace-feedback', 'Tu amigo ha confirmado. Comprueba su oferta antes de aceptar.');
-    else setText('trade-workspace-feedback', 'Elige los objetos que ofrecerás y después confirma. Los cambios reinician las confirmaciones.');
+    else setText('trade-workspace-feedback', 'Los regalos están permitidos: basta con que una de las dos personas ofrezca algo. Confirmad ambos para completarlo.');
   }
   const markup = items => items.length ? items.map(item => {
     const rarity = platformRarity(item);
@@ -4597,45 +4709,53 @@ function platformRenderTradeWorkspace() {
 }
 function platformRenderTradeAvailableItems() {
   const host = $('#trade-my-items');
-  const detail = platformActiveTradeDetail;
-  if (!host || !detail?.trade || String(detail.trade.id) !== String(platformActiveTradeId)) return;
-  const available = platformInventoryItems.filter(item => !item.reserved || String(item.reserved_trade_id) === String(detail.trade.id));
-  const active = detail.trade.status === 'active';
-  const markup = available.length
-    ? available.map(item => platformItemCardMarkup(item, { mode: 'trade', selected: Boolean(platformTradeOfferDraft?.has(platformItemKey(item))), disabled: !active })).join('')
+  const detail=platformActiveTradeDetail;
+  if (!host || !detail?.trade || String(detail.trade.id)!==String(platformActiveTradeId)) return;
+  const available=platformInventoryItems.filter(item=>!item.reserved || String(item.reserved_trade_id)===String(detail.trade.id));
+  const groups=platformGroupItems(available);
+  const active=detail.trade.status==='active';
+  const markup=groups.length ? groups.map(group=>platformItemCardMarkup(group.item,{mode:'trade',count:group.count,disabled:!active})).join('')
     : '<div class="inventory-inline-empty">No tienes objetos disponibles para este intercambio.</div>';
-  platformApplyMarkup(host, markup);
+  platformApplyMarkup(host,markup);
+  platformRefreshTradeTileStates();
 }
 
 function platformRefreshTradeTileStates() {
-  $$('#trade-my-items [data-trade-tile]').forEach(tile => {
-    const id = tile.dataset.tradeTile;
-    const selected = Boolean(platformTradeOfferDraft?.has(id));
-    tile.classList.toggle('is-offered', selected);
-    const button = tile.querySelector('[data-trade-toggle]');
-    if (button) {
-      button.setAttribute('aria-pressed', String(selected));
-      button.title = selected ? 'Quitar de la oferta' : 'Añadir a la oferta';
-    }
-    const label = tile.querySelector('.mini-item-selection');
-    if (label && !button?.disabled) label.textContent = selected ? '✓ En tu oferta' : '+ Ofrecer';
+  const available = platformInventoryItems.filter(item => !item.reserved || String(item.reserved_trade_id)===String(platformActiveTradeId));
+  $$('#trade-my-items [data-trade-tile]').forEach(tile=>{
+    const representative=available.find(item=>platformItemKey(item)===tile.dataset.tradeTile);
+    if (!representative) return;
+    const members=available.filter(item=>platformGroupSignature(item)===platformGroupSignature(representative));
+    const selected=members.filter(item=>platformTradeOfferDraft?.has(platformItemKey(item))).length;
+    const active=platformActiveTradeDetail?.trade?.status==='active';
+    tile.classList.toggle('is-offered',selected>0);
+    const plus=tile.querySelector('[data-trade-toggle]');
+    if(plus){plus.disabled=!active || selected===members.length;plus.setAttribute('aria-pressed',String(selected>0));}
+    const minus=tile.querySelector('.mini-item-minus');
+    if(minus){minus.classList.toggle('hidden',selected===0 || !active);minus.disabled=!active || !selected;}
+    const label=tile.querySelector('.mini-item-selection');
+    if(label) label.textContent=selected ? `${selected}/${members.length} ofrecidos` : '+ Ofrecer';
   });
   platformUpdateTradeSelectionCount();
 }
 
-function platformToggleTradeItem(itemId) {
-  const trade = platformActiveTradeDetail?.trade;
-  if (!trade || trade.status !== 'active' || String(trade.id) !== String(platformActiveTradeId)) return;
-  const item = platformInventoryItems.find(row => platformItemKey(row) === String(itemId));
-  if (!item || (item.reserved && String(item.reserved_trade_id) !== String(trade.id))) return;
-  if (!platformTradeOfferDraft) platformTradeOfferDraft = new Set();
-  if (platformTradeOfferDraft.has(String(itemId))) platformTradeOfferDraft.delete(String(itemId));
-  else platformTradeOfferDraft.add(String(itemId));
-  platformTradeOfferDraftDirty = true;
-  platformTradeOfferRetryNeeded = false;
-  platformTradeOfferRevision += 1;
+function platformToggleTradeItem(itemId, remove = false) {
+  const trade=platformActiveTradeDetail?.trade;
+  if (!trade || trade.status!=='active' || String(trade.id)!==String(platformActiveTradeId)) return;
+  const available=platformInventoryItems.filter(item=>!item.reserved || String(item.reserved_trade_id)===String(trade.id));
+  const representative=available.find(row=>platformItemKey(row)===String(itemId));
+  if(!representative) return;
+  const members=available.filter(item=>platformGroupSignature(item)===platformGroupSignature(representative));
+  if(!platformTradeOfferDraft) platformTradeOfferDraft=new Set();
+  const chosen=remove ? members.slice().reverse().find(item=>platformTradeOfferDraft.has(platformItemKey(item))) : members.find(item=>!platformTradeOfferDraft.has(platformItemKey(item)));
+  if(!chosen)return;
+  const id=platformItemKey(chosen);
+  if(remove)platformTradeOfferDraft.delete(id); else platformTradeOfferDraft.add(id);
+  platformTradeOfferDraftDirty=true;
+  platformTradeOfferRetryNeeded=false;
+  platformTradeOfferRevision++;
   platformRefreshTradeTileStates();
-  setText('trade-workspace-feedback', 'Guardando tu oferta...');
+  setText('trade-workspace-feedback','Guardando tu oferta...');
   void platformSyncTradeOffer();
 }
 
@@ -4705,7 +4825,7 @@ async function platformConfirmTrade() {
   const button = $('#trade-confirm-button');
   setLoading(button, true);
   try {
-    const { data, error } = await supabase.rpc('xifre_confirm_trade', { p_trade_id: tradeId });
+    const { data, error } = await supabase.rpc('xifre_confirm_trade_v2', { p_trade_id: tradeId });
     if (error) throw error;
     if (data === 'completed') {
       toast('¡Intercambio completado! Los objetos ya se han transferido.', 'success');
@@ -4884,6 +5004,483 @@ async function platformSaveRelease(event) {
   }
 }
 
+/* ========================================================================
+   XIFRE ALPHA 1.3: secure simulated economy / shop / configurable loot boxes
+   ======================================================================== */
+
+const platformBoxInstanceToItem = new Map();
+const platformBoxPreviewCache = new Map();
+const platformPurchaseRequestIds = new Map();
+
+async function platformLoadBoxMeta() {
+  if (!currentUser || !supabase) return;
+  const owner = String(currentUser.id);
+  const generation = platformSessionGeneration;
+  const { data, error } = await supabase.rpc('xifre_box_meta');
+  if (error) { console.warn('XIFRE BOX META',error); return; }
+  if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id)!==owner) return;
+  platformBoxIds = new Set((data?.item_ids || []).map(String));
+  platformBoxInstances = new Set((data?.inventory || []).map(row=>String(row.instance_id)));
+  platformBoxInstanceToItem.clear();
+  (data?.inventory || []).forEach(row=>platformBoxInstanceToItem.set(String(row.instance_id),String(row.item_id)));
+  platformBoxPreviewCache.clear();
+}
+
+function platformBoxIdFor(item) {
+  const instance = platformItemKey(item);
+  return String(platformBoxInstanceToItem.get(instance) || item?.item_id || item?.id || '');
+}
+
+async function platformGetBoxDrops(itemId, refresh = false) {
+  const id = String(itemId || '');
+  if (!isValidUuid(id)) throw new Error('No se ha encontrado el tipo de caja. Actualiza el inventario.');
+  if (!refresh && platformBoxPreviewCache.has(id)) return platformBoxPreviewCache.get(id);
+  const { data,error } = await supabase.rpc('xifre_box_preview',{p_box_item_id:id});
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  const urls = await platformSignImagePaths(rows.map(row=>row.image_path));
+  const drops = rows.map(row=>({...row,image_url:urls.get(row.image_path)||''}));
+  platformBoxPreviewCache.set(id,drops);
+  return drops;
+}
+
+async function platformRenderBoxPreview(item, source) {
+  const preview = $('#item-box-preview');
+  const button = $('#item-open-box-button');
+  const sequence=platformDetailsSequence;
+  if (!preview) return;
+  const itemId = platformBoxIdFor(item);
+  const instanceId = platformItemKey(item);
+  preview.classList.remove('hidden');
+  preview.innerHTML = '<p>Cargando premios posibles...</p>';
+  if (source==='collection') {
+    const available = platformInventoryItems.find(x=>platformGroupSignature(x)===platformGroupSignature(item) && !x.reserved && platformBoxInstances.has(platformItemKey(x)));
+    if (available && button) {
+      button.dataset.boxInstance=platformItemKey(available);
+      button.classList.remove('hidden');
+    }
+  }
+  try {
+    const drops = await platformGetBoxDrops(itemId);
+    if (sequence!==platformDetailsSequence || !$('#item-details-modal') || $('#item-details-modal').classList.contains('hidden')) return;
+    preview.innerHTML = `<strong class="box-details-title">PREMIOS POSIBLES · PROBABILIDADES</strong><div class="box-details-grid">${drops.map(drop=>{
+      const rarity=platformRarity(drop);
+      return `<div class="box-detail-prize rarity-${esc(rarity.className)}"><span class="box-detail-image">${platformImageMarkup(drop.image_url,drop.name)}</span><strong>${esc(drop.name)}</strong><small>${esc(String(drop.chance))}% · ${esc(rarity.label)}</small></div>`;
+    }).join('') || '<p>Esta caja aún no tiene premios.</p>'}</div>`;
+  } catch(error) {
+    preview.innerHTML=`<p>Premios no disponibles: ${esc(friendlyError(error))}</p>`;
+  }
+}
+
+function platformToggleBoxFields() {
+  const checked = Boolean($('#admin-item-is-box')?.checked);
+  $('#admin-box-config')?.classList.toggle('hidden',!checked);
+  if (checked && !$('#admin-box-drops')?.children.length) platformAddBoxDropRow();
+}
+
+function platformAddBoxDropRow(itemId='',chance='') {
+  const host=$('#admin-box-drops');
+  if (!host) return;
+  const valid = platformAdminItems.filter(item=>item.active && !item.is_box && String(item.id)!==String(platformAdminEditingItemId));
+  const row=document.createElement('div');
+  row.className='admin-box-drop-row';
+  row.innerHTML=`<select class="admin-box-drop-item" aria-label="Premio" required><option value="">Selecciona premio</option>${valid.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}</option>`).join('')}</select><div class="admin-box-drop-chance"><input type="number" class="admin-box-drop-percent" min="0.0001" max="100" step="0.0001" placeholder="Prob. %" aria-label="Probabilidad en porcentaje" value="${esc(chance)}"><span>%</span></div><button class="inventory-secondary-button compact" type="button" data-box-drop-remove aria-label="Quitar premio">×</button>`;
+  host.appendChild(row);
+  row.querySelector('select').value=String(itemId || '');
+  platformUpdateBoxPercent();
+}
+
+function platformUpdateBoxPercent() {
+  const total=$$('#admin-box-drops .admin-box-drop-percent').reduce((sum,field)=>sum+Number(field.value || 0),0);
+  const node=$('#admin-box-probability');
+  if (node) {
+    node.textContent=`Total: ${total.toLocaleString('es-ES',{maximumFractionDigits:4})}% / 100%`;
+    node.classList.toggle('correct',Math.abs(total-100)<0.00001);
+  }
+}
+
+function platformReadBoxDrops() {
+  const rows=$$('#admin-box-drops .admin-box-drop-row').map(row=>({
+    item_id:String(row.querySelector('select')?.value || ''),
+    chance:Number(row.querySelector('input')?.value || 0)
+  }));
+  if (!rows.length) throw new Error('Añade al menos un premio.');
+  if (rows.some(row=>!isValidUuid(row.item_id) || !Number.isFinite(row.chance) || row.chance<=0 || row.chance>100)) throw new Error('Revisa los premios y sus probabilidades.');
+  if (new Set(rows.map(row=>row.item_id)).size!==rows.length) throw new Error('No repitas el mismo premio.');
+  if (Math.abs(rows.reduce((sum,row)=>sum+row.chance,0)-100)>0.00001) throw new Error('Las probabilidades deben sumar exactamente 100%.');
+  if (rows.some(row=>Math.round(row.chance*10000)/10000!==row.chance)) throw new Error('Usa como máximo 4 decimales en las probabilidades.');
+  return rows;
+}
+
+async function platformLoadBoxEditor(itemId) {
+  try {
+    const drops=await platformGetBoxDrops(itemId,true);
+    if (String(platformAdminEditingItemId)!==String(itemId)) return;
+    $('#admin-box-drops')?.replaceChildren();
+    drops.forEach(drop=>platformAddBoxDropRow(drop.item_id,String(drop.chance)));
+    platformUpdateBoxPercent();
+  } catch(error) { platformSetMessage('admin-item-message','No se pudieron cargar los premios: '+friendlyError(error),'error'); }
+}
+
+function platformMoney(cents) {
+  const n=Number(cents || 0);
+  return (n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'€';
+}
+function platformMoneyToCents(value) {
+  const text=String(value ?? '').trim();
+  if(!/^\d+(?:\.\d{1,2})?$/.test(text))throw new Error('Escribe un precio con un máximo de dos decimales.');
+  const [whole,fraction='']=text.split('.');
+  const n=Number(whole)*100+Number(fraction.padEnd(2,'0'));
+  if(!Number.isSafeInteger(n) || n>1e12)throw new Error('Importe demasiado grande.');
+  return n;
+}
+
+function platformSetWalletUI(cents) {
+  platformWalletBalance=Math.max(0,Number(cents||0));
+  setText('shop-wallet-balance',platformMoney(platformWalletBalance));
+  $$('#shop-products [data-shop-buy],#shop-featured [data-shop-buy]').forEach(button=>{
+    const listing=platformShopListings.find(l=>l.id===button.dataset.shopBuy);
+    if(!listing)return;
+    const busy=platformShopBuying.has(String(listing.id));
+    button.disabled=busy || Number(listing.price_cents)>platformWalletBalance || listing.stock===0 || !listing.active;
+    button.textContent=busy?'Comprando...':Number(listing.price_cents)>platformWalletBalance?'Saldo insuficiente':'Comprar ahora';
+  });
+}
+
+async function platformLoadWallet(initial = false) {
+  if (!supabase || !currentUser) return;
+  const owner=String(currentUser.id),generation=platformSessionGeneration;
+  try {
+    const { data,error }=await supabase.rpc('xifre_wallet_get');
+    if(error)throw error;
+    if(!currentUser || owner!==String(currentUser.id) || generation!==platformSessionGeneration)return;
+    platformSetWalletUI(data?.balance_cents);
+    if (initial) {
+      // Establish the server clock baseline; never claim time prior to login.
+      const start=await supabase.rpc('xifre_wallet_heartbeat',{p_active_seconds:0});
+      if(start.error)throw start.error;
+      if(!currentUser || owner!==String(currentUser.id) || generation!==platformSessionGeneration)return;
+      platformSetWalletUI(start.data?.balance_cents);
+      platformWalletTickAt=Date.now();
+      platformWalletAccumulated=0;
+    }
+  } catch(error) {
+    console.warn('XIFRE WALLET',error);
+    if(platformActiveApp==='shop')toast('La economía necesita el SQL nuevo: '+friendlyError(error),'error');
+  }
+}
+
+function platformStartWalletTimer() {
+  if(platformWalletTimer)clearInterval(platformWalletTimer);
+  platformWalletTickAt=Date.now();
+  platformWalletActivityAt=Date.now();
+  platformWalletTimer=setInterval(()=>{
+    if (!currentUser || !supabase) return;
+    const now=Date.now();
+    const elapsed=Math.min(2,Math.max(0,Math.floor((now-platformWalletTickAt)/1000)));
+    platformWalletTickAt=now;
+    if(document.visibilityState==='visible' && now-platformWalletActivityAt<15000)platformWalletAccumulated=Math.min(12,platformWalletAccumulated+elapsed);
+    if(platformWalletAccumulated>=5 && !platformWalletLoading)void platformSendWalletHeartbeat();
+  },1000);
+}
+
+async function platformSendWalletHeartbeat() {
+  if(!currentUser || !supabase || platformWalletLoading || !platformWalletAccumulated)return;
+  const owner=String(currentUser.id),generation=platformSessionGeneration;
+  const activeSeconds=Math.min(12,platformWalletAccumulated);
+  platformWalletAccumulated-=activeSeconds;
+  platformWalletLoading=true;
+  try {
+    const { data,error }=await supabase.rpc('xifre_wallet_heartbeat',{p_active_seconds:activeSeconds});
+    if(error)throw error;
+    if(generation!==platformSessionGeneration || String(currentUser?.id)!==owner)return;
+    platformSetWalletUI(data?.balance_cents);
+  } catch(error) {
+    if(generation===platformSessionGeneration && String(currentUser?.id)===owner) {
+      platformWalletAccumulated=Math.min(12,platformWalletAccumulated+activeSeconds);
+      console.warn('XIFRE WALLET HEARTBEAT',error);
+    }
+  } finally {platformWalletLoading=false;}
+}
+
+async function platformLoadShop() {
+  if(!currentUser || !supabase)return;
+  const owner=String(currentUser.id),generation=platformSessionGeneration;
+  const {data,error}=await supabase.rpc('xifre_shop_catalog',{p_include_inactive:platformShopOwner});
+  if(error) {
+    console.error('XIFRE SHOP',error);
+    platformApplyMarkup($('#shop-featured'),`<div class="shop-empty">No se pudo cargar la tienda. Comprueba la migración SQL.<small>${esc(friendlyError(error))}</small></div>`);
+    return;
+  }
+  const listings=Array.isArray(data)?data:[];
+  const urls=await platformSignImagePaths(listings.map(row=>row.image_path));
+  if(generation!==platformSessionGeneration || String(currentUser?.id)!==owner)return;
+  platformShopListings=listings.map(row=>({...row,image_url:urls.get(row.image_path)||''}));
+  platformRenderShop();
+  if(platformShopOwner) {
+    if(!platformAdminItems.length)void platformLoadAdminData();
+    platformPopulateShopAdminSelect();
+    platformRenderShopAdminList();
+  }
+}
+
+function platformShopListingMarkup(listing, featured = false) {
+  const rarity=platformRarity(listing);
+  const disabled=!listing.active || !listing.item_active || listing.stock===0;
+  const price=platformMoney(listing.price_cents);
+  const theme=['indigo','gold','rose','cyan','green','violet'].includes(listing.theme)?listing.theme:'indigo';
+  return `<article class="shop-listing rarity-${esc(rarity.className)} shop-theme-${esc(theme)} ${featured?'shop-listing-featured':listing.placement==='special'?'shop-listing-special':''} ${listing.glow?'shop-listing-glow':''} ${disabled?'shop-listing-disabled':''}">
+    <div class="shop-listing-visual"><span class="shop-listing-rings"></span>${listing.badge_text?`<span class="shop-listing-badge">${esc(listing.badge_text)}</span>`:''}
+      ${listing.is_box?'<span class="shop-listing-box-mark">✦ CAJA SORPRESA</span>':''}
+      <div class="shop-listing-image">${platformImageMarkup(listing.image_url,listing.name)}</div>
+    </div>
+    <div class="shop-listing-information"><span class="shop-listing-rarity">${esc(rarity.label.toUpperCase())}</span><h3>${esc(listing.name)}</h3><p>${esc(listing.description || 'Objeto de XIFRE')}</p>
+      <div class="shop-listing-bottom"><div><small>PRECIO</small><strong>${esc(price)}</strong>${listing.stock!==null?`<span class="shop-listing-stock">${listing.stock} disponibles</span>`:''}</div><button type="button" data-shop-buy="${esc(listing.id)}" ${disabled?'disabled':''} class="shop-buy-button">${disabled?'No disponible':'Comprar ahora'}</button></div>
+    </div>
+  </article>`;
+}
+
+function platformRenderShop() {
+  const available=platformShopListings.filter(item=>item.active && item.item_active && item.stock!==0);
+  const featured=available.filter(item=>item.placement==='featured');
+  const rest=available.filter(item=>item.placement!=='featured');
+  const hero=featured[0] || available[0];
+  const others=hero?available.filter(item=>item.id!==hero.id):[];
+  platformApplyMarkup($('#shop-featured'),hero?platformShopListingMarkup(hero,true):'<div class="shop-empty">Todavía no hay ofertas destacadas. Pronto aparecerán nuevos objetos.</div>');
+  platformApplyMarkup($('#shop-products'),others.length?others.map(item=>platformShopListingMarkup(item)).join(''):'<div class="shop-empty">Pronto habrá más ofertas.</div>');
+  setText('shop-count',`${available.length} ${available.length===1?'artículo':'artículos'}`);
+  platformSetWalletUI(platformWalletBalance);
+}
+
+function platformPopulateShopAdminSelect() {
+  const select=$('#shop-admin-item');
+  if(!select)return;
+  const selected=select.value;
+  select.innerHTML='<option value="">Elige un objeto...</option>'+platformAdminItems.filter(item=>item.active).map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}${item.is_box?' · CAJA':''}</option>`).join('');
+  if(selected && platformAdminItems.some(item=>String(item.id)===selected))select.value=selected;
+}
+
+function platformRenderShopAdminList() {
+  const host=$('#shop-admin-list');
+  if(!host)return;
+  const rows=platformShopListings;
+  platformApplyMarkup(host,rows.length?rows.map(row=>`<div class="shop-admin-row"><div><strong>${esc(row.name)}</strong><small>${esc(platformMoney(row.price_cents))} · ${esc(row.placement)} · ${esc(row.theme)} ${row.active?'':'· OCULTA'}</small></div><div><button class="inventory-secondary-button compact" type="button" data-shop-edit="${esc(row.id)}">Editar</button>${row.active?`<button class="inventory-secondary-button compact" type="button" data-shop-disable="${esc(row.id)}">Ocultar</button>`:''}</div></div>`).join(''):'<p class="shop-empty">Aún no hay artículos publicados.</p>');
+}
+
+function platformResetShopForm() {
+  $('#shop-admin-form')?.reset();
+  platformShopEditingId=null;
+  setText('shop-admin-form-title','Nueva oferta');
+  setText('shop-admin-save','Publicar oferta');
+  setText('shop-admin-message','');
+}
+
+function platformEditShopListing(listingId) {
+  if(!platformShopOwner)return;
+  const row=platformShopListings.find(item=>item.id===String(listingId));
+  if(!row)return;
+  platformShopEditingId=row.id;
+  $('#shop-admin-item').value=row.item_id;
+  $('#shop-admin-price').value=(Number(row.price_cents)/100).toFixed(2);
+  $('#shop-admin-placement').value=row.placement;
+  $('#shop-admin-badge').value=row.badge_text || '';
+  $('#shop-admin-theme').value=row.theme || 'indigo';
+  $('#shop-admin-glow').checked=Boolean(row.glow);
+  $('#shop-admin-active').checked=Boolean(row.active);
+  $('#shop-admin-stock').value=row.stock === null ? '' : String(row.stock);
+  setText('shop-admin-form-title','Editar oferta');
+  setText('shop-admin-save','Guardar cambios');
+  $('#shop-admin-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function platformSaveShopListing(event) {
+  event.preventDefault();
+  if(!platformShopOwner)return;
+  const button=$('#shop-admin-save');
+  setLoading(button,true);
+  try {
+    const stockText=String($('#shop-admin-stock')?.value||'').trim();
+    const stock=stockText===''?null:Number(stockText);
+    if(stock!==null && (!Number.isInteger(stock) || stock<0 || stock>1000000))throw new Error('Existencias inválidas.');
+    const { error }=await supabase.rpc('xifre_admin_shop_save_listing',{
+      p_listing_id:platformShopEditingId,
+      p_item_id:$('#shop-admin-item').value,
+      p_price_cents:platformMoneyToCents($('#shop-admin-price').value),
+      p_placement:$('#shop-admin-placement').value,
+      p_badge_text:$('#shop-admin-badge').value.trim(),
+      p_theme:$('#shop-admin-theme').value,
+      p_glow:$('#shop-admin-glow').checked,
+      p_stock:stock,
+      p_active:$('#shop-admin-active').checked
+    });
+    if(error)throw error;
+    platformResetShopForm();
+    await platformLoadShop();
+    toast('Oferta de la tienda guardada.','success');
+  } catch(error) {
+    setText('shop-admin-message','Error: '+friendlyError(error));
+    toast(friendlyError(error),'error');
+  } finally {setLoading(button,false);}
+}
+
+async function platformDisableShopListing(id) {
+  if(!platformShopOwner)return;
+  try {
+    const {error}=await supabase.rpc('xifre_admin_shop_delete_listing',{p_listing_id:id});
+    if(error)throw error;
+    await platformLoadShop();
+    toast('Oferta ocultada.','success');
+  }catch(error){toast(friendlyError(error),'error');}
+}
+
+async function platformBuyShopItem(id) {
+  if(!currentUser || !isValidUuid(id) || platformShopBuying.has(String(id)))return;
+  const listing=platformShopListings.find(row=>String(row.id)===String(id));
+  if(!listing || !listing.active || listing.stock===0)return;
+  if(platformWalletBalance<Number(listing.price_cents))return toast('Necesitas más saldo para comprar este objeto.','info');
+  platformShopBuying.add(String(id));
+  const requestId=platformPurchaseRequestIds.get(String(id)) || (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`);
+  platformPurchaseRequestIds.set(String(id),requestId);
+  platformSetWalletUI(platformWalletBalance);
+  try {
+    const {data,error}=await supabase.rpc('xifre_shop_purchase',{p_listing_id:id,p_request_id:requestId});
+    if(error)throw error;
+    platformPurchaseRequestIds.delete(String(id));
+    platformSetWalletUI(data?.balance_cents);
+    await Promise.all([platformLoadBoxMeta(),platformLoadShop()]);
+    await platformRefreshInventory();
+    toast('¡Compra completada! Ya tienes el objeto en tu inventario.','success');
+  }catch(error){toast(friendlyError(error),'error');}
+  finally {platformShopBuying.delete(String(id));platformSetWalletUI(platformWalletBalance);}
+}
+
+function platformSearchShopMoneyUsers(value) {
+  if(!platformShopOwner)return;
+  if(platformShopSearchTimer)clearTimeout(platformShopSearchTimer);
+  const query=String(value || '').replace(/^@/,'').trim();
+  platformShopSelectedRecipient=null;
+  $('#shop-money-selected')?.classList.add('hidden');
+  if(query.length<2) {
+    setText('shop-money-results','Escribe al menos 2 letras.');
+    return;
+  }
+  setText('shop-money-results','Buscando...');
+  const owner=String(currentUser?.id||'');
+  platformShopSearchTimer=setTimeout(async()=>{
+    const {data,error}=await supabase.rpc('xifre_admin_search_users',{p_query:query});
+    if(String(currentUser?.id)!==owner || $('#shop-money-search')?.value?.replace(/^@/,'').trim()!==query)return;
+    if(error){setText('shop-money-results',friendlyError(error));return;}
+    platformShopSearchRows=Array.isArray(data)?data:[];
+    platformApplyMarkup($('#shop-money-results'),platformShopSearchRows.length?platformShopSearchRows.map(row=>`<button type="button" data-shop-user="${esc(row.id)}"><strong>${esc(row.username)}</strong><small>@${esc(row.email_handle || row.username)}</small></button>`).join(''):'No se han encontrado usuarios.');
+  },250);
+}
+
+function platformSelectShopMoneyUser(id) {
+  const user=platformShopSearchRows.find(row=>String(row.id)===String(id));
+  if(!user)return;
+  platformShopSelectedRecipient=user;
+  setText('shop-money-selected',`Destinatario: ${user.username} (@${user.email_handle || user.username})`);
+  $('#shop-money-selected')?.classList.remove('hidden');
+  setText('shop-money-results','Usuario seleccionado.');
+}
+
+async function platformGiveShopMoney(event) {
+  event.preventDefault();
+  if(!platformShopOwner)return;
+  const button=$('#shop-money-submit');
+  setLoading(button,true);
+  try {
+    if(!platformShopSelectedRecipient?.id)throw new Error('Selecciona primero un usuario.');
+    const amount=platformMoneyToCents($('#shop-money-amount').value);
+    if(amount<=0)throw new Error('El importe tiene que ser positivo.');
+    const {error}=await supabase.rpc('xifre_admin_give_money',{p_target_user:platformShopSelectedRecipient.id,p_amount_cents:amount});
+    if(error)throw error;
+    setText('shop-money-message',`Se han entregado ${platformMoney(amount)} a ${platformShopSelectedRecipient.username}.`);
+    if(String(platformShopSelectedRecipient.id)===String(currentUser.id))await platformLoadWallet();
+    toast('Saldo entregado.','success');
+  }catch(error){setText('shop-money-message','Error: '+friendlyError(error));}
+  finally {setLoading(button,false);}
+}
+
+function platformPickCosmeticDrop(drops) {
+  const sum=drops.reduce((s,x)=>s+Number(x.chance||0),0);
+  let roll=Math.random()*sum;
+  for(const item of drops){roll-=Number(item.chance||0);if(roll<=0)return item;}
+  return drops[drops.length-1];
+}
+
+async function platformOpenBox(instanceId) {
+  if(platformBoxOpeningBusy || !currentUser || !platformBoxInstances.has(String(instanceId)))return;
+  const item=platformInventoryItems.find(row=>platformItemKey(row)===String(instanceId));
+  if(!item)return toast('Esta caja ya no está en tu inventario.','error');
+  const boxId=platformBoxIdFor(item);
+  platformBoxOpeningBusy=true;
+  platformBoxSpinToken++;
+  const token=platformBoxSpinToken;
+  const button=$('#item-open-box-button');
+  if(button)button.disabled=true;
+  try {
+    const drops=await platformGetBoxDrops(boxId);
+    if(!drops.length)throw new Error('Esta caja todavía no tiene premios configurados.');
+    // The prize and inventory change happen ATOMICALLY at the server; the reel is cosmetic only.
+    const {data,error}=await supabase.rpc('xifre_box_open',{p_inventory_instance_id:instanceId});
+    if(error)throw error;
+    if(!data?.item_id)throw new Error('Respuesta de caja incompleta. Actualiza el inventario.');
+    const prize= {...data};
+    const paths=await platformSignImagePaths([prize.image_path]);
+    prize.image_url=paths.get(prize.image_path)||'';
+    closeModal('item-details-modal');
+    openModal('box-opening-modal');
+    $('#box-opening-result')?.classList.add('hidden');
+    $('#box-opening-done')?.classList.add('hidden');
+    setText('box-opening-title','¡Abriendo caja!');
+    setText('box-opening-hint','El premio ya está guardado en tu colección.');
+    const reel=$('#box-reel-strip');
+    const rolls=Array.from({length:55},(_,i)=>i===47?prize:platformPickCosmeticDrop(drops));
+    reel.innerHTML=rolls.map((row,i)=>`<div class="box-reel-card rarity-${esc(platformRarity(row).className)} ${i===47?'box-winning-card':''}"><span>${platformImageMarkup(row.image_url,row.name)}</span><strong>${esc(row.name)}</strong><small>${esc(platformRarity(row).label)}</small></div>`).join('');
+    reel.style.transition='none';
+    reel.style.transform='translate3d(0,0,0)';
+    const windowEl=$('#box-reel-window');
+    const reelCards=reel.querySelectorAll('.box-reel-card');
+    const target=reelCards[47];
+    if(!windowEl || !target)throw new Error('No se puede mostrar la animación. El premio ya se ha entregado.');
+    await platformLoadBoxMeta();
+    await platformRefreshInventory();
+    // Two animation frames force initial paint; the reel lands with a slight randomized offset.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      if(token!==platformBoxSpinToken)return;
+      const targetX=-(target.offsetLeft + target.offsetWidth/2 - windowEl.clientWidth/2 + (Math.random()*12-6));
+      reel.style.transition='transform 5500ms cubic-bezier(.10,.73,.09,1)';
+      reel.style.transform=`translate3d(${targetX}px,0,0)`;
+    }));
+    platformBoxSpinTimer=setTimeout(()=>{
+      if(token!==platformBoxSpinToken)return;
+      platformBoxOpeningBusy=false;
+      setText('box-opening-title','¡Nuevo objeto conseguido!');
+      const rarity=platformRarity(prize);
+      $('#box-opening-result').innerHTML=`<div class="box-result-visual rarity-${esc(rarity.className)}">${platformImageMarkup(prize.image_url,prize.name)}</div><span class="box-result-rarity">${esc(rarity.label)}</span><strong>${esc(prize.name)}</strong><small>Valor ${esc(platformFormatValue(prize.value))}</small>`;
+      $('#box-opening-result')?.classList.remove('hidden');
+      $('#box-opening-done')?.classList.remove('hidden');
+      setText('box-opening-hint','Objeto añadido a tu inventario.');
+    },5750);
+  }catch(error) {
+    console.error('XIFRE BOX OPEN',error);
+    toast(friendlyError(error),'error');
+    platformBoxOpeningBusy=false;
+    void platformRefreshInventory();
+    void platformLoadBoxMeta();
+  } finally {if(button)button.disabled=false;}
+}
+
+function platformFinishBoxOpening() {
+  if(platformBoxOpeningBusy)return;
+  if(platformBoxSpinTimer)clearTimeout(platformBoxSpinTimer);
+  platformBoxSpinToken++;
+  closeModal('box-opening-modal');
+  platformSetApp('inventory');
+  platformSetInventoryTab('collection');
+}
+
 function platformBindEvents() {
   document.addEventListener('click', event => {
     const appButton = event.target.closest('[data-platform-app]');
@@ -4915,6 +5512,18 @@ function platformBindEvents() {
       platformOpenItemDetails(itemDetails.dataset.openItem, itemDetails.dataset.itemSource || 'collection');
       return;
     }
+    const tradeRemove=event.target.closest('[data-trade-remove-group]');
+    if(tradeRemove){event.preventDefault();platformToggleTradeItem(tradeRemove.dataset.tradeRemoveGroup,true);return;}
+    const shopBuy=event.target.closest('[data-shop-buy]');
+    if(shopBuy){event.preventDefault();void platformBuyShopItem(shopBuy.dataset.shopBuy);return;}
+    const shopEdit=event.target.closest('[data-shop-edit]');
+    if(shopEdit){event.preventDefault();platformEditShopListing(shopEdit.dataset.shopEdit);return;}
+    const shopDisable=event.target.closest('[data-shop-disable]');
+    if(shopDisable){event.preventDefault();void platformDisableShopListing(shopDisable.dataset.shopDisable);return;}
+    const moneyUser=event.target.closest('[data-shop-user]');
+    if(moneyUser){event.preventDefault();platformSelectShopMoneyUser(moneyUser.dataset.shopUser);return;}
+    const boxRemove=event.target.closest('[data-box-drop-remove]');
+    if(boxRemove){event.preventDefault();boxRemove.closest('.admin-box-drop-row')?.remove();platformUpdateBoxPercent();return;}
     const tradeToggle = event.target.closest('[data-trade-toggle]');
     if (tradeToggle) {
       event.preventDefault();
@@ -4953,7 +5562,19 @@ function platformBindEvents() {
   $('#admin-item-image')?.addEventListener('change', event => platformSetPreview('admin-item-image-preview', event.target.files?.[0] || null, platformAdminEditingItemImagePath || ''));
   $('#admin-user-search')?.addEventListener('input', event => void platformSearchAdminUsers(event.target.value));
   $('#admin-grant-form')?.addEventListener('submit', event => void platformGrantItem(event));
-  $('#platform-version-form')?.addEventListener('submit', event => void platformSaveDisplayVersion(event));
+  $('#shop-refresh')?.addEventListener('click',()=>{void platformLoadShop();void platformLoadWallet(false);});
+  $('#shop-admin-form')?.addEventListener('submit',event=>void platformSaveShopListing(event));
+  $('#shop-admin-reset')?.addEventListener('click',platformResetShopForm);
+  $('#shop-money-search')?.addEventListener('input',event=>platformSearchShopMoneyUsers(event.target.value));
+  $('#shop-money-form')?.addEventListener('submit',event=>void platformGiveShopMoney(event));
+  $('#admin-item-is-box')?.addEventListener('change',platformToggleBoxFields);
+  $('#admin-box-add-drop')?.addEventListener('click',()=>platformAddBoxDropRow());
+  $('#admin-box-drops')?.addEventListener('input',platformUpdateBoxPercent);
+  $('#admin-box-drops')?.addEventListener('change',platformUpdateBoxPercent);
+  $('#item-open-box-button')?.addEventListener('click',()=>{const id=$('#item-open-box-button')?.dataset.boxInstance;if(id)void platformOpenBox(id);});
+  $('#box-opening-done')?.addEventListener('click',platformFinishBoxOpening);
+  $('#box-opening-close')?.addEventListener('click',()=>{if(!platformBoxOpeningBusy)platformFinishBoxOpening();});
+  $('#platform-version-form')?.addEventListener('submit' , event => void platformSaveDisplayVersion(event));
   $('#release-admin-form')?.addEventListener('submit', event => void platformSaveRelease(event));
   $('#release-editor-reset')?.addEventListener('click', platformResetReleaseEditor);
   $('#release-image')?.addEventListener('change', event => platformSetPreview('release-image-preview', event.target.files?.[0] || null, platformReleaseImagePath || ''));
