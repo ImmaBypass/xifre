@@ -1651,3 +1651,239 @@ html[data-theme="light"] .release-summary,html[data-theme="light"] .release-body
 @media (prefers-reduced-motion:reduce) {
   .app-launcher,.appbar-tool-button,.appbar-updates-button,.inventory-item-card,.inventory-refresh-button { transition:none!important; }
 }
+
+/* ========================================================================
+   XIFRE ALPHA 1.2 — Inventory & Trading UX, rarity glows, Release Hub
+   Only platform/inventory/release selectors; existing chat is unchanged.
+   ======================================================================== */
+:root {
+  --xi-common:#a5b2c5; --xi-common-rgb:165,178,197;
+}
+#inventory-app-view .inventory-header { min-height:98px; padding:19px 30px; }
+#inventory-app-view .inventory-layout { grid-template-columns:200px minmax(0,1fr); }
+#inventory-app-view .inventory-sidebar { padding-top:18px; }
+#inventory-app-view .inventory-nav-button { min-height:43px;font-size:11px;border-radius:10px; }
+#inventory-app-view .inventory-nav-label { font-size:9px; }
+#inventory-app-view .inventory-main { background:radial-gradient(circle at 45% -15%,rgba(104,110,196,.075),transparent 50%),linear-gradient(150deg,#292c34,#22252c); }
+#inventory-app-view .inventory-panel { padding:28px clamp(17px,2.7vw,36px) 38px; }
+#inventory-app-view .inventory-panel-heading h2 { font-size:23px; }
+#inventory-app-view .inventory-panel-heading p { font-size:11px; }
+#inventory-app-view .inventory-grid { grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:13px; }
+#inventory-app-view .rarity-common,#item-details-modal.rarity-common { --xi-rarity:#a5b2c5;--xi-rgb:165,178,197; }
+#inventory-app-view .rarity-uncommon,#item-details-modal.rarity-uncommon { --xi-rarity:#48cd8c;--xi-rgb:72,205,140; }
+#inventory-app-view .rarity-rare,#item-details-modal.rarity-rare { --xi-rarity:#579eff;--xi-rgb:87,158,255; }
+#inventory-app-view .rarity-epic,#item-details-modal.rarity-epic { --xi-rarity:#b28aff;--xi-rgb:178,138,255; }
+#inventory-app-view .rarity-legendary,#item-details-modal.rarity-legendary { --xi-rarity:#ffbf58;--xi-rgb:255,191,88; }
+#inventory-app-view .rarity-mythic,#item-details-modal.rarity-mythic { --xi-rarity:#ff76d0;--xi-rgb:255,118,208; }
+#inventory-app-view .rarity-divine,#item-details-modal.rarity-divine { --xi-rarity:#81ecf1;--xi-rgb:129,236,241; }
+#inventory-app-view .xifre-mini-item {
+  position:relative;min-width:0;display:flex;flex-direction:column;align-items:center;
+  border:1px solid rgba(var(--xi-rgb),.35);border-radius:14px;
+  background:radial-gradient(ellipse at 50% 20%,rgba(var(--xi-rgb),.15),transparent 70%),linear-gradient(165deg,#30333c,#262931);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 7px 20px rgba(0,0,0,.14),0 0 15px rgba(var(--xi-rgb),.055);
+  transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+}
+#inventory-app-view .inventory-item-card.xifre-mini-item { width:100%;min-height:190px;cursor:pointer;padding:10px 10px 12px;text-align:center; }
+#inventory-app-view .xifre-mini-item:hover { transform:translateY(-3px);border-color:rgba(var(--xi-rgb),.8);box-shadow:0 13px 28px rgba(0,0,0,.22),0 0 23px rgba(var(--xi-rgb),.21); }
+#inventory-app-view .xifre-mini-item:focus-visible { outline:2px solid var(--xi-rarity);outline-offset:3px; }
+#inventory-app-view .mini-item-image { position:relative;display:grid;place-items:center;width:100%;height:118px;padding:5px;border-radius:11px;background:radial-gradient(circle at 50% 55%,rgba(var(--xi-rgb),.13),transparent 72%); }
+#inventory-app-view .mini-item-image .platform-image-frame,#inventory-app-view .mini-item-image .platform-image-fallback { min-height:0; }
+#inventory-app-view .mini-item-image img { max-height:105px;filter:drop-shadow(0 8px 12px rgba(0,0,0,.26)) drop-shadow(0 0 11px rgba(var(--xi-rgb),.2)); }
+#inventory-app-view .mini-item-name {display:block;max-width:100%;margin:7px 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f3f5fc;font-size:12px;line-height:1.35;font-weight:770;}
+#inventory-app-view .mini-item-value { color:var(--xi-rarity);font-size:19px;line-height:1.15;font-weight:870;font-variant-numeric:tabular-nums;letter-spacing:-.5px;text-shadow:0 0 13px rgba(var(--xi-rgb),.23); }
+#inventory-app-view .mini-item-lock {margin-top:6px;color:#b8becb;font-size:9px;}
+#inventory-app-view .xifre-mini-item.is-reserved { opacity:.73; border-style:dashed; }
+#inventory-app-view .inventory-item-card.rarity-divine {background:radial-gradient(circle at 30% 15%,rgba(112,228,255,.2),transparent 58%),radial-gradient(circle at 88% 70%,rgba(217,149,255,.14),transparent 50%),#282c37;}
+#inventory-app-view .inventory-inline-empty {font-size:11px;line-height:1.6;padding:22px 16px;}
+#inventory-app-view .inventory-primary-button,#inventory-app-view .inventory-secondary-button,#inventory-app-view .inventory-back-button,#inventory-app-view .inventory-danger-quiet {font-size:11px;min-height:36px;}
+#inventory-app-view .trade-request-card {grid-template-columns:minmax(160px,.9fr) minmax(240px,1.5fr);padding:17px 19px;margin-bottom:18px;border-radius:13px;}
+#inventory-app-view .trade-request-copy strong {font-size:12px;}
+#inventory-app-view .trade-request-copy span {font-size:10px;}
+#inventory-app-view .trade-request-controls select {min-height:40px;font-size:11px;}
+#inventory-app-view .trade-lists-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
+#inventory-app-view .trade-list-block {border-radius:12px;}
+#inventory-app-view .trade-list-title {padding:14px;}
+#inventory-app-view .trade-list-title h3 {font-size:12px;}
+#inventory-app-view .trade-list-row {padding:12px;}
+#inventory-app-view .trade-list-copy strong {font-size:11px;}
+#inventory-app-view .trade-list-copy span {font-size:10px;}
+#inventory-app-view .trade-list-copy small {font-size:9px;}
+#inventory-app-view .trade-list {max-height:260px;scrollbar-width:thin;}
+#inventory-app-view .trade-workspace {gap:16px;}
+#inventory-app-view .trade-offer-columns {gap:14px;}
+#inventory-app-view .trade-offer-panel {min-height:145px;padding:16px;border-radius:13px;background:rgba(0,0,0,.1);}
+#inventory-app-view .trade-offer-kicker {font-size:9px;}
+#inventory-app-view .trade-offer-panel-head h3 {font-size:12px;}
+#inventory-app-view .trade-confirm-state {font-size:10px;}
+#inventory-app-view .trade-offer-items {grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;}
+#inventory-app-view .trade-offer-item {display:flex;flex-direction:column;gap:6px;align-items:center;min-width:0;min-height:96px;padding:9px;border-color:rgba(var(--xi-rgb),.3);border-radius:9px;background:rgba(var(--xi-rgb),.075);cursor:pointer;text-align:center;}
+#inventory-app-view .trade-offer-item:hover {border-color:var(--xi-rarity);}
+#inventory-app-view .trade-offer-thumb {display:block;width:100%;height:47px;}
+#inventory-app-view .trade-offer-thumb .platform-image-frame,#inventory-app-view .trade-offer-thumb .platform-image-fallback {width:100%;height:47px;min-height:0;}
+#inventory-app-view .trade-offer-thumb img {max-height:44px;}
+#inventory-app-view .trade-offer-copy {display:flex;flex-direction:column;align-items:center;gap:2px;max-width:100%;min-width:0;}
+#inventory-app-view .trade-offer-copy strong {font-size:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#inventory-app-view .trade-offer-copy small {font-size:13px;color:var(--xi-rarity);font-weight:850;}
+#inventory-app-view .trade-offer-empty {font-size:11px;}
+#inventory-app-view .trade-select-items {padding:17px;border-radius:13px;}
+#inventory-app-view .trade-select-heading {margin-bottom:13px;}
+#inventory-app-view .trade-select-heading h3 {font-size:14px;}
+#inventory-app-view .trade-select-heading p {font-size:10px;}
+#inventory-app-view #trade-selected-count {font-size:11px;color:#c3c9ff;}
+#inventory-app-view .trade-select-grid {grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px;}
+#inventory-app-view .trade-select-item.xifre-mini-item {display:block;min-height:183px;padding:0;overflow:hidden;}
+#inventory-app-view .trade-select-item .trade-select-hitarea {display:flex;flex-direction:column;align-items:center;width:100%;min-height:178px;padding:10px 8px 12px;border:0;background:transparent;color:inherit;cursor:pointer;}
+#inventory-app-view .trade-select-item .mini-item-image {height:92px;}
+#inventory-app-view .trade-select-item .mini-item-image .platform-image-frame,#inventory-app-view .trade-select-item .mini-item-image .platform-image-fallback {width:100%;height:100%;min-height:0;}
+#inventory-app-view .trade-select-item .mini-item-image img {max-width:100%;max-height:85px;}
+#inventory-app-view .trade-select-item .mini-item-name {font-size:11px;}
+#inventory-app-view .trade-select-item .mini-item-value {font-size:17px;}
+#inventory-app-view .trade-select-item .mini-item-selection {display:block;margin-top:8px;color:#aeb7c7;font-size:9px;font-weight:740;}
+#inventory-app-view .trade-select-item.is-offered {border-color:var(--xi-rarity);background:radial-gradient(circle at 50% 15%,rgba(var(--xi-rgb),.21),transparent 70%),#2b313b;box-shadow:inset 0 0 0 1px rgba(var(--xi-rgb),.3),0 0 19px rgba(var(--xi-rgb),.16);}
+#inventory-app-view .trade-select-item.is-offered .mini-item-selection {color:#80e7b6;}
+#inventory-app-view .trade-select-item.is-locked {opacity:.42;}
+#inventory-app-view .trade-select-item .mini-item-info {position:absolute;right:7px;top:7px;display:grid;place-items:center;width:24px;height:24px;border:1px solid rgba(255,255,255,.16);border-radius:50%;background:rgba(19,21,29,.72);color:#dce0ef;font-size:13px;cursor:pointer;z-index:2;}
+#inventory-app-view .trade-select-item .mini-item-info:hover {background:#4e5ad2;}
+#inventory-app-view .trade-feedback {font-size:10px;line-height:1.6;max-width:620px;}
+#inventory-app-view .trade-workspace-actions {gap:16px;}
+#inventory-app-view .admin-card {padding:19px;border-radius:13px;}
+#inventory-app-view .admin-card-heading h3 {font-size:14px;}
+#inventory-app-view .admin-card-heading p {font-size:10px;}
+#inventory-app-view .admin-form label {font-size:11px;gap:8px;}
+#inventory-app-view .admin-form label > span {font-size:10px;}
+#inventory-app-view .admin-form input:not([type=file]),#inventory-app-view .admin-form select,#inventory-app-view .admin-form textarea {font-size:11px;}
+#inventory-app-view .admin-card-icon {width:37px;height:37px;font-size:20px;}
+#inventory-app-view .admin-app-management {padding:17px;border-radius:12px;}
+#inventory-app-view .admin-app-management strong {font-size:12px;}
+#inventory-app-view .admin-app-management p {font-size:10px;}
+#inventory-app-view .admin-app-toggle-row strong {font-size:11px;}
+#inventory-app-view .admin-app-toggle-row small {font-size:9px;}
+#inventory-app-view .admin-item-row {padding:10px;border-radius:9px;border-color:rgba(var(--xi-rgb),.15);}
+#inventory-app-view .admin-item-row-image {width:52px;height:52px;flex-basis:52px;cursor:pointer;border:1px solid rgba(var(--xi-rgb),.23);}
+#inventory-app-view .admin-item-row-copy strong {font-size:12px;}
+#inventory-app-view .admin-item-row-copy span {font-size:10px;}
+#inventory-app-view .admin-item-row-copy b {font-size:12px;color:var(--xi-rarity);}
+#inventory-app-view .admin-item-row-copy small {font-size:9px;}
+#inventory-app-view .admin-user-result strong {font-size:11px;}
+#inventory-app-view .admin-user-result small {font-size:9px;}
+#inventory-app-view .admin-form-message {font-size:10px;}
+
+/* Object detail: the description is intentionally shown only after click. */
+#item-details-modal {z-index:225;}
+#item-details-modal .item-details-card {padding:0;width:min(440px,calc(100vw - 28px));border:1px solid rgba(var(--xi-rgb),.4);border-radius:19px;overflow:auto;background:linear-gradient(160deg,#30343e,#22252d);box-shadow:0 22px 80px rgba(0,0,0,.45),0 0 55px rgba(var(--xi-rgb),.11);}
+#item-details-modal .modal-close {z-index:3;top:15px;right:15px;}
+.item-details-hero {display:grid;place-items:center;height:225px;padding:30px;background:radial-gradient(ellipse at 50% 65%,rgba(var(--xi-rgb),.26),transparent 60%),linear-gradient(150deg,#292e39,#252832);border-bottom:1px solid rgba(var(--xi-rgb),.15);}
+.item-details-hero .platform-image-frame,.item-details-hero .platform-image-fallback {height:100%;min-height:0;}
+.item-details-hero .platform-image-frame img {max-height:165px;filter:drop-shadow(0 12px 18px rgba(0,0,0,.3)) drop-shadow(0 0 24px rgba(var(--xi-rgb),.35));}
+.item-details-body {padding:22px 25px 25px;}
+.item-details-top {display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.item-details-rarity {padding:6px 9px;border:1px solid rgba(var(--xi-rgb),.34);border-radius:8px;color:var(--xi-rarity);background:rgba(var(--xi-rgb),.1);font-size:11px;font-weight:800;}
+#item-details-name {margin-top:10px;color:#fff;font-size:26px;line-height:1.2;overflow-wrap:anywhere;}
+.item-details-value-wrap {display:flex;align-items:center;gap:10px;margin-top:15px;}
+.item-details-value-wrap span {color:#98a0ad;font-size:10px;letter-spacing:1px;font-weight:820;}
+.item-details-value-wrap strong {color:var(--xi-rarity);font-size:32px;line-height:1.1;font-weight:900;font-variant-numeric:tabular-nums;}
+.item-details-section {margin-top:23px;padding-top:18px;border-top:1px solid rgba(255,255,255,.09);}
+.item-details-section strong {color:#e9edf6;font-size:12px;}
+.item-details-section p {margin-top:8px;color:#acb5c5;font-size:12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;}
+.item-details-status {margin-top:15px;color:#8995a7;font-size:10px;}
+.item-details-close {width:100%;margin-top:19px;font-size:12px;}
+
+/* Cleaner update hub and separate administrative version settings */
+#updates-modal .updates-modal-card {width:min(860px,calc(100vw - 28px));max-height:min(850px,calc(100vh - 28px));padding:32px clamp(20px,3vw,38px);background:linear-gradient(155deg,#2a2d37,#20232c);}
+#updates-modal h2 {font-size:29px;}
+#updates-modal .updates-intro {font-size:12px;margin-top:7px;margin-bottom:23px;}
+#updates-modal .release-list {max-height:410px;gap:14px;padding-right:8px;}
+#updates-modal .release-entry {padding:21px;border-radius:13px;background:linear-gradient(155deg,rgba(255,255,255,.03),rgba(0,0,0,.09));}
+#updates-modal .release-entry-latest {border-color:rgba(120,132,255,.36);background:linear-gradient(120deg,rgba(91,103,240,.12),rgba(32,36,45,.5));}
+#updates-modal .release-entry-top {gap:10px;margin-bottom:14px;}
+#updates-modal .release-version-pill {font-size:10px;padding:6px 9px;}
+#updates-modal .release-latest-tag {color:#a8d6bf;font-size:9px;letter-spacing:.5px;font-weight:850;}
+#updates-modal .release-entry-top time {font-size:10px;margin-left:auto;}
+#updates-modal .release-entry h3 {font-size:18px;line-height:1.3;}
+#updates-modal .release-summary {font-size:12px;line-height:1.65;margin-top:7px;}
+#updates-modal .release-body {font-size:12px;line-height:1.75;margin-top:15px;white-space:normal;}
+#updates-modal .release-body p {margin:0 0 9px;overflow-wrap:anywhere;}
+#updates-modal .release-body .release-bullet {display:grid;grid-template-columns:11px 1fr;gap:8px;align-items:start;}
+#updates-modal .release-bullet span {color:#9da7ff;font-weight:900;}
+#updates-modal .release-line-gap {height:7px;}
+#updates-modal .release-draft-pill {font-size:9px;}
+#updates-modal .release-edit-button {font-size:10px;margin-top:10px;}
+#updates-modal .release-admin-editor {margin-top:25px;padding-top:23px;}
+#updates-modal .release-admin-heading h3 {font-size:15px;}
+#updates-modal .platform-version-editor {display:grid;grid-template-columns:minmax(0,1fr) minmax(130px,175px) auto;gap:10px 12px;align-items:center;padding:17px;margin-bottom:22px;border:1px solid rgba(129,143,255,.18);border-radius:13px;background:rgba(88,101,242,.07);}
+#updates-modal .platform-version-editor strong {font-size:13px;color:#e9edff;}
+#updates-modal .platform-version-editor p {margin-top:5px;color:#919db3;font-size:10px;line-height:1.5;}
+#updates-modal #platform-display-version {width:100%;height:39px;padding:0 11px;border:1px solid rgba(255,255,255,.13);border-radius:8px;outline:none;color:#e9edfa;background:#1e2129;font-size:12px;}
+#updates-modal #platform-display-version:focus {border-color:#7b87ff;}
+#updates-modal #platform-version-save {min-height:39px;white-space:nowrap;font-size:11px;}
+#updates-modal #platform-version-message {grid-column:1/-1;margin:0;font-size:10px;}
+#updates-modal .release-form-heading {display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:15px;padding-top:17px;border-top:1px solid rgba(255,255,255,.08);}
+#updates-modal .release-form-heading h3 {font-size:15px;color:#eff1fa;}
+#updates-modal .release-form-heading span {color:#8993a8;font-size:10px;}
+#updates-modal .admin-form label {font-size:11px;gap:8px;}
+#updates-modal .admin-form input:not([type=file]),#updates-modal .admin-form select,#updates-modal .admin-form textarea {font-size:11px;}
+#updates-modal .admin-form-message {font-size:10px;}
+
+html[data-theme="light"] #inventory-app-view .inventory-main {background:linear-gradient(145deg,#f5f6fa,#eceef4);}
+html[data-theme="light"] #inventory-app-view .xifre-mini-item {background:radial-gradient(ellipse at 50% 20%,rgba(var(--xi-rgb),.12),transparent 70%),#fff;border-color:rgba(var(--xi-rgb),.55);}
+html[data-theme="light"] #inventory-app-view .mini-item-name {color:#303642;}
+html[data-theme="light"] #inventory-app-view .trade-select-item.is-offered {background:rgba(var(--xi-rgb),.13);}
+html[data-theme="light"] #inventory-app-view .admin-card,html[data-theme="light"] #inventory-app-view .admin-app-management,html[data-theme="light"] #inventory-app-view .trade-select-items,html[data-theme="light"] #inventory-app-view .trade-request-card {background:#fff;}
+html[data-theme="light"] #inventory-app-view .trade-select-heading h3,html[data-theme="light"] #inventory-app-view .admin-app-management strong {color:#303642;}
+html[data-theme="light"] #inventory-app-view .trade-offer-item {background:rgba(var(--xi-rgb),.09);}
+html[data-theme="light"] #inventory-app-view .trade-offer-copy strong {color:#27313f;}
+html[data-theme="light"] #inventory-app-view .trade-list-copy strong {color:#303642;}
+html[data-theme="light"] #item-details-modal .item-details-card {background:linear-gradient(155deg,#fff,#f1f3f8);}
+html[data-theme="light"] #item-details-modal .item-details-hero {background:radial-gradient(circle,rgba(var(--xi-rgb),.2),transparent 75%),#f1f3f8;}
+html[data-theme="light"] #item-details-name,html[data-theme="light"] .item-details-section strong {color:#27303e;}
+html[data-theme="light"] .item-details-section p {color:#535f72;}
+html[data-theme="light"] #updates-modal .release-entry {background:#fff;}
+html[data-theme="light"] #updates-modal .release-entry-latest {background:linear-gradient(115deg,#eef0ff,#fff);}
+html[data-theme="light"] #updates-modal .platform-version-editor {background:#eef0ff;}
+html[data-theme="light"] #updates-modal .platform-version-editor strong,html[data-theme="light"] #updates-modal .release-form-heading h3 {color:#303648;}
+html[data-theme="light"] #updates-modal #platform-display-version {color:#293243;background:#fff;border-color:#cdd2df;}
+html[data-theme="light"] #updates-modal .release-latest-tag {color:#328764;}
+html[data-theme="light"] #updates-modal .release-version-pill {color:#525fcf;}
+
+@media (max-width:1050px) {
+  #inventory-app-view .inventory-layout {grid-template-columns:182px minmax(0,1fr);}
+  #inventory-app-view .trade-lists-grid {grid-template-columns:1fr;}
+}
+@media (max-width:760px) {
+  #inventory-app-view .inventory-layout {grid-template-columns:1fr;}
+  #inventory-app-view .inventory-panel {padding:20px 16px 30px;}
+  #inventory-app-view .inventory-grid {grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:10px;}
+  #inventory-app-view .inventory-item-card.xifre-mini-item {min-height:172px;padding:7px 7px 10px;}
+  #inventory-app-view .mini-item-image {height:98px;}
+  #inventory-app-view .mini-item-image img {max-height:90px;}
+  #inventory-app-view .mini-item-name {font-size:11px;}
+  #inventory-app-view .mini-item-value {font-size:18px;}
+  #inventory-app-view .trade-request-card {grid-template-columns:1fr;}
+  #inventory-app-view .trade-offer-columns {grid-template-columns:1fr;}
+  #inventory-app-view .trade-workspace-actions {flex-direction:column;align-items:stretch;}
+  #inventory-app-view .trade-select-grid {grid-template-columns:repeat(auto-fill,minmax(115px,1fr));}
+  #updates-modal .platform-version-editor {grid-template-columns:1fr 1fr;}
+  #updates-modal .platform-version-editor > div {grid-column:1/-1;}
+}
+@media (max-width:480px) {
+  #inventory-app-view .inventory-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+  #inventory-app-view .trade-select-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
+  #inventory-app-view .inventory-panel-heading h2 {font-size:20px;}
+  #inventory-app-view .trade-workspace-heading h2 {font-size:17px;}
+  #updates-modal .platform-version-editor {grid-template-columns:1fr;}
+  #updates-modal .platform-version-editor > div {grid-column:1;}
+  #updates-modal .release-form-heading {display:block;}
+  #updates-modal .release-form-heading span {display:block;margin-top:5px;}
+}
+@media (prefers-reduced-motion:reduce) {
+  #inventory-app-view .xifre-mini-item {transition:none;}
+}
+
+/* Keep the shared platform version visible on narrow screens, too. */
+@media (max-width:760px) {
+  .appbar-brand { gap:5px; }
+  .appbar-version { display:inline-flex;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 5px;font-size:7px;letter-spacing:.25px; }
+}
+@media (max-width:480px) {
+  .appbar-version { max-width:66px;padding:2px 4px;font-size:6px; }
+}
