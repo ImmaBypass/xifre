@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261108-alpha-1">
+<link rel="stylesheet" href="style.css?v=20261111-inventory-2">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -61,7 +61,7 @@
 <nav class="xifre-appbar" aria-label="Barra de aplicaciones">
   <div class="appbar-brand">
     <span class="appbar-logo">XIFRE</span>
-    <span class="appbar-version">ALPHA 1</span>
+    <span id="appbar-version" class="appbar-version">ALPHA 1</span>
   </div>
   <div class="appbar-launchers" aria-label="Aplicaciones">
     <button id="app-chat-button" class="app-launcher app-launcher-chat active" type="button" data-platform-app="chat" aria-label="Abrir CHAT" title="CHAT">
@@ -218,12 +218,12 @@
     </aside>
     <div class="inventory-main">
       <section id="inventory-panel-collection" class="inventory-panel active">
-        <div class="inventory-panel-heading"><div><h2>Mi colección</h2><p>Todos los objetos que tienes actualmente.</p></div><span id="inventory-collection-count" class="inventory-subcount">0 COPIAS</span></div>
+        <div class="inventory-panel-heading"><div><h2>Mi colección</h2><p>Selecciona un objeto para ver su ficha, rareza y descripción.</p></div><span id="inventory-collection-count" class="inventory-subcount">0 COPIAS</span></div>
         <div id="inventory-grid" class="inventory-grid"><div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div></div>
       </section>
       <section id="inventory-panel-trades" class="inventory-panel">
         <div id="trade-list-view">
-          <div class="inventory-panel-heading"><div><h2>Intercambios</h2><p>Intercambia objetos con tus amigos de XIFRE.</p></div></div>
+          <div class="inventory-panel-heading"><div><h2>Intercambios</h2><p>Solicita, prepara y confirma intercambios de forma segura.</p></div></div>
           <form id="trade-request-form" class="trade-request-card">
             <div class="trade-request-copy"><strong>Nuevo intercambio</strong><span>Envía una solicitud a uno de tus amigos.</span></div>
             <div class="trade-request-controls"><select id="trade-friend-select" required><option value="">Selecciona un amigo...</option></select><button class="inventory-primary-button" type="submit">Solicitar intercambio</button></div>
@@ -236,13 +236,13 @@
         </div>
         <div id="trade-workspace" class="trade-workspace hidden">
           <div class="trade-workspace-top"><button id="trade-back-button" class="inventory-back-button" type="button">← Volver a intercambios</button><span id="trade-workspace-status" class="trade-status-pill">EN CURSO</span></div>
-          <div class="trade-workspace-heading"><div><h2>Intercambio en tiempo real</h2><p id="trade-workspace-subtitle">Preparad vuestras ofertas.</p></div><button id="trade-cancel-button" class="inventory-danger-quiet" type="button">Cancelar intercambio</button></div>
+          <div class="trade-workspace-heading"><div><h2>Preparar intercambio</h2><p id="trade-workspace-subtitle">Preparad vuestras ofertas.</p></div><button id="trade-cancel-button" class="inventory-danger-quiet" type="button">Cancelar intercambio</button></div>
           <div class="trade-offer-columns">
             <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">TU OFERTA</span><h3 id="trade-own-name">Tú</h3></div><span id="trade-own-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div id="trade-own-offer" class="trade-offer-items"></div></section>
             <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">SU OFERTA</span><h3 id="trade-other-name">Amigo</h3></div><span id="trade-other-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div id="trade-other-offer" class="trade-offer-items"></div></section>
           </div>
-          <section class="trade-select-items"><div class="trade-select-heading"><div><h3>Tus objetos disponibles</h3><p>Marca las copias que quieras ofrecer. Los objetos reservados en otro intercambio no se pueden seleccionar.</p></div><span id="trade-selected-count">0 seleccionados</span></div><div id="trade-my-items" class="trade-select-grid"></div></section>
-          <div class="trade-workspace-actions"><span id="trade-workspace-feedback" class="trade-feedback">Los objetos solo se transferirán cuando ambos confirméis.</span><div><button id="trade-save-offer-button" class="inventory-secondary-button" type="button">Guardar oferta</button><button id="trade-confirm-button" class="inventory-primary-button" type="button">Confirmar intercambio</button></div></div>
+          <section class="trade-select-items"><div class="trade-select-heading"><div><h3>Elige qué quieres ofrecer</h3><p>Haz clic en un objeto para añadirlo o quitarlo. Se guarda automáticamente. Los objetos de otros intercambios no están disponibles.</p></div><span id="trade-selected-count" aria-live="polite">0 ofrecidos</span></div><div id="trade-my-items" class="trade-select-grid"></div></section>
+          <div class="trade-workspace-actions"><span id="trade-workspace-feedback" class="trade-feedback" aria-live="polite">Los objetos solo se transferirán cuando ambos confirméis.</span><div><button id="trade-save-offer-button" class="inventory-secondary-button hidden" type="button">Reintentar guardar</button><button id="trade-confirm-button" class="inventory-primary-button" type="button">Confirmar intercambio</button></div></div>
         </div>
       </section>
       <section id="inventory-panel-admin" class="inventory-panel">
@@ -281,6 +281,22 @@
 </section>
 </div>
 
+
+<!-- ITEM DETAILS: shared by collection, trade offers and admin catalog -->
+<div id="item-details-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="item-details-name">
+  <div class="modal-card item-details-card">
+    <button class="modal-close" type="button" data-action="close-modal" data-modal="item-details-modal" aria-label="Cerrar ficha">×</button>
+    <div class="item-details-hero" id="item-details-hero"></div>
+    <div class="item-details-body">
+      <div class="item-details-top"><span class="inventory-eyebrow">FICHA DEL OBJETO</span><span id="item-details-rarity" class="item-details-rarity">Común</span></div>
+      <h2 id="item-details-name">Objeto</h2>
+      <div class="item-details-value-wrap"><span>VALOR</span><strong id="item-details-value">0</strong></div>
+      <div class="item-details-section"><strong>Descripción</strong><p id="item-details-description">Sin descripción.</p></div>
+      <p id="item-details-status" class="item-details-status"></p>
+      <button class="inventory-primary-button item-details-close" type="button" data-action="close-modal" data-modal="item-details-modal">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- CREATE GROUP -->
 <div id="group-modal" class="modal hidden">
@@ -450,7 +466,15 @@
     <p class="updates-intro">Novedades, mejoras y cambios de XIFRE.</p>
     <div id="release-list" class="release-list"><div class="inventory-inline-empty">Cargando actualizaciones...</div></div>
     <section id="release-admin-editor" class="release-admin-editor hidden">
-      <div class="release-admin-heading"><div><span class="inventory-eyebrow">ADMINISTRACIÓN</span><h3 id="release-editor-title">Publicar actualización</h3></div><span class="admin-secure-pill">◈ ADMIN</span></div>
+      <div class="release-admin-heading"><div><span class="inventory-eyebrow">ADMINISTRACIÓN</span><h3>Gestionar XIFRE</h3></div><span class="admin-secure-pill">◈ ADMIN</span></div>
+      <form id="platform-version-form" class="platform-version-editor">
+        <div><strong>Versión de XIFRE</strong><p>Se muestra junto al logo, para todos los usuarios. Puedes cambiarla sin publicar un changelog.</p></div>
+        <label for="platform-display-version" class="visually-hidden-input">Versión visible</label>
+        <input id="platform-display-version" type="text" maxlength="40" placeholder="Alpha 1" required>
+        <button id="platform-version-save" class="inventory-primary-button" type="submit">Actualizar versión</button>
+        <span id="platform-version-message" class="admin-form-message" aria-live="polite"></span>
+      </form>
+      <div class="release-form-heading"><h3 id="release-editor-title">Publicar actualización</h3><span>Publicaciones del tablón de novedades</span></div>
       <form id="release-admin-form" class="admin-form">
         <input id="release-edit-id" type="hidden">
         <div class="admin-form-row"><label>Versión<input id="release-version" type="text" maxlength="40" placeholder="Alpha 1.1" required></label><label>Estado<select id="release-published"><option value="true">Publicada</option><option value="false">Borrador</option></select></label></div>
@@ -513,6 +537,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261108-alpha-1"></script>
+<script src="app.js?v=20261111-inventory-2"></script>
 </body>
 </html>
