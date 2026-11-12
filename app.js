@@ -76,7 +76,7 @@ let presenceActivityAt = Date.now();
 let presenceLastTrackAt = 0;
 let presenceOwnerId = null;
 const presenceTabId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const PRESENCE_IDLE_MS = 5 * 60 * 1000;
+const PRESENCE_IDLE_MS = 60 * 1000; // visible tab + recent interaction => online
 const PRESENCE_STALE_MS = 80 * 1000;
 let pendingExternalUrl = '';
 let pendingChatAttachment = null;
@@ -199,7 +199,7 @@ function getPresenceStatus(userId) {
     return observed > 0 && observed <= now + 30000 && now - observed < PRESENCE_STALE_MS;
   });
   if (!live.length) return 'offline';
-  if (live.some(record => record.visible !== false && record.status === 'online' && now - parsePresenceTimestamp(record.last_active_at) < PRESENCE_IDLE_MS)) return 'online';
+  if (live.some(record => record.visible === true && record.status === 'online' && now - parsePresenceTimestamp(record.last_active_at) < PRESENCE_IDLE_MS)) return 'online';
   return 'away';
 }
 
@@ -274,7 +274,7 @@ async function trackPresence(force = false) {
   if (!currentUser || !presenceChannel) return;
   const now = Date.now();
   if (!force && now - presenceLastTrackAt < 12000) return;
-  const visible = document.visibilityState === 'visible';
+  const visible = document.visibilityState === 'visible' && document.hasFocus();
   const recent = now - presenceActivityAt < PRESENCE_IDLE_MS;
   const payload = {
     user_id: String(currentUser.id),
@@ -1143,6 +1143,7 @@ async function loadConversations() {
   conversationCache = [...unique.values()];
   conversationCache.sort((a, b) => new Date(b.last_message_at || b.created_at || 0) - new Date(a.last_message_at || a.created_at || 0));
   renderConversations();
+  platformUpdateChatBadges();
   return conversationCache;
 }
 
@@ -1265,6 +1266,7 @@ async function openConversation(id, cached = null) {
     const readRow = conversationCache.find(c => String(c.id) === conversationId);
     if (readRow) { readRow.unread_count = 0; readRow.has_mention = false; }
     renderConversations();
+    platformUpdateChatBadges();
     setupTypingChannel(conversationId);
     setupMessageChannel(conversationId);
     $('#message-input').disabled = false;
@@ -1272,6 +1274,7 @@ async function openConversation(id, cached = null) {
     resizeMessageInput();
     updateMessageCharacterCount();
     $('#message-input').focus();
+    xifreChatOpenRetries.delete(conversationId);
     return true;
   } catch (error) {
     // Errors from an obsolete open attempt must not overwrite the active chat.
@@ -1280,6 +1283,13 @@ async function openConversation(id, cached = null) {
     currentConversation = conversationId;
     currentConversationData = conversation;
     showChatError(error?.message || 'No se pudo abrir esta conversación.');
+    const tries=(xifreChatOpenRetries.get(conversationId)||0)+1;
+    xifreChatOpenRetries.set(conversationId,tries);
+    if(tries<=2)setTimeout(()=>{
+      if(currentUser && currentConversation===conversationId && conversationOpenSequence===openSequence){
+        void openConversation(conversationId,conversationCache.find(c=>String(c.id)===conversationId)||conversation).catch(console.warn);
+      }
+    },2300);
     return false;
   }
 }
@@ -1481,7 +1491,19 @@ async function uploadChatAttachment(file, conversationId) {
 }
 
 
+const xifreMessageLoads=new Map();
+const xifreChatOpenRetries=new Map();
+const xifreRecentlySent=new Map();
+const xifreSendTimes=[];
 async function loadMessages(conversationId, scrollToBottom = false) {
+  const key=String(conversationId||'');
+  const existing=xifreMessageLoads.get(key);
+  if(existing) return existing;
+  const job=loadMessagesInternal(conversationId,scrollToBottom);
+  xifreMessageLoads.set(key,job);
+  try{return await job;} finally{if(xifreMessageLoads.get(key)===job)xifreMessageLoads.delete(key);}
+}
+async function loadMessagesInternal(conversationId, scrollToBottom = false) {
   const requestedId = String(conversationId || '');
   if (!requestedId || !currentUser) return;
   const ownerAtStart = String(currentUser.id);
@@ -1593,6 +1615,7 @@ function renderMessages(messages, forceBottom = false) {
     const delta = new Date(a.created_at || 0) - new Date(b.created_at || 0);
     return delta || String(a.id || '').localeCompare(String(b.id || ''));
   });
+  for(const [id,at] of xifreRecentlySent){if(Date.now()-at>60000)xifreRecentlySent.delete(id);}
   const incomingIds = new Set(ordered.map(item => String(item.id || '')).filter(Boolean));
   const existingNodes = new Map([...box.querySelectorAll('[data-message-id]')].map(node => [String(node.dataset.messageId), node]));
   const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
@@ -1604,6 +1627,11 @@ function renderMessages(messages, forceBottom = false) {
   let changed = false;
   let addedAny = false;
 
+  if (!ordered.length && existingNodes.size && !forceBottom) {
+    // A transient empty result during a flood cannot erase an existing conversation.
+    console.debug('XIFRE: ignored unexpected empty message refresh');
+    return;
+  }
   if (!ordered.length) {
     if (existingNodes.size || !box.querySelector('.chat-welcome')) {
       box.innerHTML = '<div class="chat-welcome"><div class="welcome-mark">X</div><h3>Sin mensajes todavía</h3><p>Escribe el primer mensaje.</p></div>';
@@ -1613,7 +1641,7 @@ function renderMessages(messages, forceBottom = false) {
   }
 
   for (const [id, node] of existingNodes) {
-    if (!incomingIds.has(id)) { node.remove(); existingNodes.delete(id); changed = true; }
+    if (!incomingIds.has(id) && !(xifreRecentlySent.has(id) && Date.now()-xifreRecentlySent.get(id)<55000)) { node.remove(); existingNodes.delete(id); changed = true; }
   }
   const welcome = box.querySelector('.chat-welcome');
   if (welcome) { welcome.remove(); changed = true; }
@@ -1999,6 +2027,12 @@ async function sendMessage() {
   const sendingAttachment = pendingChatAttachment;
   const attachmentGeneration = pendingChatAttachmentGeneration;
   if (!textContent && !sendingAttachment) return;
+  const sendNow=Date.now();
+  while(xifreSendTimes.length && sendNow-xifreSendTimes[0]>10000)xifreSendTimes.shift();
+  if((xifreSendTimes.length && sendNow-xifreSendTimes.at(-1)<850) || xifreSendTimes.length>=6){
+    toast('Estás enviando mensajes demasiado rápido. Espera un momento, vas a romper el teclado.','info');
+    return;
+  }
   if (sendingAttachment && textContent.length > CHAT_MESSAGE_WITH_IMAGE_MAX_TEXT) {
     toast(`El texto con imagen no puede superar ${CHAT_MESSAGE_WITH_IMAGE_MAX_TEXT} caracteres.`, 'error');
     return;
@@ -2048,6 +2082,7 @@ async function sendMessage() {
     });
     if (error) throw error;
     persisted = true;
+    xifreSendTimes.push(Date.now());
     messageLoadSequences.set(conversationId, (messageLoadSequences.get(conversationId) || 0) + 1);
     const sent = Array.isArray(data) ? data[0] : data;
     if (uploadedPath && sent) {
@@ -2072,6 +2107,7 @@ async function sendMessage() {
       clearPendingChatAttachment(false);
     }
     if (sent?.id) {
+      xifreRecentlySent.set(String(sent.id),Date.now());
       if (sendingReply) {
         sent.reply_sender_id = sent.reply_sender_id || sendingReply.sender_id;
         sent.reply_sender_username = sent.reply_sender_username || sendingReply.sender_username;
@@ -2438,7 +2474,8 @@ function refreshTypingIndicator() {
   el.classList.toggle('hidden', count === 0);
   if (!count) return;
   let label;
-  if (count >= 3) label = 'Varias personas están escribiendo...';
+  if (count > 3) label = 'Muchas personas están escribiendo...';
+  else if (count === 3) label = `${names[0]}, ${names[1]} y ${names[2]} están escribiendo...`;
   else if (count === 2) label = `${names[0]} y ${names[1]} están escribiendo...`;
   else label = `${names[0]} está escribiendo...`;
   setText('typing-text', label);
@@ -2490,9 +2527,10 @@ console.debug('TYPING', error);
 }
 }
 
+let xifreLastTypingEvent = 0;
 function scheduleTyping() {
 if (!currentConversation) return;
-void broadcastTyping(true);
+if (Date.now()-xifreLastTypingEvent>1100) { xifreLastTypingEvent=Date.now();void broadcastTyping(true); }
 if (typingStopTimer) clearTimeout(typingStopTimer);
 typingStopTimer = setTimeout(() => void broadcastTyping(false), 1600);
 }
@@ -3497,6 +3535,9 @@ $$('.modal:not(.hidden)').forEach(m => m.classList.add('hidden'));
 }
 });
 
+window.addEventListener('blur',()=>{if(!currentUser)return; void trackPresence(true);});
+window.addEventListener('focus',()=>{if(!currentUser)return;presenceActivityAt=Date.now();void trackPresence(true);});
+window.addEventListener('pagehide',()=>{try{if(presenceChannel)void presenceChannel.untrack();}catch(_){} });
 document.addEventListener('visibilitychange', () => {
 if (!currentUser) return;
 if (document.visibilityState === 'visible') presenceActivityAt = Date.now();
@@ -3792,6 +3833,17 @@ async function platformInitialize() {
   platformStartWalletTimer();
   platformUpdateClock();
   void platformLoadDisplayVersion();
+  if (platformMarketRefreshTimer) clearInterval(platformMarketRefreshTimer);
+  platformMarketRefreshTimer=setInterval(()=>{
+    if(currentUser && String(currentUser.id)===owner && document.visibilityState==='visible'){
+      void platformLoadMarket(platformActiveApp==='market');
+      if(platformActiveApp!=='shop')void platformLoadShop();
+      platformUpdateChatBadges();
+    }
+  },30000);
+  void platformUiLoad();
+  void platformLoadMarket(false);
+  $$('.xifre-edit-launch').forEach(button=>button.classList.toggle('hidden',!platformShopOwner));
   if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
   platformDisplayVersionTimer = setInterval(() => {
     if (currentUser && String(currentUser.id) === owner && document.visibilityState === 'visible') void platformLoadDisplayVersion();
@@ -3827,6 +3879,8 @@ function platformStop() {
   if (platformTradeDetailTimer) clearInterval(platformTradeDetailTimer);
   if (platformInventoryTimer) clearInterval(platformInventoryTimer);
   if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
+  if (platformMarketRefreshTimer) clearInterval(platformMarketRefreshTimer);
+  platformMarketRefreshTimer=null;
   if (platformWalletTimer) clearInterval(platformWalletTimer);
   platformWalletTimer=null;platformWalletAccumulated=0;platformWalletLoading=false;
   platformBoxSpinToken++;
@@ -3853,6 +3907,10 @@ function platformStop() {
   $('#app-inventory-button')?.classList.add('hidden');
   $('#app-shop-button')?.classList.remove('active');
   $('#app-shop-button')?.classList.add('hidden');
+  $('#app-market-button')?.classList.remove('active');
+  $('#app-market-button')?.classList.add('hidden');
+  $('#market-app-view')?.classList.remove('active');
+  $('#market-app-view')?.classList.add('hidden');
   $('#shop-app-view')?.classList.remove('active');
   $('#shop-app-view')?.classList.add('hidden');
   $('#app-admin-button')?.classList.add('hidden');
@@ -3873,6 +3931,12 @@ function platformStop() {
   platformBoxIds=new Set();platformBoxInstances=new Set();
   platformBoxInstanceToItem.clear();platformBoxPreviewCache.clear();platformPurchaseRequestIds.clear();
   platformShopListings=[];platformShopOwner=false;platformShopEditingId=null;platformShopBuying.clear();
+  platformMarketListings=[];platformMarketMyListings=[];platformMarketInventory=[];platformMarketHistory=[];
+  platformMarketSelectedInstance='';platformMarketTab='explore';platformMarketLoadBusy=false;platformMarketRefreshQueued=false;platformMarketPurchaseRequests.clear();platformMarketMutations.clear();
+  platformUiRecords=[];platformUiLoaded=false;platformReadTradeIds.clear();platformChatBadgeBaseline=0;
+  for(const key of Object.keys(platformNotifications))platformNotifications[key]=0;
+  platformUpdateTitleAndBadges();
+  $$('.xifre-edit-launch').forEach(button=>button.classList.add('hidden'));
   platformWalletBalance=0;platformShopSelectedRecipient=null;platformShopSearchRows=[];
   setText('shop-wallet-balance','0.00€');
   platformTrades = [];
@@ -3942,6 +4006,9 @@ async function platformLoadSystemApps() {
   const shopAvailable=Boolean(shopRow?.enabled);
   $('#app-shop-button')?.classList.toggle('hidden',!shopAvailable && !isXifreAdmin);
   $('#app-shop-button')?.classList.toggle('app-launcher-disabled',!shopAvailable);
+  const marketRow=platformApps.find(app=>app.app_id==='market');
+  $('#app-market-button')?.classList.toggle('hidden',!marketRow?.enabled && !isXifreAdmin);
+  $('#app-market-button')?.classList.toggle('app-launcher-disabled',!marketRow?.enabled);
   const inventoryRow = platformApps.find(app => app.app_id === 'inventory');
   const inventoryAvailable = Boolean(inventoryRow?.enabled);
   const inventoryButton = $('#app-inventory-button');
@@ -3965,7 +4032,11 @@ function platformSetApp(appId, forceAdmin = false) {
     const shop = platformApps.find(entry=>entry.app_id==='shop');
     if (!shop?.enabled && !isXifreAdmin) return toast('La tienda no está disponible.','info');
   }
-  if (!['chat', 'inventory', 'shop'].includes(appId)) return;
+  if(appId==='market'){
+    const market=platformApps.find(entry=>entry.app_id==='market');
+    if(!market?.enabled && !isXifreAdmin)return toast('El Mercado no está disponible.','info');
+  }
+  if (!['chat', 'inventory', 'shop','market'].includes(appId)) return;
   platformActiveApp = appId;
   $('#chat-app-view')?.classList.toggle('active', appId === 'chat');
   $('#chat-app-view')?.classList.toggle('hidden', appId !== 'chat');
@@ -3976,6 +4047,11 @@ function platformSetApp(appId, forceAdmin = false) {
   $('#app-chat-button')?.classList.toggle('active', appId === 'chat');
   $('#app-inventory-button')?.classList.toggle('active', appId === 'inventory');
   $('#app-shop-button')?.classList.toggle('active',appId==='shop');
+  $('#market-app-view')?.classList.toggle('active',appId==='market');
+  $('#market-app-view')?.classList.toggle('hidden',appId!=='market');
+  $('#app-market-button')?.classList.toggle('active',appId==='market');
+  platformMarkAppSeen(appId);
+  if(appId==='market'){void platformLoadMarket(true);void platformLoadWallet(false);}
   if (appId==='shop') { void platformLoadShop();void platformLoadWallet(false); }
   if (appId === 'inventory') {
     if (forceAdmin && isXifreAdmin) platformSetInventoryTab('admin');
@@ -4052,7 +4128,8 @@ async function platformRefreshInventory() {
     const rawItems = Array.isArray(data) ? data : [];
     const urls = await platformSignImagePaths(rawItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
-    platformInventoryItems = rawItems.map(item => ({ ...item, is_box: platformItemIsBox(item), image_url: urls.get(item.image_path) || '' }));
+    const marketReserved=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
+    platformInventoryItems = rawItems.map(item => ({ ...item, is_box: platformItemIsBox(item), reserved:Boolean(item.reserved||marketReserved.has(platformItemKey(item))), image_url: urls.get(item.image_path) || '' }));
     platformRenderInventory();
     // Don't redraw the entire trade workspace: its item selection is interactive.
     if (platformActiveTradeId && !platformTradeOfferMutationBusy) platformRenderTradeAvailableItems();
@@ -4143,6 +4220,11 @@ async function platformLoadAdminData() {
     const { data, error } = await supabase.rpc('xifre_admin_list_items');
     if (error) throw error;
     platformAdminItems = Array.isArray(data) ? data : [];
+    const priceResult=await supabase.rpc('xifre_admin_instant_prices');
+    if(!priceResult.error && Array.isArray(priceResult.data)){
+      const prices=new Map(priceResult.data.map(row=>[String(row.id),Number(row.instant_sell_cents)]));
+      platformAdminItems=platformAdminItems.map(row=>({...row,instant_sell_cents:prices.get(String(row.id))??1}));
+    }
     const urls = await platformSignImagePaths(platformAdminItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || !isXifreAdmin) return;
     platformAdminItems = platformAdminItems.map(item => ({ ...item, is_box: platformBoxIds.has(String(item.id)), image_url: urls.get(item.image_path) || '' }));
@@ -4209,6 +4291,7 @@ async function platformToggleSystemApp(appId, enabled) {
 function platformResetItemForm() {
   const form = $('#admin-item-form');
   if (form) form.reset();
+  if($('#admin-item-instant-price'))$('#admin-item-instant-price').value='0.01';
   platformAdminEditingItemId = null;
   platformAdminEditingItemImagePath = null;
   const button = $('#admin-item-save');
@@ -4231,6 +4314,8 @@ function platformEditItem(itemId) {
   $('#admin-item-description').value = item.description || '';
   $('#admin-item-rarity').value = item.rarity || 'comun';
   $('#admin-item-value').value = String(item.value || 0);
+  const priceInput=$('#admin-item-instant-price');
+  if(priceInput)priceInput.value=(Number(item.instant_sell_cents??1)/100).toFixed(2);
   $('#admin-item-image').value = '';
   $('#admin-item-is-box').checked = Boolean(item.is_box);
   platformToggleBoxFields();
@@ -4288,6 +4373,7 @@ async function platformSaveItem(event) {
     if (!isValidUuid(savedId)) throw new Error('El objeto se ha guardado, pero no se ha podido identificar su ID. Revisa el catálogo antes de continuar.');
     const configured = await supabase.rpc('xifre_admin_configure_box',{p_item_id:savedId,p_is_box:isBox,p_drops:drops});
     if (configured.error) throw new Error(`Objeto guardado, pero no se configuró la caja: ${friendlyError(configured.error)}. Edita el objeto e inténtalo otra vez.`);
+    await platformAdminSaveInstantPrice(savedId,platformMoneyToCents($('#admin-item-instant-price')?.value||'0.01'));
     await platformLoadBoxMeta();
     if (uploadedPath && platformAdminEditingItemImagePath && uploadedPath !== platformAdminEditingItemImagePath) {
       await platformDeleteImage(platformAdminEditingItemImagePath);
@@ -4368,6 +4454,7 @@ function platformSelectAdminUser(userId) {
   }
   const results = $('#admin-user-results');
   if (results) results.innerHTML = '<span>Destinatario seleccionado.</span>';
+  if(platformShopOwner)void platformAdminLoadAssets();
 }
 
 async function platformGrantItem(event) {
@@ -4443,6 +4530,7 @@ async function platformLoadTrades(showNotifications = true) {
     if (error) throw error;
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
     platformTrades = Array.isArray(data) ? data : [];
+    platformUpdateTradeBadges();
     const incoming = platformTrades.filter(trade => trade.status === 'pending' && String(trade.recipient_id) === owner);
     setText('inventory-trade-badge', String(incoming.length));
     $('#inventory-trade-badge')?.classList.toggle('hidden', incoming.length === 0);
@@ -5065,7 +5153,8 @@ async function platformRenderBoxPreview(item, source) {
     if (sequence!==platformDetailsSequence || !$('#item-details-modal') || $('#item-details-modal').classList.contains('hidden')) return;
     preview.innerHTML = `<strong class="box-details-title">PREMIOS POSIBLES · PROBABILIDADES</strong><div class="box-details-grid">${drops.map(drop=>{
       const rarity=platformRarity(drop);
-      return `<div class="box-detail-prize rarity-${esc(rarity.className)}"><span class="box-detail-image">${platformImageMarkup(drop.image_url,drop.name)}</span><strong>${esc(drop.name)}</strong><small>${esc(String(drop.chance))}% · ${esc(rarity.label)}</small></div>`;
+      const hidden=Boolean(drop.hidden && !platformShopOwner);
+      return `<div class="box-detail-prize rarity-${esc(rarity.className)} ${hidden?'box-detail-secret':''}"><span class="box-detail-image">${hidden?'<span class="box-secret-shadow">?</span>':platformImageMarkup(drop.image_url,drop.name)}</span><strong>${esc(hidden?'Ítem '+rarity.label:drop.name)}</strong><small>${esc(hidden?'Premio oculto':String(drop.chance)+'% · '+rarity.label)}</small></div>`;
     }).join('') || '<p>Esta caja aún no tiene premios.</p>'}</div>`;
   } catch(error) {
     preview.innerHTML=`<p>Premios no disponibles: ${esc(friendlyError(error))}</p>`;
@@ -5078,13 +5167,13 @@ function platformToggleBoxFields() {
   if (checked && !$('#admin-box-drops')?.children.length) platformAddBoxDropRow();
 }
 
-function platformAddBoxDropRow(itemId='',chance='') {
+function platformAddBoxDropRow(itemId='',chance='',hidden=false) {
   const host=$('#admin-box-drops');
   if (!host) return;
   const valid = platformAdminItems.filter(item=>item.active && !item.is_box && String(item.id)!==String(platformAdminEditingItemId));
   const row=document.createElement('div');
   row.className='admin-box-drop-row';
-  row.innerHTML=`<select class="admin-box-drop-item" aria-label="Premio" required><option value="">Selecciona premio</option>${valid.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}</option>`).join('')}</select><div class="admin-box-drop-chance"><input type="number" class="admin-box-drop-percent" min="0.0001" max="100" step="0.0001" placeholder="Prob. %" aria-label="Probabilidad en porcentaje" value="${esc(chance)}"><span>%</span></div><button class="inventory-secondary-button compact" type="button" data-box-drop-remove aria-label="Quitar premio">×</button>`;
+  row.innerHTML=`<select class="admin-box-drop-item" aria-label="Premio" required><option value="">Selecciona premio</option>${valid.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}</option>`).join('')}</select><div class="admin-box-drop-chance"><input type="number" class="admin-box-drop-percent" min="0.0001" max="100" step="0.0001" placeholder="Prob. %" aria-label="Probabilidad en porcentaje" value="${esc(chance)}"><span>%</span></div><label class="admin-box-drop-hidden" title="Ocultar el premio a usuarios"><input type="checkbox" class="admin-box-drop-secret" ${hidden?'checked':''}> Oculto</label><button class="inventory-secondary-button compact" type="button" data-box-drop-remove aria-label="Quitar premio">×</button>`;
   host.appendChild(row);
   row.querySelector('select').value=String(itemId || '');
   platformUpdateBoxPercent();
@@ -5102,7 +5191,8 @@ function platformUpdateBoxPercent() {
 function platformReadBoxDrops() {
   const rows=$$('#admin-box-drops .admin-box-drop-row').map(row=>({
     item_id:String(row.querySelector('select')?.value || ''),
-    chance:Number(row.querySelector('input')?.value || 0)
+    chance:Number(row.querySelector('.admin-box-drop-percent')?.value || 0),
+    hidden:Boolean(row.querySelector('.admin-box-drop-secret')?.checked)
   }));
   if (!rows.length) throw new Error('Añade al menos un premio.');
   if (rows.some(row=>!isValidUuid(row.item_id) || !Number.isFinite(row.chance) || row.chance<=0 || row.chance>100)) throw new Error('Revisa los premios y sus probabilidades.');
@@ -5117,7 +5207,7 @@ async function platformLoadBoxEditor(itemId) {
     const drops=await platformGetBoxDrops(itemId,true);
     if (String(platformAdminEditingItemId)!==String(itemId)) return;
     $('#admin-box-drops')?.replaceChildren();
-    drops.forEach(drop=>platformAddBoxDropRow(drop.item_id,String(drop.chance)));
+    drops.forEach(drop=>platformAddBoxDropRow(drop.item_id,String(drop.chance),Boolean(drop.hidden)));
     platformUpdateBoxPercent();
   } catch(error) { platformSetMessage('admin-item-message','No se pudieron cargar los premios: '+friendlyError(error),'error'); }
 }
@@ -5138,6 +5228,7 @@ function platformMoneyToCents(value) {
 function platformSetWalletUI(cents) {
   platformWalletBalance=Math.max(0,Number(cents||0));
   setText('shop-wallet-balance',platformMoney(platformWalletBalance));
+  setText('market-wallet',platformMoney(platformWalletBalance));
   $$('#shop-products [data-shop-buy],#shop-featured [data-shop-buy]').forEach(button=>{
     const listing=platformShopListings.find(l=>l.id===button.dataset.shopBuy);
     if(!listing)return;
@@ -5217,6 +5308,7 @@ async function platformLoadShop() {
   if(generation!==platformSessionGeneration || String(currentUser?.id)!==owner)return;
   platformShopListings=listings.map(row=>({...row,image_url:urls.get(row.image_path)||''}));
   platformRenderShop();
+  platformUpdateListingBadges('shop',platformShopListings.filter(r=>r.active));
   if(platformShopOwner) {
     if(!platformAdminItems.length)void platformLoadAdminData();
     platformPopulateShopAdminSelect();
@@ -5437,7 +5529,7 @@ async function platformOpenBox(instanceId) {
     setText('box-opening-hint','El premio ya está guardado en tu colección.');
     const reel=$('#box-reel-strip');
     const rolls=Array.from({length:55},(_,i)=>i===47?prize:platformPickCosmeticDrop(drops));
-    reel.innerHTML=rolls.map((row,i)=>`<div class="box-reel-card rarity-${esc(platformRarity(row).className)} ${i===47?'box-winning-card':''}"><span>${platformImageMarkup(row.image_url,row.name)}</span><strong>${esc(row.name)}</strong><small>${esc(platformRarity(row).label)}</small></div>`).join('');
+    reel.innerHTML=rolls.map((row,i)=>`<div class="box-reel-card rarity-${esc(platformRarity(row).className)} ${i===47?'box-winning-card':''}"><span>${row.hidden && !platformShopOwner?'<span class="box-secret-shadow">?</span>':platformImageMarkup(row.image_url,row.name)}</span><strong>${esc(row.hidden && !platformShopOwner?'Ítem '+platformRarity(row).label:row.name)}</strong><small>${esc(platformRarity(row).label)}</small></div>`).join('');
     reel.style.transition='none';
     reel.style.transform='translate3d(0,0,0)';
     const windowEl=$('#box-reel-window');
@@ -5481,7 +5573,393 @@ function platformFinishBoxOpening() {
   platformSetInventoryTab('collection');
 }
 
+/* ==============================================================
+   XIFRE ALPHA 1.4 — MARKET / NOTIFICATIONS / VISUAL EDITOR
+   ============================================================= */
+let platformMarketListings = [];
+let platformMarketMyListings = [];
+let platformMarketInventory = [];
+let platformMarketHistory = [];
+let platformMarketSelectedInstance = '';
+let platformMarketTab = 'explore';
+let platformMarketLoadBusy = false;
+let platformMarketRefreshQueued = false;
+let platformMarketRefreshTimer = null;
+const platformMarketPurchaseRequests = new Map();
+const platformMarketMutations = new Set();
+const platformNotifications = {chat:0,inventory:0,shop:0,market:0};
+let platformReadTradeIds = new Set();
+let platformChatBadgeBaseline = 0;
+let platformUiRecords = [];
+let platformUiEditingApp = 'chat';
+let platformUiLoaded = false;
+const PLATFORM_EDIT_FIELDS = {
+  chat:[['chat-title','Título CHAT'],['chat-group','Botón Nuevo grupo'],['chat-friends','Botón Amigos'],['chat-banner','Imagen sobre la ventana de chat']],
+  inventory:[['inventory-title','Título Inventario'],['inventory-subtitle','Descripción Inventario'],['inventory-trades','Botón Intercambios'],['inventory-banner','Imagen del Inventario']],
+  shop:[['shop-title','Título Tienda'],['shop-subtitle','Descripción Tienda'],['shop-banner','Imagen de la Tienda']],
+  market:[['market-title','Título Mercado'],['market-subtitle','Descripción Mercado'],['market-banner','Imagen del Mercado']]
+};
+const PLATFORM_UI_SELECTORS = {
+  'chat-title':'.chat-brand-label > span',
+  'chat-group':'[data-action="open-group"] > span:last-child',
+  'chat-friends':'[data-action="open-people"] > span:nth-child(2)',
+  'inventory-title':'.inventory-header-title h1',
+  'inventory-subtitle':'.inventory-header-title p',
+  'inventory-trades':'[data-inventory-tab="trades"] > span:nth-child(2)',
+  'shop-title':'.shop-header h1',
+  'shop-subtitle':'.shop-header > div:first-of-type p',
+  'market-title':'#market-heading',
+  'market-subtitle':'#market-subheading'
+};
+
+function platformUpdateTitleAndBadges() {
+  let total=0;
+  for(const id of ['chat','inventory','shop','market']) {
+    const amount=Math.max(0,Math.floor(Number(platformNotifications[id])||0));
+    const badge=$(`#notification-${id}`);
+    if(badge) {
+      badge.textContent=amount>99?'99+':String(amount);
+      badge.classList.toggle('hidden',amount===0);
+      badge.setAttribute('aria-label',`${amount} notificaciones`);
+    }
+    total+=amount;
+  }
+  document.title=total?`XIFRE (${total>99?'99+':total})`:'XIFRE';
+}
+function platformNotify(app,amount) {
+  if(!Object.prototype.hasOwnProperty.call(platformNotifications,app)) return;
+  platformNotifications[app]=Math.max(0,Math.round(Number(amount)||0));
+  platformUpdateTitleAndBadges();
+}
+function platformReadKey(app) {return `xifre_a14_seen_${app}_${currentUser?.id||'anonymous'}`;}
+function platformLastSeen(app) {
+  try {
+    const key=platformReadKey(app);
+    const raw=localStorage.getItem(key);
+    if(raw===null){const now=Date.now();localStorage.setItem(key,String(now));return now;}
+    return Number(raw)||0;
+  }catch(_){return Date.now();}
+}
+function platformMarkAppSeen(app) {
+  try{localStorage.setItem(platformReadKey(app),String(Date.now()));}catch(_){/* ephemeral */}
+  if(app==='inventory') platformReadTradeIds=new Set(platformTrades.filter(t=>t.status==='pending' && String(t.recipient_id)===String(currentUser?.id)).map(t=>String(t.id)));
+  if(app==='chat') platformChatBadgeBaseline=platformUnreadChatTotal();
+  platformNotify(app,0);
+}
+function platformUnreadChatTotal() {
+  const fromChats=conversationCache.reduce((sum,row)=>sum+Math.max(0,Number(row.unread_count||0)),0);
+  const friendRequest=Number($('#friend-request-badge')?.textContent||0);
+  return fromChats+(Number.isFinite(friendRequest)?friendRequest:0);
+}
+function platformUpdateChatBadges(){
+  if(platformActiveApp==='chat') return platformNotify('chat',0);
+  platformNotify('chat',Math.max(0,platformUnreadChatTotal()-platformChatBadgeBaseline));
+}
+function platformUpdateTradeBadges(){
+  const incoming=platformTrades.filter(t=>t.status==='pending' && String(t.recipient_id)===String(currentUser?.id));
+  if(platformActiveApp==='inventory')platformReadTradeIds=new Set(incoming.map(t=>String(t.id)));
+  platformNotify('inventory',platformActiveApp==='inventory'?0:incoming.filter(t=>!platformReadTradeIds.has(String(t.id))).length);
+}
+function platformUpdateListingBadges(app,rows) {
+  if(platformActiveApp===app){platformMarkAppSeen(app);return;}
+  const since=platformLastSeen(app);
+  platformNotify(app,rows.filter(row=>new Date(row.created_at||0).getTime()>since).length);
+}
+function platformRarityMarketClass(item){return `rarity-${esc(platformRarity(item).className)}`;}
+async function platformLoadMarket(withInventory=false) {
+  if(!currentUser || !supabase)return;
+  if(platformMarketLoadBusy){platformMarketRefreshQueued=true;return;}
+  platformMarketLoadBusy=true;
+  const owner=String(currentUser.id),generation=platformSessionGeneration;
+  try {
+    const jobs=[supabase.rpc('xifre_market_catalog',{p_only_mine:false}),supabase.rpc('xifre_market_catalog',{p_only_mine:true})];
+    jobs.push(supabase.rpc('xifre_market_inventory'));
+    const results=await Promise.all(jobs);
+    for(const result of results)if(result.error)throw result.error;
+    if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
+    const all=Array.isArray(results[0].data)?results[0].data:[];
+    const mine=Array.isArray(results[1].data)?results[1].data:[];
+    const inv=results[2]?Array.isArray(results[2].data)?results[2].data:[]:platformMarketInventory;
+    const urls=await platformSignImagePaths([...all,...mine,...inv].map(x=>x.image_path));
+    if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
+    const img=(r)=>({...r,image_url:urls.get(r.image_path)||''});
+    platformMarketListings=all.map(img);
+    platformMarketMyListings=mine.map(img);
+    if(results[2])platformMarketInventory=inv.map(img);
+    if(platformInventoryItems.length) {
+      const reservedIds=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
+      for(const item of platformInventoryItems) if(reservedIds.has(platformItemKey(item))) item.reserved=true;
+      if(platformActiveApp==='inventory')platformRenderInventory();
+    }
+    platformUpdateListingBadges('market',platformMarketListings.filter(r=>r.seller_id!==owner));
+    if(platformActiveApp==='market')platformRenderMarket();
+  }catch(error){
+    console.warn('XIFRE MARKET',error);
+    if(platformActiveApp==='market') platformApplyMarkup($('#market-listings'),`<div class="market-empty">No se puede cargar el Mercado. ${esc(friendlyError(error))}</div>`);
+  }finally{
+    platformMarketLoadBusy=false;
+    if(platformMarketRefreshQueued && currentUser){
+      platformMarketRefreshQueued=false;
+      queueMicrotask(()=>{void platformLoadMarket(true);});
+    }
+  }
+}
+function platformMarketListingHTML(listing,{mine=false}={}) {
+  const owner=String(currentUser?.id||'')===String(listing.seller_id);
+  const rarity=platformRarity(listing);
+  const status=listing.status;
+  return `<article class="market-listing ${platformRarityMarketClass(listing)}">
+    <div class="market-art">${platformImageMarkup(listing.image_url,listing.name)}</div>
+    <span class="market-rarity">${esc(rarity.label.toUpperCase())}</span>
+    <h3 title="${esc(listing.name)}">${esc(listing.name)}</h3>
+    <small class="market-seller">${mine?`Estado: ${esc(status==='active'?'En venta':status==='sold'?'Vendida':'Cancelada')}`:`Vendedor: @${esc(listing.seller_name||'Usuario')}`}</small>
+    <div class="market-price-row"><strong>${esc(platformMoney(listing.price_cents))}</strong>
+      ${mine&&status==='active'?`<button data-market-cancel="${esc(listing.id)}" type="button" class="inventory-secondary-button compact">Retirar</button>`:
+        owner?'<span class="market-own-tag">Tu oferta</span>':status==='active'?`<button data-market-buy="${esc(listing.id)}" class="inventory-primary-button compact" type="button" ${platformWalletBalance<Number(listing.price_cents)?'disabled title="Saldo insuficiente"':''}>Comprar</button>`:'<span class="market-own-tag">Cerrada</span>'}
+    </div>
+  </article>`;
+}
+function platformRenderMarket() {
+  const q=normalizeUsername($('#market-search')?.value||'');
+  const rarity=$('#market-filter-rarity')?.value||'';
+  const items=platformMarketListings.filter(l=>(!q || normalizeUsername(l.name).includes(q) || normalizeUsername(l.seller_name).includes(q)) && (!rarity||l.rarity===rarity))
+    .sort((a,b)=>Number(a.price_cents)-Number(b.price_cents) || new Date(a.created_at)-new Date(b.created_at) || String(a.id).localeCompare(String(b.id)));
+  platformApplyMarkup($('#market-listings'),items.length?items.map(i=>platformMarketListingHTML(i)).join(''):'<div class="market-empty">No hay ofertas que coincidan con tu búsqueda.</div>');
+  setText('market-count',`${items.length} ${items.length===1?'oferta':'ofertas'} · Orden: más barato primero`);
+  platformApplyMarkup($('#market-my-listings'),platformMarketMyListings.length?platformMarketMyListings.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(i=>platformMarketListingHTML(i,{mine:true})).join(''):'<div class="market-empty">Todavía no has publicado ofertas.</div>');
+  platformRenderMarketInventory();
+  setText('market-wallet',platformMoney(platformWalletBalance));
+  $$('[data-market-tab]').forEach(b=>b.classList.toggle('active',b.dataset.marketTab===platformMarketTab));
+  $$('.market-panel').forEach(p=>p.classList.toggle('active',p.id===`market-panel-${platformMarketTab}`));
+}
+function platformRenderMarketInventory() {
+  const excluded=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
+  const items=platformMarketInventory.filter(i=>!i.listed&&!i.reserved&&!excluded.has(String(i.instance_id)));
+  const host=$('#market-my-inventory');
+  platformApplyMarkup(host,items.length?items.map(item=>`<button type="button" data-market-select="${esc(item.instance_id)}" class="market-inventory-item ${platformRarityMarketClass(item)} ${platformMarketSelectedInstance===String(item.instance_id)?'active':''}">
+    <span class="market-art">${platformImageMarkup(item.image_url,item.name)}</span><strong>${esc(item.name)}</strong><small>${esc(platformRarity(item).label)} · ${esc(platformFormatValue(item.value))}</small></button>`).join(''):'<div class="market-empty">No hay objetos disponibles. Los objetos puestos a la venta o en un intercambio están reservados.</div>');
+  const selected=items.find(i=>String(i.instance_id)===platformMarketSelectedInstance);
+  $('#market-sell-selection')?.classList.toggle('hidden',!selected);
+  if(selected){
+    setText('market-sell-selected',`${selected.name} · ${platformRarity(selected).label}`);
+    setText('market-instant-price',platformMoney(selected.instant_sell_cents));
+  }else platformMarketSelectedInstance='';
+}
+function platformSelectMarketItem(id){platformMarketSelectedInstance=String(id);platformRenderMarketInventory();$('#market-sell-selection')?.scrollIntoView({behavior:'smooth',block:'nearest'});}
+async function platformMarketCreateListing(event) {
+  event.preventDefault();
+  const id=platformMarketSelectedInstance;
+  if(!id || platformMarketMutations.has(id))return;
+  platformMarketMutations.add(id);
+  const button=$('#market-list-submit');setLoading(button,true);
+  try {
+    const cents=platformMoneyToCents($('#market-list-price').value);
+    if(cents<1)throw new Error('El precio mínimo es 0.01€.');
+    const {error}=await supabase.rpc('xifre_market_list_item',{p_instance_id:id,p_price_cents:cents});
+    if(error)throw error;
+    platformMarketSelectedInstance='';
+    await platformLoadMarket(true);
+    await platformRefreshInventory();
+    toast('Tu oferta ya está publicada en el Mercado.','success');
+    platformSetMarketTab('my');
+  }catch(error){toast(friendlyError(error),'error');}
+  finally{platformMarketMutations.delete(id);setLoading(button,false);}
+}
+async function platformMarketCancelListing(id){
+  if(platformMarketMutations.has(id))return;
+  platformMarketMutations.add(id);
+  try{
+    const {error}=await supabase.rpc('xifre_market_cancel',{p_listing_id:id});if(error)throw error;
+    await platformLoadMarket(true);await platformRefreshInventory();toast('Oferta retirada. Tu copia vuelve a estar disponible.','success');
+  }catch(error){toast(friendlyError(error),'error');}
+  finally{platformMarketMutations.delete(id);}
+}
+async function platformMarketBuy(id) {
+  if(platformMarketMutations.has(id))return;
+  const row=platformMarketListings.find(x=>String(x.id)===String(id));
+  if(!row || String(row.seller_id)===String(currentUser?.id))return;
+  if(platformWalletBalance<Number(row.price_cents))return toast('Saldo insuficiente.','info');
+  platformMarketMutations.add(id);
+  const requestId=platformMarketPurchaseRequests.get(id)||crypto.randomUUID();
+  platformMarketPurchaseRequests.set(id,requestId);
+  try{
+    const {data,error}=await supabase.rpc('xifre_market_buy',{p_listing_id:id,p_request_id:requestId});
+    if(error)throw error;
+    platformMarketPurchaseRequests.delete(id);
+    if(typeof data?.balance_cents==='number')platformSetWalletUI(data.balance_cents);
+    await Promise.all([platformLoadWallet(false),platformLoadMarket(true),platformLoadBoxMeta()]);
+    await platformRefreshInventory();
+    toast('¡Compra completada! El artículo ya es tuyo.','success');
+  }catch(error){toast(friendlyError(error),'error');}
+  finally{platformMarketMutations.delete(id);}
+}
+async function platformMarketInstantSell() {
+  const id=platformMarketSelectedInstance;
+  const row=platformMarketInventory.find(i=>String(i.instance_id)===id);
+  if(!row || platformMarketMutations.has(id))return;
+  const confirmed=await askConfirm('Venta instantánea',`¿Vender ${row.name} por ${platformMoney(row.instant_sell_cents)}? No se puede recuperar esta copia.`, 'Vender ahora');
+  if(!confirmed)return;
+  platformMarketMutations.add(id);
+  const requestId=crypto.randomUUID();
+  try {
+    const {data,error}=await supabase.rpc('xifre_market_instant_sell',{p_instance_id:id,p_request_id:requestId});
+    if(error)throw error;
+    platformMarketSelectedInstance='';
+    if(typeof data?.balance_cents==='number')platformSetWalletUI(data.balance_cents);
+    await Promise.all([platformLoadWallet(false),platformLoadMarket(true),platformRefreshInventory(),platformLoadBoxMeta()]);
+    toast(`Vendido inmediatamente por ${platformMoney(data.price_cents)}.`, 'success');
+  }catch(error){toast(friendlyError(error),'error');}
+  finally{platformMarketMutations.delete(id);}
+}
+function platformSetMarketTab(tab){
+  if(!['explore','sell','my','history'].includes(tab))return;
+  platformMarketTab=tab;
+  if(tab==='sell')void platformLoadMarket(true);
+  if(tab==='history')void platformMarketLoadHistory();
+  platformRenderMarket();
+}
+async function platformMarketLoadHistory(){
+  const owner=String(currentUser?.id||'');
+  const {data,error}=await supabase.rpc('xifre_market_history');
+  if(error){toast('No se pudo cargar el historial: '+friendlyError(error),'error');return;}
+  if(String(currentUser?.id)!==owner)return;
+  platformMarketHistory=Array.isArray(data)?data:[];
+  platformApplyMarkup($('#market-history'),platformMarketHistory.length?platformMarketHistory.map(r=>`<div class="market-history-row"><span>${esc(r.action==='venta'?'Vendido':r.action==='instant'?'Venta inmediata':'Comprado')}: ${esc(r.name)} · ${esc(platformRarity(r).label)}</span><strong>${esc(platformMoney(r.price_cents))}</strong></div>`).join(''):'<div class="market-empty">No hay compras ni ventas todavía.</div>');
+}
+
+async function platformAdminLoadAssets(){
+  if(!platformShopOwner || !platformAdminRecipient?.id)return;
+  const target=String(platformAdminRecipient.id),owner=String(currentUser?.id);
+  setText('admin-assets-user',`Cuenta: @${platformAdminRecipient.username||'Usuario'}`);
+  $('#admin-assets-content')?.classList.remove('hidden');
+  const {data,error}=await supabase.rpc('xifre_admin_user_assets',{p_target_user:target});
+  if(error){toast('No se pudieron cargar los bienes: '+friendlyError(error),'error');return;}
+  if(!currentUser || owner!==String(currentUser.id) || String(platformAdminRecipient?.id)!==target)return;
+  setText('admin-assets-balance',platformMoney(data?.balance_cents));
+  const urls=await platformSignImagePaths((data?.items||[]).map(r=>r.image_path));
+  if(String(platformAdminRecipient?.id)!==target)return;
+  const host=$('#admin-assets-items');
+  platformApplyMarkup(host,(data?.items||[]).length?(data.items||[]).map(row=>{
+    const rarity=platformRarity(row),locked=Boolean(row.reserved);
+    return `<div class="admin-asset-row ${platformRarityMarketClass(row)}"><span class="admin-asset-thumb">${platformImageMarkup(urls.get(row.image_path)||'',row.name)}</span><div><strong>${esc(row.name)}</strong><small>${esc(rarity.label)} · ${esc(platformFormatValue(row.value))} ${locked?'· EN VENTA':''}</small></div>
+    <button type="button" class="inventory-secondary-button compact" data-admin-remove-instance="${esc(row.instance_id)}">Quitar copia</button></div>`;
+  }).join(''):'<p class="inventory-inline-empty">Este usuario no tiene objetos.</p>');
+}
+async function platformAdminAdjustMoney(event){
+  event.preventDefault();if(!platformShopOwner || !platformAdminRecipient?.id)return;
+  const raw=String($('#admin-assets-money-delta')?.value||'');
+  const negative=raw.startsWith('-');
+  const amount=platformMoneyToCents(negative?raw.slice(1):raw)*(negative?-1:1);
+  if(amount===0)return toast('Introduce un importe distinto de cero.','info');
+  const {error}=await supabase.rpc('xifre_admin_adjust_wallet',{p_target_user:platformAdminRecipient.id,p_delta_cents:amount});
+  if(error)return toast(friendlyError(error),'error');
+  toast('Saldo modificado correctamente.','success');
+  await platformAdminLoadAssets();
+}
+async function platformAdminRemoveInstance(id){
+  if(!platformShopOwner || !platformAdminRecipient?.id)return;
+  const okay=await askConfirm('Retirar objeto','¿Quitar esta copia del inventario del usuario? Esta acción no se puede deshacer.','Quitar copia');
+  if(!okay)return;
+  const {error}=await supabase.rpc('xifre_admin_remove_inventory',{p_target_user:platformAdminRecipient.id,p_instance_id:id});
+  if(error)return toast(friendlyError(error),'error');
+  toast('Copia retirada.','success');
+  await platformAdminLoadAssets();
+  if(platformAdminRecipient.id===currentUser.id)await platformRefreshInventory();
+}
+async function platformAdminSaveInstantPrice(itemId,cents){
+  const {error}=await supabase.rpc('xifre_admin_set_instant_price',{p_item_id:itemId,p_price_cents:cents});
+  if(error)throw error;
+}
+
+async function platformUiLoad(){
+  if(!currentUser)return;
+  const owner=String(currentUser.id),gen=platformSessionGeneration;
+  const {data,error}=await supabase.rpc('xifre_ui_get');
+  if(error){console.warn('XIFRE UI CONFIG',error);return;}
+  if(!currentUser || String(currentUser.id)!==owner || gen!==platformSessionGeneration)return;
+  platformUiRecords=Array.isArray(data)?data:[];
+  platformUiLoaded=true;
+  await platformUiApply();
+}
+async function platformUiApply(){
+  if(!currentUser || !platformUiLoaded)return;
+  for(const [key,selector] of Object.entries(PLATFORM_UI_SELECTORS)){
+    const node=$(selector);if(!node)continue;
+    if(node.__xifreDefaultText===undefined)node.__xifreDefaultText=node.textContent;
+    const record=platformUiRecords.find(r=>r.key===key);
+    node.textContent=record?.text_value?.trim()||node.__xifreDefaultText;
+  }
+  const banners=platformUiRecords.filter(r=>r.key.endsWith('-banner') && r.image_path);
+  const urls=await platformSignImagePaths(banners.map(r=>r.image_path));
+  for(const app of ['chat','inventory','shop','market']){
+    const container=$(`#${app}-banner-slot`);if(!container)continue;
+    const record=platformUiRecords.find(r=>r.key===`${app}-banner`);
+    const url=record?.image_path?urls.get(record.image_path):'';
+    if(url){const markup=`<img src="${esc(url)}" alt="Imagen personalizada de ${esc(app)}">`;platformApplyMarkup(container,markup);container.classList.remove('hidden');}
+    else{container.classList.add('hidden');container.replaceChildren();delete container.__xifreMarkup;}
+  }
+}
+function platformUiOpenEditor(app){
+  if(!platformShopOwner || !PLATFORM_EDIT_FIELDS[app])return;
+  platformUiEditingApp=app;
+  const select=$('#xifre-editor-key');
+  select.innerHTML=PLATFORM_EDIT_FIELDS[app].map(([key,label])=>`<option value="${esc(key)}">${esc(label)}</option>`).join('');
+  setText('xifre-editor-title',`Editar ${app.toUpperCase()}`);
+  platformUiFillEditor();openModal('xifre-editor-modal');
+}
+function platformUiFillEditor(){
+  const key=$('#xifre-editor-key')?.value||'';
+  const rec=platformUiRecords.find(r=>r.key===key);
+  const banner=key.endsWith('-banner');
+  $('#xifre-editor-text-label')?.classList.toggle('hidden',banner);
+  $('#xifre-editor-text').value=rec?.text_value||'';
+  $('#xifre-editor-image').value='';$('#xifre-editor-remove-image').checked=false;
+  setText('xifre-editor-preview',rec?.image_path?'Hay una imagen guardada. Puedes reemplazarla o quitarla.':'Sin imagen personalizada.');
+  setText('xifre-editor-feedback','');
+}
+async function platformUiSave(event){
+  event.preventDefault();if(!platformShopOwner)return;
+  const key=$('#xifre-editor-key')?.value||'';
+  if(!PLATFORM_EDIT_FIELDS[platformUiEditingApp].some(row=>row[0]===key))return;
+  const button=$('#xifre-editor-submit');setLoading(button,true);
+  const current=platformUiRecords.find(r=>r.key===key);
+  let path=current?.image_path||'';let fresh='';
+  try {
+    const file=$('#xifre-editor-image')?.files?.[0];
+    if($('#xifre-editor-remove-image')?.checked)path='';
+    if(file){fresh=await platformUploadImage(file,'ui');path=fresh;}
+    const textValue=key.endsWith('-banner')?'':String($('#xifre-editor-text')?.value||'').trim();
+    const {error}=await supabase.rpc('xifre_admin_ui_save',{p_key:key,p_text:textValue,p_image_path:path});
+    if(error)throw error;
+    await platformUiLoad();
+    setText('xifre-editor-feedback','Cambios guardados para todos.');
+    toast('Interfaz actualizada.','success');
+  }catch(error){
+    if(fresh)await platformDeleteImage(fresh).catch(()=>{});
+    setText('xifre-editor-feedback','Error: '+friendlyError(error));
+  }finally{setLoading(button,false);}
+}
+function platformAlpha14Bind(){
+  document.addEventListener('click',event=>{
+    const tab=event.target.closest('[data-market-tab]');if(tab){platformSetMarketTab(tab.dataset.marketTab);return;}
+    const pick=event.target.closest('[data-market-select]');if(pick){platformSelectMarketItem(pick.dataset.marketSelect);return;}
+    const buy=event.target.closest('[data-market-buy]');if(buy){void platformMarketBuy(buy.dataset.marketBuy);return;}
+    const cancel=event.target.closest('[data-market-cancel]');if(cancel){void platformMarketCancelListing(cancel.dataset.marketCancel);return;}
+    const edit=event.target.closest('[data-editor-open]');if(edit){platformUiOpenEditor(edit.dataset.editorOpen);return;}
+    const remove=event.target.closest('[data-admin-remove-instance]');if(remove){void platformAdminRemoveInstance(remove.dataset.adminRemoveInstance);return;}
+  });
+  $('#market-list-form')?.addEventListener('submit',event=>void platformMarketCreateListing(event));
+  $('#market-instant-button')?.addEventListener('click',()=>void platformMarketInstantSell());
+  $('#market-refresh')?.addEventListener('click',()=>{void platformLoadMarket(true);void platformLoadWallet(false);});
+  $('#market-search')?.addEventListener('input',platformRenderMarket);
+  $('#market-filter-rarity')?.addEventListener('change',platformRenderMarket);
+  $('#admin-assets-money-form')?.addEventListener('submit',event=>void platformAdminAdjustMoney(event));
+  $('#xifre-editor-key')?.addEventListener('change',platformUiFillEditor);
+  $('#xifre-editor-form')?.addEventListener('submit',event=>void platformUiSave(event));
+}
+
 function platformBindEvents() {
+  platformAlpha14Bind();
   document.addEventListener('click', event => {
     const appButton = event.target.closest('[data-platform-app]');
     if (appButton) {
@@ -5611,6 +6089,7 @@ return;
 if (event === 'SIGNED_OUT') {
 stopPresenceTracking();
 platformStop();
+xifreSendTimes.length=0;xifreRecentlySent.clear();xifreMessageLoads.clear();xifreChatOpenRetries.clear();
 currentUser = null;
 currentProfile = null;
 appStarted = false;
