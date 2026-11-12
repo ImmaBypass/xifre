@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#17124d">
 <title>XIFRE</title>
-<link rel="stylesheet" href="style.css?v=20261112-shop-3">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css?v=20261112-market-alpha-14">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -65,13 +67,16 @@
   </div>
   <div class="appbar-launchers" aria-label="Aplicaciones">
     <button id="app-chat-button" class="app-launcher app-launcher-chat active" type="button" data-platform-app="chat" aria-label="Abrir CHAT" title="CHAT">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.2 5.5h15.6a1.7 1.7 0 0 1 1.7 1.7v9.1a1.7 1.7 0 0 1-1.7 1.7H9l-5.3 2.6V7.2a1.7 1.7 0 0 1 .5-1.2Z"/><path d="M7.5 10h9M7.5 13.5h6"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.2 5.5h15.6a1.7 1.7 0 0 1 1.7 1.7v9.1a1.7 1.7 0 0 1-1.7 1.7H9l-5.3 2.6V7.2a1.7 1.7 0 0 1 .5-1.2Z"/><path d="M7.5 10h9M7.5 13.5h6"/></svg><span id="notification-chat" class="xifre-app-count hidden" aria-label="Notificaciones">0</span>
     </button>
     <button id="app-inventory-button" class="app-launcher app-launcher-inventory" type="button" data-platform-app="inventory" aria-label="Abrir Inventario" title="Inventario">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5 8.3 4h7.4L17 7.5l2.5 1.2v10.1a1.7 1.7 0 0 1-1.7 1.7H6.2a1.7 1.7 0 0 1-1.7-1.7V8.7L7 7.5Z"/><path d="M8 4.5c.2 2.1 1.5 3.3 4 3.3s3.8-1.2 4-3.3M9 12h6M12 9.5v5"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5 8.3 4h7.4L17 7.5l2.5 1.2v10.1a1.7 1.7 0 0 1-1.7 1.7H6.2a1.7 1.7 0 0 1-1.7-1.7V8.7L7 7.5Z"/><path d="M8 4.5c.2 2.1 1.5 3.3 4 3.3s3.8-1.2 4-3.3M9 12h6M12 9.5v5"/></svg><span id="notification-inventory" class="xifre-app-count hidden" aria-label="Notificaciones">0</span>
     </button>
     <button id="app-shop-button" class="app-launcher app-launcher-shop" type="button" data-platform-app="shop" aria-label="Abrir Tienda" title="Tienda XIFRE">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18l-1.5-5H4.5L3 9Z"/><path d="M5 9v11h14V9M9 20v-7h6v7M3 9c0 2 3 2 4 0 1 2 4 2 5 0 1 2 4 2 5 0 1 2 4 2 4 0"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18l-1.5-5H4.5L3 9Z"/><path d="M5 9v11h14V9M9 20v-7h6v7M3 9c0 2 3 2 4 0 1 2 4 2 5 0 1 2 4 2 5 0 1 2 4 2 4 0"/></svg><span id="notification-shop" class="xifre-app-count hidden" aria-label="Notificaciones">0</span>
+    </button>
+    <button id="app-market-button" class="app-launcher app-launcher-market hidden" type="button" data-platform-app="market" title="Mercado de jugadores" aria-label="Abrir Mercado">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M5 7l2-4h10l2 4M5 7v13h14V7M9 20v-8h6v8M8 10h2m4 0h2"/></svg><span id="notification-market" class="xifre-app-count hidden" aria-label="Notificaciones">0</span>
     </button>
   </div>
   <div class="appbar-tools">
@@ -91,11 +96,13 @@
 </nav>
 <div class="xifre-app-stage">
 <div id="chat-app-view" class="app-view active">
+<div id="chat-banner-slot" class="xifre-custom-banner hidden"></div>
 <div class="app-shell">
 <!-- LEFT: navigation / conversations -->
 <aside class="left-pane">
 <div class="left-pane-head">
-<div class="brand-line chat-brand-label"><span>CHAT</span><i></i></div>
+<div class="brand-line chat-brand-label">
+<button type="button" class="xifre-edit-launch hidden" data-editor-open="chat" title="Editar la interfaz">✎ Editar</button><span>CHAT</span><i></i></div>
 <div class="nav-actions">
 <div class="conversation-searchbar">
   <span class="conversation-search-icon" aria-hidden="true">⌕</span>
@@ -198,6 +205,7 @@
 </div>
 <section id="inventory-app-view" class="app-view inventory-app hidden" aria-label="Aplicación Inventario">
   <header class="inventory-header">
+<button type="button" class="xifre-edit-launch hidden" data-editor-open="inventory" title="Editar la interfaz">✎ Editar</button>
     <div class="inventory-header-title">
       <span class="inventory-eyebrow">APLICACIÓN DEL SISTEMA</span>
       <h1>Inventario</h1>
@@ -208,7 +216,8 @@
       <button id="inventory-refresh-button" class="inventory-refresh-button" type="button" title="Actualizar inventario" aria-label="Actualizar inventario">↻</button>
     </div>
   </header>
-  <div class="inventory-layout">
+  <div id="inventory-banner-slot" class="xifre-custom-banner hidden"></div>
+<div class="inventory-layout">
     <aside class="inventory-sidebar">
       <div class="inventory-nav-label">TU ESPACIO</div>
       <button class="inventory-nav-button active" type="button" data-inventory-tab="collection"><span class="inventory-nav-icon">▦</span><span>Mi colección</span><b id="inventory-nav-count">0</b></button>
@@ -259,6 +268,7 @@
               <label>Nombre<input id="admin-item-name" type="text" maxlength="80" placeholder="Ej. Fragmento solar" required></label>
               <label>Descripción<textarea id="admin-item-description" rows="3" maxlength="1000" placeholder="Describe el objeto..."></textarea></label>
               <div class="admin-form-row"><label>Rareza<select id="admin-item-rarity" required><option value="comun">Común</option><option value="poco_comun">Poco común</option><option value="raro">Raro</option><option value="epico">Épico</option><option value="legendario">Legendario</option><option value="mitico">Mítico</option><option value="divino">Divino</option></select></label><label>Valor conceptual<input id="admin-item-value" type="number" min="0" max="9000000000000000" step="1" value="0" required></label></div>
+              <label>Venta instantánea (€)<input id="admin-item-instant-price" type="number" min="0" step="0.01" value="0.01" title="Precio al que el sistema compra una copia de este objeto"></label>
               <label class="xifre-check-row"><input id="admin-item-is-box" type="checkbox"><span>Este objeto es una caja consumible</span></label>
               <div id="admin-box-config" class="admin-box-config hidden">
                 <strong>Contenido de la caja · probabilidades (%)</strong>
@@ -286,6 +296,13 @@
             </form>
           </section>
         </div>
+        <section class="admin-card xifre-admin-assets">
+          <div class="admin-card-heading"><span class="admin-card-icon">◎</span><div><h3>Consultar y gestionar usuarios</h3><p>Selecciona un usuario en «Entregar objetos» para consultar su saldo y copias.</p></div></div>
+          <div id="admin-assets-user" class="admin-assets-user">Selecciona un destinatario arriba.</div>
+          <div id="admin-assets-content" class="hidden"><div class="admin-assets-balance">Saldo actual <strong id="admin-assets-balance">0.00€</strong></div>
+          <form id="admin-assets-money-form"><label>Ajustar saldo (€): número positivo para añadir, negativo para quitar<input id="admin-assets-money-delta" type="number" min="-10000000000" step="0.01" value="-0.01" required></label><button type="submit" class="inventory-secondary-button">Aplicar ajuste</button></form>
+          <div id="admin-assets-items" class="admin-assets-items"></div></div>
+        </section>
         <section class="admin-card admin-catalog-card"><div class="admin-card-heading"><span class="admin-card-icon">▤</span><div><h3>Catálogo de objetos</h3><p>Gestiona los objetos ya creados y consulta cuántas copias existen.</p></div></div><div id="admin-item-list" class="admin-item-list"><div class="inventory-inline-empty">Todavía no hay objetos.</div></div></section>
       </section>
     </div>
@@ -294,6 +311,7 @@
 
 <section id="shop-app-view" class="app-view shop-app hidden" aria-label="Tienda de XIFRE">
   <header class="shop-header">
+<button type="button" class="xifre-edit-launch hidden" data-editor-open="shop" title="Editar la interfaz">✎ Editar</button>
     <div><span class="shop-eyebrow">XIFRE · SISTEMA</span><h1>La Tienda<span class="shop-header-spark">✦</span></h1><p>Descubre objetos, ofertas especiales y cajas sorpresa.</p></div>
     <div class="shop-header-controls">
       <div class="shop-wallet" aria-live="polite"><span>MI SALDO</span><strong id="shop-wallet-balance">0.00€</strong><button class="shop-wallet-help" type="button" aria-label="Información sobre el saldo" title="Ganas 0.05€ virtuales por cada minuto de actividad en XIFRE. Los segundos se guardan para la siguiente visita. Sin valor real.">?</button>
@@ -302,7 +320,8 @@
       <button id="shop-refresh" type="button" class="shop-refresh" title="Actualizar tienda" aria-label="Actualizar tienda">↻</button>
     </div>
   </header>
-  <div class="shop-scroller">
+  <div id="shop-banner-slot" class="xifre-custom-banner hidden"></div>
+<div class="shop-scroller">
     <div class="shop-intro"><span>OBJETOS DESTACADOS</span><p>Tu próxima adquisición puede estar aquí.</p></div>
     <div id="shop-featured" class="shop-featured"></div>
     <div class="shop-section-heading"><div><span>EXPLORA EL CATÁLOGO</span><h2>Ofertas y artículos</h2></div><span id="shop-count">0 artículos</span></div>
@@ -330,9 +349,59 @@
     <footer class="shop-footer">✦ XIFRE STORE · Moneda ficticia sin valor real · Los premios de las cajas tienen probabilidades públicas.</footer>
   </div>
 </section>
+
+<section id="market-app-view" class="app-view market-app hidden" aria-label="Mercado de jugadores">
+  <header class="market-header">
+    <div class="market-brand"><span class="inventory-eyebrow">APLICACIÓN DEL SISTEMA · COMERCIO ENTRE USUARIOS</span><h1 id="market-heading">Mercado</h1><p id="market-subheading">Compra y vende artículos a otros jugadores. Sin comisiones.</p></div>
+    <button class="xifre-edit-launch hidden" type="button" data-editor-open="market" title="Editar la interfaz">✎ Editar</button>
+    <div class="market-header-tools"><span id="market-wallet" class="market-wallet" title="Saldo virtual">0.00€</span><button type="button" id="market-refresh" class="inventory-refresh-button" title="Actualizar">↻</button></div>
+  </header>
+  <div class="market-scroll">
+    <div id="market-banner-slot" class="xifre-custom-banner hidden"></div>
+    <div class="market-summary"><div><b>EL MERCADO DE XIFRE</b><h2>Artículos de la comunidad</h2><span>El precio más barato aparece primero. Cada oferta pertenece a un jugador.</span></div><div class="market-summary-icon">⚖</div></div>
+    <nav class="market-tabs" aria-label="Apartados del mercado">
+      <button type="button" data-market-tab="explore" class="active">Explorar ofertas</button>
+      <button type="button" data-market-tab="sell">Poner a la venta</button>
+      <button type="button" data-market-tab="my">Mis ofertas</button>
+      <button type="button" data-market-tab="history">Historial</button>
+    </nav>
+    <section id="market-panel-explore" class="market-panel active">
+      <div class="market-searchbar"><span>⌕</span><input id="market-search" type="search" placeholder="Buscar artículo o vendedor..." maxlength="90" autocomplete="off"><select id="market-filter-rarity" aria-label="Filtrar rareza"><option value="">Todas las rarezas</option><option value="comun">Común</option><option value="poco_comun">Poco común</option><option value="raro">Raro</option><option value="epico">Épico</option><option value="legendario">Legendario</option><option value="mitico">Mítico</option><option value="divino">Divino</option></select></div>
+      <p id="market-count" class="market-count">Buscando ofertas...</p><div id="market-listings" class="market-listings"><div class="market-empty">Cargando Mercado...</div></div>
+    </section>
+    <section id="market-panel-sell" class="market-panel">
+      <div class="market-panel-heading"><h2>Vender un objeto</h2><p>Selecciona una copia de tu inventario, indica el precio o véndela inmediatamente al sistema.</p></div>
+      <div id="market-my-inventory" class="market-inventory-grid"><p class="market-empty">Abre el inventario para cargar tus objetos.</p></div>
+      <div id="market-sell-selection" class="market-sell-selection hidden"><div id="market-sell-selected"></div>
+        <form id="market-list-form"><label>Precio de la oferta (€)<input id="market-list-price" type="number" step="0.01" min="0.01" max="10000000000" value="0.10" required></label><button id="market-list-submit" class="inventory-primary-button" type="submit">Publicar oferta</button></form>
+        <div class="market-instant"><p>¿No quieres esperar a otro comprador? Vende ahora al sistema por <strong id="market-instant-price">0.01€</strong>. Esta operación consume una copia y es irreversible.</p><button id="market-instant-button" type="button" class="inventory-secondary-button">Venta instantánea</button></div>
+      </div>
+    </section>
+    <section id="market-panel-my" class="market-panel"><div class="market-panel-heading"><h2>Mis ofertas</h2><p>Solo cobras si otro jugador compra tu objeto. Puedes cancelar las ofertas activas.</p></div><div id="market-my-listings" class="market-listings"></div></section>
+    <section id="market-panel-history" class="market-panel"><div class="market-panel-heading"><h2>Mi historial</h2><p>Operaciones de compraventa completadas.</p></div><div id="market-history" class="market-history"></div></section>
+    <footer class="market-disclaimer">Todas las cifras son monedas virtuales de XIFRE, sin valor real. No existen comisiones.</footer>
+  </div>
+</section>
 </div>
 
 
+
+
+<div id="xifre-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="xifre-editor-title">
+  <div class="modal-card xifre-editor-card">
+    <button class="modal-close" type="button" data-action="close-modal" data-modal="xifre-editor-modal" aria-label="Cerrar">×</button>
+    <span class="inventory-eyebrow">EDITOR PRIVADO · XIFRE</span><h2 id="xifre-editor-title">Personalizar la interfaz</h2>
+    <p class="xifre-editor-intro">Elige una zona. Los textos aparecen para todos los usuarios y las imágenes se muestran en el encabezado de cada aplicación.</p>
+    <form id="xifre-editor-form"><label>Elemento editable<select id="xifre-editor-key"></select></label>
+      <label id="xifre-editor-text-label">Texto o etiqueta<input id="xifre-editor-text" type="text" maxlength="160" placeholder="Deja vacío para mostrar el texto original"></label>
+      <label>Imagen opcional (PNG, JPG, WEBP o GIF)<input id="xifre-editor-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+      <label class="xifre-check-row"><input id="xifre-editor-remove-image" type="checkbox"> Quitar imagen actual</label>
+      <div id="xifre-editor-preview" class="xifre-editor-preview"></div>
+      <button id="xifre-editor-submit" type="submit" class="inventory-primary-button">Guardar cambios públicos</button>
+      <p id="xifre-editor-feedback" role="status"></p>
+    </form>
+  </div>
+</div>
 
 <div id="box-opening-modal" class="modal hidden box-opening-modal" role="dialog" aria-modal="true" aria-labelledby="box-opening-title">
  <div class="modal-card box-opening-card"><button type="button" id="box-opening-close" class="modal-close" aria-label="Cerrar">×</button>
@@ -598,6 +667,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261112-shop-3"></script>
+<script src="app.js?v=20261112-market-alpha-14"></script>
 </body>
 </html>
