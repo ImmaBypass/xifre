@@ -92,6 +92,77 @@ let keyboardWordUsageCache = null;
 let keyboardWordUsageOwner = null;
 
 const screens = ['landing', 'login', 'register', 'email'];
+/* Alpha 1.6: connectivity is measured with a real lightweight Supabase REST request.
+ * 401/403 are NOT outages, timeouts and 5xx are. Two consecutive failures avoid flashes.
+ * Time is calculated from Date.now(), including delayed/suspended timers.
+ */
+let xifreServerMonitorTimer = null;
+let xifreServerClockTimer = null;
+let xifreServerPollBusy = false;
+let xifreServerFailureCount = 0;
+let xifreServerFirstFailureAt = 0;
+let xifreServerUnavailableAt = 0;
+let xifreServerOffline = false;
+function xifreDurationText(ms) {
+ const seconds=Math.max(0,Math.floor(ms/1000));
+ const minutes=Math.floor(seconds/60);
+ return `${String(minutes).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+}
+function xifreUpdateServerBanner() {
+ const banner=$('#xifre-server-alert');
+ if(!banner)return;
+ const down=Boolean(xifreServerUnavailableAt);
+ banner.classList.toggle('hidden',!down);
+ if(!down)return;
+ const offline=xifreServerOffline || navigator.onLine===false;
+ setText('xifre-server-alert-title',offline?'Sin conexión a Internet':'Servidor de XIFRE no disponible');
+ setText('xifre-server-alert-detail',offline?'Comprueba tu conexión. XIFRE intentará reconectar.':'No se puede contactar con Supabase. Estamos intentando reconectar.');
+ setText('xifre-server-alert-time',xifreDurationText(Date.now()-xifreServerUnavailableAt));
+}
+async function xifreCheckServerHealth(){
+ if(xifreServerPollBusy)return;
+ xifreServerPollBusy=true;
+ const offline=navigator.onLine===false;
+ let ok=false;
+ try {
+  if(!offline){
+   const ctrl=new AbortController();
+   const timeout=setTimeout(()=>ctrl.abort(),8500);
+   try {
+    // Use the same REST origin as normal XIFRE requests; an HTTP 4xx still proves the server responded.
+    const res=await fetch(`${CONFIG.url}/rest/v1/xifre_system_apps?select=app_id&limit=1`,{
+      method:'GET',headers:{apikey:CONFIG.key,Accept:'application/json'},
+      cache:'no-store',signal:ctrl.signal
+    });
+    ok=res.status<500;
+   }finally{clearTimeout(timeout);}
+  }
+ }catch(err){console.warn('XIFRE connectivity probe',err?.name||err);}
+ finally {
+  xifreServerPollBusy=false;
+  if(ok){
+    xifreServerFailureCount=0;xifreServerFirstFailureAt=0;xifreServerUnavailableAt=0;xifreServerOffline=false;
+  }else{
+    if(!xifreServerFailureCount)xifreServerFirstFailureAt=Date.now();
+    xifreServerFailureCount++;
+    xifreServerOffline=offline;
+    if(xifreServerFailureCount>=2 && !xifreServerUnavailableAt)xifreServerUnavailableAt=xifreServerFirstFailureAt;
+  }
+  xifreUpdateServerBanner();
+ }
+}
+function xifreStartServerMonitor(){
+ if(xifreServerMonitorTimer)return;
+ void xifreCheckServerHealth();
+ xifreServerMonitorTimer=setInterval(()=>void xifreCheckServerHealth(),18000);
+ xifreServerClockTimer=setInterval(xifreUpdateServerBanner,1000);
+ window.addEventListener('online',()=>void xifreCheckServerHealth());
+ window.addEventListener('offline',()=>{void xifreCheckServerHealth();});
+ document.addEventListener('visibilitychange',()=>{
+   if(document.visibilityState==='visible')void xifreCheckServerHealth();
+ });
+}
+
 
 function normalizeUsername(value) {
 return String(value || '').trim().toLowerCase();
@@ -3891,9 +3962,9 @@ function platformGiftCardMarkup(id){
  const disabled=!!platformGiftSending;
  return `<div class="xifre-gift-card rarity-${esc(rarity.className)} ${platformGradeClass(gift)}" data-xifre-gift="${esc(id)}" data-gift-stamp="${esc(giftStamp)}">
   <div class="xi-gift-heading"><span>🎁 REGALO DE XIFRE</span>${state}</div>
-  <div class="xi-gift-middle"><div class="xi-gift-art">${platformImageMarkup(gift.image_url,gift.name)}</div><div><strong>${esc(gift.name)}</strong><small>${esc(rarity.label)} · ${esc(platformGradeName(gift.upgrade_tier))}</small><b>Valor ${esc(platformFormatValue(gift.value))}</b></div></div>
-  ${status==='open'?(mine?`<button type="button" class="xi-gift-button secondary" data-gift-cancel="${esc(id)}" ${disabled?'disabled':''}>Cancelar regalo</button>`:`<button type="button" class="xi-gift-button" data-gift-claim="${esc(id)}" ${disabled?'disabled':''}>🎁 ¡Reclamar regalo!</button>`)
-   :`<p class="xi-gift-result">${status==='claimed'?`Este regalo ya lo ha reclamado ${esc(who)}.`:'Este regalo ha sido cancelado.'}</p>`}
+  <div class="xi-gift-middle"><div class="xi-gift-art">${platformImageMarkup(gift.image_url,gift.name)}</div><div class="xi-gift-info"><strong>${esc(gift.name)}</strong><small>${esc(rarity.label)} · ${esc(platformGradeName(gift.upgrade_tier))}</small><b>Valor ${esc(platformFormatValue(gift.value))}</b></div>
+  <div class="xi-gift-action">${status==='open'?(mine?`<button type="button" class="xi-gift-button secondary" data-gift-cancel="${esc(id)}" ${disabled?'disabled':''}>Cancelar regalo</button>`:`<button type="button" class="xi-gift-button" data-gift-claim="${esc(id)}" ${disabled?'disabled':''}>🎁 Reclamar</button>`)
+   :`<p class="xi-gift-result">${status==='claimed'?`Este regalo ya lo ha reclamado ${esc(who)}.`:'Este regalo ha sido cancelado.'}</p>`}</div></div>
  </div>`;
 }
 async function platformLoadChatGifts(force=false){
@@ -5445,7 +5516,11 @@ async function platformGetBoxDrops(itemId, refresh = false) {
   if (error) throw error;
   const rows = Array.isArray(data) ? data : [];
   const urls = await platformSignImagePaths(rows.map(row=>row.image_path));
-  const drops = rows.map(row=>({...row,image_url:urls.get(row.image_path)||''}));
+  const drops = rows.map(row=>{
+    const hidden=Boolean(row.hidden===true || String(row.hidden).toLowerCase()==='true' || (!row.item_id && !row.name));
+    return {...row,hidden,item_id:hidden?null:row.item_id,name:hidden?'':row.name,image_path:hidden?null:row.image_path,
+      image_url:hidden?'':(urls.get(row.image_path)||''),value:hidden?null:row.value,chance:hidden?null:row.chance};
+  });
   platformBoxPreviewCache.set(id,drops);
   return drops;
 }
@@ -5471,7 +5546,7 @@ async function platformRenderBoxPreview(item, source) {
     if (sequence!==platformDetailsSequence || !$('#item-details-modal') || $('#item-details-modal').classList.contains('hidden')) return;
     preview.innerHTML = `<strong class="box-details-title">PREMIOS POSIBLES · PROBABILIDADES</strong><div class="box-details-grid">${drops.map(drop=>{
       const rarity=platformRarity(drop);
-      const hidden=Boolean(drop.hidden && !platformShopOwner);
+      const hidden=Boolean(drop.hidden === true || String(drop.hidden).toLowerCase() === 'true' || (!drop.item_id && !drop.name));
       return `<div class="box-detail-prize rarity-${esc(rarity.className)} ${hidden?'box-detail-secret':''}"><span class="box-detail-image">${hidden?'<span class="box-secret-shadow">?</span>':platformImageMarkup(drop.image_url,drop.name)}</span><strong>${esc(hidden?'Ítem '+rarity.label:drop.name)}</strong><small>${esc(hidden?'Premio oculto':String(drop.chance)+'% · '+rarity.label)}</small></div>`;
     }).join('') || '<p>Esta caja aún no tiene premios.</p>'}</div>`;
   } catch(error) {
@@ -5522,7 +5597,11 @@ function platformReadBoxDrops() {
 
 async function platformLoadBoxEditor(itemId) {
   try {
-    const drops=await platformGetBoxDrops(itemId,true);
+    // Editor privado: los premios secretos permanecen ocultos en el RPC público.
+    // Esta función separada exige ser administrador en Supabase.
+    const {data,error}=await supabase.rpc('xifre_admin_box_drops',{p_box_item_id:itemId});
+    if(error)throw error;
+    const drops=Array.isArray(data)?data:[];
     if (String(platformAdminEditingItemId)!==String(itemId)) return;
     $('#admin-box-drops')?.replaceChildren();
     drops.forEach(drop=>platformAddBoxDropRow(drop.item_id,String(drop.chance),Boolean(drop.hidden)));
@@ -5812,6 +5891,30 @@ async function platformGiveShopMoney(event) {
   finally {setLoading(button,false);}
 }
 
+function platformResetBoxCelebration(){
+ const modal=$('#box-opening-modal');
+ modal?.classList.remove('box-celebrate-legendary','box-celebrate-epic');
+ $('#box-rarity-celebration')?.replaceChildren();
+}
+function platformPlayBoxCelebration(rarity){
+ platformResetBoxCelebration();
+ const mode=rarity==='legendary'?'legendary':rarity==='epic'?'epic':'';
+ if(!mode)return;
+ const modal=$('#box-opening-modal');
+ const layer=$('#box-rarity-celebration');
+ if(!modal||!layer)return;
+ modal.classList.add(`box-celebrate-${mode}`);
+ // Decorative particles only. No uploads/network and no changes to server-determined rewards.
+ const particles=Array.from({length:mode==='legendary'?30:19},(_,i)=>{
+   const a=(i*137.508)*(Math.PI/180);
+   const distance=(mode==='legendary'?210:155)+(i%5)*24;
+   const x=Math.round(Math.cos(a)*distance),y=Math.round(Math.sin(a)*distance);
+   const delay=((i%7)*.037).toFixed(2);
+   return `<i class="box-celebration-particle" style="--dx:${x}px;--dy:${y}px;--pd:${delay}s"></i>`;
+ }).join('');
+ layer.innerHTML=`<span class="box-celebration-burst"></span><span class="box-celebration-ring"></span>${particles}`;
+}
+
 function platformPickCosmeticDrop(drops) {
   const sum=drops.reduce((s,x)=>s+Number(x.chance||0),0);
   let roll=Math.random()*sum;
@@ -5843,11 +5946,12 @@ async function platformOpenBox(instanceId) {
     openModal('box-opening-modal');
     $('#box-opening-result')?.classList.add('hidden');
     $('#box-opening-done')?.classList.add('hidden');
+    platformResetBoxCelebration();
     setText('box-opening-title','¡Abriendo caja!');
     setText('box-opening-hint','El premio ya está guardado en tu colección.');
     const reel=$('#box-reel-strip');
     const rolls=Array.from({length:55},(_,i)=>i===47?prize:platformPickCosmeticDrop(drops));
-    reel.innerHTML=rolls.map((row,i)=>`<div class="box-reel-card rarity-${esc(platformRarity(row).className)} ${i===47?'box-winning-card':''}"><span>${row.hidden && !platformShopOwner?'<span class="box-secret-shadow">?</span>':platformImageMarkup(row.image_url,row.name)}</span><strong>${esc(row.hidden && !platformShopOwner?'Ítem '+platformRarity(row).label:row.name)}</strong><small>${esc(platformRarity(row).label)}</small></div>`).join('');
+    reel.innerHTML=rolls.map((row,i)=>`<div class="box-reel-card rarity-${esc(platformRarity(row).className)} ${i===47?'box-winning-card':''}"><span>${row.hidden?'<span class="box-secret-shadow">?</span>':platformImageMarkup(row.image_url,row.name)}</span><strong>${esc(row.hidden?'Ítem '+platformRarity(row).label:row.name)}</strong><small>${esc(platformRarity(row).label)}</small></div>`).join('');
     reel.style.transition='none';
     reel.style.transform='translate3d(0,0,0)';
     const windowEl=$('#box-reel-window');
@@ -5868,6 +5972,7 @@ async function platformOpenBox(instanceId) {
       platformBoxOpeningBusy=false;
       setText('box-opening-title','¡Nuevo objeto conseguido!');
       const rarity=platformRarity(prize);
+      platformPlayBoxCelebration(rarity.className);
       $('#box-opening-result').innerHTML=`<div class="box-result-visual rarity-${esc(rarity.className)}">${platformImageMarkup(prize.image_url,prize.name)}</div><span class="box-result-rarity">${esc(rarity.label)}</span><strong>${esc(prize.name)}</strong><small>Valor ${esc(platformFormatValue(prize.value))}</small>`;
       $('#box-opening-result')?.classList.remove('hidden');
       $('#box-opening-done')?.classList.remove('hidden');
@@ -5876,6 +5981,7 @@ async function platformOpenBox(instanceId) {
   }catch(error) {
     console.error('XIFRE BOX OPEN',error);
     toast(friendlyError(error),'error');
+    platformResetBoxCelebration();
     platformBoxOpeningBusy=false;
     void platformRefreshInventory();
     void platformLoadBoxMeta();
@@ -5886,6 +5992,7 @@ function platformFinishBoxOpening() {
   if(platformBoxOpeningBusy)return;
   if(platformBoxSpinTimer)clearTimeout(platformBoxSpinTimer);
   platformBoxSpinToken++;
+  platformResetBoxCelebration();
   closeModal('box-opening-modal');
   platformSetApp('inventory');
   platformSetInventoryTab('collection');
@@ -6600,6 +6707,7 @@ function platformBindEvents() {
 async function init() {
 bind();
 applyTheme(currentTheme());
+xifreStartServerMonitor();
 
 if (!window.supabase?.createClient) {
 showScreen('landing');
