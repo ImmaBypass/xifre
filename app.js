@@ -3611,8 +3611,12 @@ function platformHydrateItem(row) {
   const instance=platformInstanceFeatures.get(platformItemKey(row))||{};
   const tier=Number(row.upgrade_tier ?? instance.upgrade_tier ?? 0);
   const value=Number(tier===1 ? (definition.gold_value ?? row.value ?? 0) : tier===2 ? (definition.neon_value ?? row.value ?? 0) : (definition.value ?? row.value ?? 0));
-  const {id:ignored,...features}=definition;
+  // La definición del tipo puede no tener URL (las imágenes solo se firman
+  // previamente para los objetos configurados como emoji). No permitir que
+  // ese valor vacío sobrescriba la URL firmada de esta copia del inventario.
+  const {id:ignored,image_url:definitionImageUrl,...features}=definition;
   return {...row,...features,upgrade_tier:tier,value,base_value:Number(definition.value ?? row.value ?? 0),
+    image_url:row.image_url || definitionImageUrl || '',
     reserved:Boolean(row.reserved||instance.gift_reserved),gift_reserved:Boolean(instance.gift_reserved),
     instant_sell_cents:Number(row.instant_sell_cents ?? definition.instant_sell_cents ?? 1)};
 }
