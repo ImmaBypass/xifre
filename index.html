@@ -7,11 +7,16 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261113-alpha-15">
+<link rel="stylesheet" href="style.css?v=20261113-alpha-16">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="background-effects"><div class="background-glow glow-one"></div><div class="background-glow glow-two"></div><div class="background-glow glow-three"></div></div>
+<div id="xifre-server-alert" class="xifre-server-alert hidden" role="status" aria-live="polite">
+  <span class="xifre-server-alert-icon" aria-hidden="true">!</span>
+  <span class="xifre-server-alert-copy"><strong id="xifre-server-alert-title">Servidor de XIFRE no disponible</strong><small id="xifre-server-alert-detail">No se puede contactar con Supabase.</small></span>
+  <span class="xifre-server-alert-clock"><small>TIEMPO SIN CONEXIÓN</small><b id="xifre-server-alert-time">00:00</b></span>
+</div>
 <main id="app">
 <section id="landing-screen" class="screen active">
 <div class="landing-content">
@@ -419,6 +424,7 @@
 <div id="box-opening-modal" class="modal hidden box-opening-modal" role="dialog" aria-modal="true" aria-labelledby="box-opening-title">
  <div class="modal-card box-opening-card"><button type="button" id="box-opening-close" class="modal-close" aria-label="Cerrar">×</button>
  <span class="shop-eyebrow">XIFRE · APERTURA DE CAJA</span><h2 id="box-opening-title">Descubriendo tu premio...</h2>
+ <div id="box-rarity-celebration" class="box-rarity-celebration" aria-hidden="true"></div>
  <div class="box-reel-window" id="box-reel-window"><div class="box-reel-strip" id="box-reel-strip"></div><span class="box-reel-marker"></span></div>
  <div id="box-opening-result" class="box-opening-result hidden"></div><p id="box-opening-hint">El premio se determina en el servidor antes de comenzar la animación.</p>
  <button id="box-opening-done" class="inventory-primary-button hidden" type="button">Volver a mi inventario</button></div>
@@ -695,6 +701,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261113-alpha-15"></script>
+<script src="app.js?v=20261113-alpha-16"></script>
 </body>
 </html>
