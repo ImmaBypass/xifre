@@ -1541,6 +1541,8 @@ function messageRenderSignature(message) {
 
 function renderMessageContent(content, message) {
   const source = String(content || '');
+  const gift=source.match(PLATFORM_GIFT_RE);
+  if(gift)return platformGiftCardMarkup(gift[1]);
   const mentionedIds = new Set((message?.mentions || []).map(id => String(id)));
   const hasMentionData = Array.isArray(message?.mentions);
   const membersByName = new Map();
@@ -1598,7 +1600,7 @@ function renderMessageContent(content, message) {
     lastIndex = tokenEnd;
   }
   html += esc(source.slice(lastIndex));
-  return html;
+  return platformItemEmojiHtml(html);
 }
 
 function messageMentionsMe(message) {
@@ -1671,6 +1673,7 @@ function renderMessages(messages, forceBottom = false) {
   }
 
   if (changed) applyMessageGrouping();
+  if(ordered.some(item=>PLATFORM_GIFT_RE.test(String(item.content||''))))void platformLoadChatGifts(false);
   if (forceBottom || (wasNearBottom && addedAny)) {
     box.scrollTop = box.scrollHeight;
   } else if (changed && anchorId) {
@@ -1755,7 +1758,7 @@ function renderOneMessage(message, profiles = new Map(), existingNode = null) {
     <div class="message-body">
       ${message.reply_to ? `<div class="message-reply-preview" data-reply-target="${esc(message.reply_to)}"><span class="reply-line"></span><span class="reply-avatar">${avatarHTML(message.reply_sender_username || 'Usuario', message.reply_sender_avatar_url, 'private', '', message.reply_sender_avatar_color || '')}</span><div class="message-reply-copy"><strong>${esc(message.reply_sender_username || 'Usuario')}</strong><span>${esc(messagePreviewText(message.reply_content || ''))}</span></div></div>` : ''}
       <div class="message-meta"><span class="message-author">${esc(sender.username)}</span><span class="message-time" title="${esc(exactStamp)}">${esc(stamp)}</span>${message.edited_at ? '<span class="message-edited" title="Este mensaje ha sido editado">(editado)</span>' : ''}</div>
-      <div class="message-content">${imageMarkup}${bodyText.trim() ? `<div class="message-caption">${renderMessageContent(bodyText, message)}</div>` : ''}${message.edited_at ? '<span class="message-edited-inline"> (editado)</span>' : ''}</div>
+      <div class="message-content">${imageMarkup}${bodyText.trim() ? `<div class="message-caption" ${PLATFORM_GIFT_RE.test(bodyText)?`data-gift-id="${esc(bodyText.match(PLATFORM_GIFT_RE)[1])}"`:''}>${renderMessageContent(bodyText, message)}</div>` : ''}${message.edited_at ? '<span class="message-edited-inline"> (editado)</span>' : ''}</div>
       <div class="message-reactions" data-reactions-for="${esc(id)}"></div>
     </div>
     <div class="message-actions">
@@ -2161,6 +2164,7 @@ function openEmojiPicker(anchor, mode = 'compose', messageId = null) {
   const grid = $('#emoji-grid');
   if (!popover || !grid || !anchor) return;
   emojiPickerMode = mode;
+  if(mode==='reaction' && activeEmojiCategory==='xifre-items')activeEmojiCategory='smileys';
   emojiPickerMessageId = messageId ? String(messageId) : null;
   const search = $('#emoji-search');
   if (search) search.value = '';
@@ -2242,7 +2246,7 @@ function renderEmojiCategories() {
   const bar = $('#emoji-categories');
   if (!bar) return;
   bar.innerHTML = '';
-  const categories = [{ id:'recent', label:'Recientes', icon:'🕘' }, ...EMOJI_CATEGORIES.map(({id,label,icon})=>({id,label,icon}))];
+  const categories = [{ id:'recent', label:'Recientes', icon:'🕘' }, ...EMOJI_CATEGORIES.map(({id,label,icon})=>({id,label,icon})),...(emojiPickerMode==='compose'?[{id:'xifre-items',label:'Objetos XIFRE',icon:'🎴'}]:[])];
   for (const category of categories) {
     const button = document.createElement('button');
     button.type = 'button'; button.className = `emoji-category${activeEmojiCategory === category.id ? ' active' : ''}`;
@@ -2257,6 +2261,12 @@ function renderEmojiGrid(query = '') {
   const normalizeSearch = value => String(value || '').toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const term = normalizeSearch(String(query || '').trim());
   let entries = [];
+  if(activeEmojiCategory==='xifre-items' && emojiPickerMode==='compose') {
+    const items=[...platformEmojiCodes.values()].filter(item=>platformOwnedItemTypes.has(String(item.id)));
+    const filtered=term?items.filter(item=>normalizeSearch(item.name).includes(term)||normalizeSearch(item.emoji_shortcode).includes(term)):items;
+    grid.innerHTML=filtered.map(item=>`<button type="button" class="emoji-choice xifre-item-emoji-choice" data-xifre-item-emoji="${esc(item.emoji_shortcode)}" title="${esc(item.name)}"><img src="${esc(item.image_url)}" alt="${esc(item.name)}"><small>${esc(item.name)}</small></button>`).join('') || '<div class="emoji-grid-empty">No tienes objetos configurados como emojis.</div>';
+    return;
+  }
   if (term) {
     entries = EMOJI_CATEGORIES.flatMap(category => category.items.map(item => ({...item, category:category.label})))
       .filter(item => item.emoji.includes(term) || normalizeSearch(item.name).includes(term));
@@ -2309,6 +2319,8 @@ function setupEmojiPicker() {
     renderEmojiCategories(); renderEmojiGrid('');
   });
   grid.addEventListener('click', event => {
+    const custom=event.target.closest('[data-xifre-item-emoji]');
+    if(custom){insertEmojiAtCursor(`:xi_${custom.dataset.xifreItemEmoji}:`);closeEmojiPicker();return;}
     const button = event.target.closest('[data-emoji]');
     if (button) chooseEmoji(button.dataset.emoji);
   });
@@ -3583,6 +3595,64 @@ const XIFRE_RARITIES = {
   divino: { label: 'Divino', className: 'divine' }
 };
 
+/* Alpha 1.5: one shared definition per item, and a tier per INVENTORY INSTANCE. */
+const platformItemDefinitions = new Map();
+const platformInstanceFeatures = new Map();
+const platformOwnedItemTypes = new Set();
+const platformEmojiCodes = new Map();
+let platformFeaturesLoadedAt = 0;
+let platformFeaturesPromise = null;
+const PLATFORM_GRADE_NAMES = ['Normal', 'Dorado', 'Neón'];
+function platformGradeName(tier) {return PLATFORM_GRADE_NAMES[Math.max(0,Math.min(2,Number(tier)||0))];}
+function platformTypeId(item) {return String(item?.item_id || item?.id || '');}
+function platformHydrateItem(row) {
+  const typeId=platformTypeId(row);
+  const definition=platformItemDefinitions.get(typeId)||{};
+  const instance=platformInstanceFeatures.get(platformItemKey(row))||{};
+  const tier=Number(row.upgrade_tier ?? instance.upgrade_tier ?? 0);
+  const value=Number(tier===1 ? (definition.gold_value ?? row.value ?? 0) : tier===2 ? (definition.neon_value ?? row.value ?? 0) : (definition.value ?? row.value ?? 0));
+  const {id:ignored,...features}=definition;
+  return {...row,...features,upgrade_tier:tier,value,base_value:Number(definition.value ?? row.value ?? 0),
+    reserved:Boolean(row.reserved||instance.gift_reserved),gift_reserved:Boolean(instance.gift_reserved),
+    instant_sell_cents:Number(row.instant_sell_cents ?? definition.instant_sell_cents ?? 1)};
+}
+async function platformLoadItemFeatures(force=false){
+  if(!currentUser || !supabase)return;
+  if(!force && platformFeaturesLoadedAt && Date.now()-platformFeaturesLoadedAt<18000)return;
+  if(platformFeaturesPromise)return platformFeaturesPromise;
+  const uid=String(currentUser.id),generation=platformSessionGeneration;
+  platformFeaturesPromise=(async()=>{
+    const {data,error}=await supabase.rpc('xifre_item_features');
+    if(error){console.warn('XIFRE ITEM FEATURES',error);return;}
+    if(!currentUser||String(currentUser.id)!==uid||generation!==platformSessionGeneration)return;
+    const rows=Array.isArray(data?.items)?data.items:[];
+    const signed=await platformSignImagePaths(rows.filter(row=>row.emoji_enabled).map(row=>row.image_path));
+    if(!currentUser||String(currentUser.id)!==uid||generation!==platformSessionGeneration)return;
+    platformItemDefinitions.clear();platformInstanceFeatures.clear();platformOwnedItemTypes.clear();platformEmojiCodes.clear();
+    rows.forEach(row=>{
+      const defined={...row,image_url:signed.get(row.image_path)||''};
+      platformItemDefinitions.set(String(row.id),defined);
+      if(row.emoji_enabled && row.emoji_shortcode)platformEmojiCodes.set(String(row.emoji_shortcode).toLowerCase(),defined);
+    });
+    (data.instances||[]).forEach(row=>platformInstanceFeatures.set(String(row.instance_id),row));
+    (data.owned_item_ids||[]).forEach(id=>platformOwnedItemTypes.add(String(id)));
+    platformFeaturesLoadedAt=Date.now();
+  })().finally(()=>{platformFeaturesPromise=null;});
+  return platformFeaturesPromise;
+}
+function platformAvailableCopies(itemId,tier){
+ return platformInventoryItems.filter(row=>platformTypeId(row)===String(itemId) && Number(row.upgrade_tier||0)===tier && !row.reserved);
+}
+function platformGradeClass(item){const tier=Number(item?.upgrade_tier||0);return tier===2?'xifre-grade-neon':tier===1?'xifre-grade-gold':'';}
+function platformGradeTag(item){const tier=Number(item?.upgrade_tier||0);return tier?`<span class="xifre-grade-tag">${tier===2?'✺ NEÓN':'✦ DORADO'}</span>`:'';}
+function platformItemEmojiHtml(sourceHtml){
+ if(!platformEmojiCodes.size||!sourceHtml.includes(':xi_'))return sourceHtml;
+ return sourceHtml.replace(/(^|>)([^<]*)(?=<|$)/g,(part,prefix,text)=>prefix+text.replace(/:xi_([a-z][a-z0-9_]{1,25}):/gi,(token,code)=>{
+   const item=platformEmojiCodes.get(code.toLowerCase());
+   return item?.image_url?`<img class="xifre-chat-item-emoji" src="${esc(item.image_url)}" alt="${esc(item.name)}" title="${esc(item.name)} · ${esc(platformRarity(item).label)}" loading="lazy">`:token;
+ }));
+}
+
 let isXifreAdmin = false;
 let platformOwnerId = null;
 let platformApps = [];
@@ -3725,7 +3795,7 @@ function platformItemKey(item) {
 function platformGroupSignature(item) {
   // The grouping compares the full public item definition, not just its display name.
   return JSON.stringify([String(item.name || ''),String(item.description || ''),String(item.rarity || ''),
-    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item))]);
+    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item)),String(item.item_id||item.id||''),Number(item.upgrade_tier||0)]);
 }
 function platformGroupItems(items) {
   const groups = new Map();
@@ -3747,17 +3817,18 @@ function platformItemCardMarkup(item, { mode = 'collection', disabled = false, s
   const boxIcon = platformItemIsBox(item) ? '<span class="mini-item-box" title="Caja consumible">✦ CAJA</span>' : '';
   const numericValue = Number(item?.value) || 0;
   const valueGlow = numericValue >= 5000 ? 'value-precious' : numericValue >= 1000 ? 'value-high' : '';
+  const gradeClass=platformGradeClass(item),gradeBadge=platformGradeTag(item);
   if (mode === 'trade') {
-    return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" data-trade-tile="${esc(instanceId)}">
-      ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}
+    return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" data-trade-tile="${esc(instanceId)}">
+      ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${gradeBadge}
       <button class="trade-select-hitarea" type="button" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled?'disabled':''} title="Añadir una copia">
         <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong><span class="mini-item-selection">+ Ofrecer</span>
       </button><button class="mini-item-info" type="button" data-open-item="${esc(instanceId)}" data-item-source="trade" aria-label="Detalles">ⓘ</button>
       <button class="mini-item-minus hidden" type="button" data-trade-remove-group="${esc(instanceId)}" aria-label="Quitar una copia">−</button>
     </div>`;
   }
-  return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${valueGlow} ${item.reserved?'is-reserved':''}" data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
-    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}
+  return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass} ${valueGlow} ${item.reserved?'is-reserved':''}" data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
+    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}
     <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong>
   </button>`;
 }
@@ -3774,13 +3845,14 @@ function platformOpenItemDetails(key, source = 'collection') {
   if (!item) return toast('Ese objeto ya no está disponible.', 'info');
   const rarity = platformRarity(item);
   const modal = $('#item-details-modal');
-  modal.className = `modal hidden rarity-${rarity.className}`;
+  modal.className = `modal hidden rarity-${rarity.className} ${platformGradeClass(item)}`;
   const hero = $('#item-details-hero');
   if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
   setText('item-details-value',platformFormatValue(item.value));
   setText('item-details-rarity',rarity.label);
   setText('item-details-description',item.description || 'Sin descripción.');
+  platformDrawItemExtras(item,source);
   const matching = source === 'collection' ? platformInventoryItems.filter(x => platformGroupSignature(x) === platformGroupSignature(item)) : [];
   setText('item-details-status',source==='collection' ? `En tu colección: ${matching.length} ${matching.length===1?'copia':'copias'}.` : source==='admin' ? 'Objeto del catálogo XIFRE.' : 'Objeto mostrado en intercambio.');
   const preview = $('#item-box-preview');
@@ -3791,6 +3863,207 @@ function platformOpenItemDetails(key, source = 'collection') {
   button?.removeAttribute('data-box-instance');
   if (platformItemIsBox(item)) void platformRenderBoxPreview(item,source);
   openModal('item-details-modal');
+}
+
+
+
+/* Alpha 1.5 — Gift cards belong to normal chat messages and never contain client-side ownership transfers. */
+let platformChatGifts = new Map();
+let platformGiftChatId = '';
+let platformGiftLastLoaded = 0;
+let platformGiftPromise = null;
+let platformGiftPollTimer = null;
+let platformGiftSending = false;
+let platformGiftSendRequest = null;
+const PLATFORM_GIFT_RE=/^\[\[XIFRE_GIFT:([0-9a-f-]{36})\]\]$/i;
+function platformGiftCardMarkup(id){
+ const gift=platformChatGifts.get(String(id));
+ if(!gift)return `<div class="xifre-gift-card xifre-gift-pending" data-xifre-gift="${esc(id)}"><span>🎁</span><strong>${platformGiftChatId===String(currentConversation)?'Regalo no disponible':'Cargando regalo de XIFRE…'}</strong></div>`;
+ const rarity=platformRarity(gift),status=gift.status||'open',mine=String(gift.sender_id)===String(currentUser?.id);
+ const state=status==='open'?'<span class="xi-gift-open">DISPONIBLE</span>':status==='claimed'?'<span class="xi-gift-claimed">RECLAMADO</span>':'<span class="xi-gift-cancelled">CANCELADO</span>';
+ const giftStamp=[gift.status,gift.claimed_by,gift.item_id,gift.upgrade_tier].join(':');
+ const claimant=(currentMembers||[]).find(m=>getMemberId(m)===String(gift.claimed_by));
+ const who=claimant?.username||'alguien';
+ const disabled=!!platformGiftSending;
+ return `<div class="xifre-gift-card rarity-${esc(rarity.className)} ${platformGradeClass(gift)}" data-xifre-gift="${esc(id)}" data-gift-stamp="${esc(giftStamp)}">
+  <div class="xi-gift-heading"><span>🎁 REGALO DE XIFRE</span>${state}</div>
+  <div class="xi-gift-middle"><div class="xi-gift-art">${platformImageMarkup(gift.image_url,gift.name)}</div><div><strong>${esc(gift.name)}</strong><small>${esc(rarity.label)} · ${esc(platformGradeName(gift.upgrade_tier))}</small><b>Valor ${esc(platformFormatValue(gift.value))}</b></div></div>
+  ${status==='open'?(mine?`<button type="button" class="xi-gift-button secondary" data-gift-cancel="${esc(id)}" ${disabled?'disabled':''}>Cancelar regalo</button>`:`<button type="button" class="xi-gift-button" data-gift-claim="${esc(id)}" ${disabled?'disabled':''}>🎁 ¡Reclamar regalo!</button>`)
+   :`<p class="xi-gift-result">${status==='claimed'?`Este regalo ya lo ha reclamado ${esc(who)}.`:'Este regalo ha sido cancelado.'}</p>`}
+ </div>`;
+}
+async function platformLoadChatGifts(force=false){
+ if(!currentUser||!currentConversation)return;
+ const id=String(currentConversation),owner=String(currentUser.id);
+ if(!force && id===platformGiftChatId && Date.now()-platformGiftLastLoaded<5000)return;
+ if(platformGiftPromise){await platformGiftPromise; if(platformGiftChatId!==id && String(currentConversation)===id)return platformLoadChatGifts(true);return;}
+ platformGiftPromise=(async()=>{
+  const {data,error}=await supabase.rpc('xifre_chat_gifts_in_chat',{p_conversation_id:id});
+  if(error){console.warn('XIFRE GIFTS',error);return;}
+  if(!currentUser||String(currentUser.id)!==owner||String(currentConversation)!==id)return;
+  const rows=Array.isArray(data)?data:[];
+  const urls=await platformSignImagePaths(rows.map(row=>row.image_path));
+  if(String(currentConversation)!==id)return;
+  platformChatGifts=new Map(rows.map(row=>[String(row.id),{...row,image_url:urls.get(row.image_path)||''}]));
+  platformGiftChatId=id;platformGiftLastLoaded=Date.now();
+  $$('#messages [data-xifre-gift]').forEach(node=>{
+   const id=node.dataset.xifreGift;
+   const gift=platformChatGifts.get(id);
+   const stamp=gift?[gift.status,gift.claimed_by,gift.item_id,gift.upgrade_tier].join(':'):'';
+   if(node.dataset.giftStamp!==stamp)node.outerHTML=platformGiftCardMarkup(id);
+  });
+  // The initial skeleton does not always have data-xifre-gift until content is loaded.
+  $$('#messages .xifre-gift-pending').forEach(node=>{
+   const parent=node.closest('.message-caption');
+   const id=parent?.dataset.giftId;
+   if(id)node.outerHTML=platformGiftCardMarkup(id);
+  });
+ })().finally(()=>{platformGiftPromise=null;});
+ return platformGiftPromise;
+}
+function platformOpenGiftPicker(){
+ if(!currentConversation)return toast('Abre una conversación antes de enviar un regalo.','info');
+ platformDrawGiftPicker();openModal('chat-gift-modal');
+ if(!platformInventoryItems.length)void platformRefreshInventory().then(platformDrawGiftPicker);
+}
+function platformDrawGiftPicker(){
+ const grid=$('#chat-gift-grid');if(!grid)return;
+ const available=platformInventoryItems.filter(item=>!item.reserved);
+ const groups=platformGroupItems(available);
+ grid.innerHTML=groups.length?groups.map(group=>{
+   const item=group.item,rarity=platformRarity(item);
+   return `<button type="button" class="xi-gift-picker-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" data-gift-pick="${esc(platformItemKey(item))}">
+    ${group.count>1?`<span class="mini-item-quantity">×${group.count}</span>`:''}<span class="xi-gift-picker-art">${platformImageMarkup(item.image_url,item.name)}</span><strong>${esc(item.name)}</strong><small>${esc(rarity.label)} · ${esc(platformGradeName(item.upgrade_tier))}</small><b>${esc(platformFormatValue(item.value))}</b>
+   </button>`;
+ }).join(''):'<p class="inventory-inline-empty">No tienes objetos libres para regalar. Los publicados o reservados no pueden enviarse.</p>';
+ setText('chat-gift-status','');
+}
+async function platformSendChatGift(instanceId){
+ if(platformGiftSending||!currentConversation)return;
+ const item=platformInventoryItems.find(i=>platformItemKey(i)===String(instanceId)&&!i.reserved);
+ if(!item)return toast('Esta copia ya no está disponible.','error');
+ const conversation=String(currentConversation);
+ const yes=await askConfirm('Enviar regalo',`¿Regalar ${item.name} (${platformGradeName(item.upgrade_tier)}) en este chat? La primera persona que lo reclame se lo quedará.`, 'Enviar regalo');
+ if(!yes)return;
+ platformGiftSending=true;
+ const request=platformGiftSendRequest?.instanceId===instanceId && platformGiftSendRequest?.conversation===conversation
+  ?platformGiftSendRequest.id:crypto.randomUUID();
+ platformGiftSendRequest={instanceId,conversation,id:request};
+ try{
+  const {error}=await supabase.rpc('xifre_send_gift',{p_conversation_id:conversation,p_instance_id:instanceId,p_request_id:request});
+  if(error)throw error;
+  platformGiftSendRequest=null;
+  closeModal('chat-gift-modal');
+  await platformLoadItemFeatures(true);
+  await Promise.allSettled([platformRefreshInventory(),loadMessages(conversation,false)]);
+  await platformLoadChatGifts(true);
+  toast('Regalo publicado. La primera persona que lo reclame se lo llevará.','success');
+ }catch(error){toast(friendlyError(error),'error');setText('chat-gift-status',friendlyError(error));}
+ finally{platformGiftSending=false;}
+}
+async function platformActionChatGift(id,action){
+ if(platformGiftSending)return;
+ const gift=platformChatGifts.get(String(id));if(!gift||gift.status!=='open')return;
+ if(action==='cancel'){
+  if(String(gift.sender_id)!==String(currentUser?.id))return;
+  if(!await askConfirm('Cancelar regalo','¿Cancelar el regalo y recuperar la copia que habías reservado?', 'Cancelar regalo'))return;
+ }
+ platformGiftSending=true;
+ try{
+  const rpc=action==='cancel'?'xifre_cancel_gift':'xifre_claim_gift';
+  const args=action==='cancel'?{p_gift_id:id}:{p_gift_id:id};
+  const {data,error}=await supabase.rpc(rpc,args);if(error)throw error;
+  if(action==='claim' && data?.claimed===false)toast('Alguien ya ha reclamado este regalo.','info');
+  else toast(action==='claim'?'¡Has conseguido el regalo!':'Regalo cancelado.','success');
+  await platformLoadItemFeatures(true);
+  await Promise.allSettled([platformRefreshInventory(),platformLoadChatGifts(true)]);
+ }catch(error){toast(friendlyError(error),'error');await platformLoadChatGifts(true);}
+ finally{platformGiftSending=false;}
+}
+
+function platformDrawItemExtras(item,source){
+ const extras=$('#item-details-extras'),upgrades=$('#item-details-upgrades'),sell=$('#item-instant-sell');
+ const feature=platformItemDefinitions.get(platformTypeId(item))||item;
+ const rarity=platformRarity(item);
+ const bits=[];
+ if(Number(item.upgrade_tier||0)>0)bits.push(`<div class="item-feature-row"><span>Acabado</span><strong class="${platformGradeClass(item)}">${esc(platformGradeName(item.upgrade_tier))}</strong></div>`);
+ if(feature.show_series && feature.series_name)bits.push(`<div class="item-feature-row"><span>Serie / saga</span><strong>${esc(feature.series_name)}</strong></div>`);
+ if(feature.show_source_box && feature.source_box_id){
+  const origin=platformItemDefinitions.get(String(feature.source_box_id));
+  if(origin)bits.push(`<div class="item-feature-row"><span>Procedencia</span><strong>✦ Caja ${esc(origin.name)}</strong></div>`);
+ }
+ if(feature.emoji_enabled)bits.push(`<div class="item-feature-row"><span>Uso especial</span><strong>Emoji :xi_${esc(feature.emoji_shortcode)}:</strong></div>`);
+ if(extras){extras.innerHTML=bits.join('');extras.classList.toggle('hidden',!bits.length);}
+ if(upgrades){
+  upgrades.innerHTML='';upgrades.classList.add('hidden');
+  if(source==='collection' && feature.upgrade_enabled && !platformItemIsBox(item) && Number(item.upgrade_tier)<2){
+   const target=Number(item.upgrade_tier)+1;
+   const needed=Number(target===1?feature.gold_required:feature.neon_required);
+   const available=platformAvailableCopies(platformTypeId(item),target-1).length;
+   const resultValue=Number(target===1?feature.gold_value:feature.neon_value);
+   const label=target===1?'Dorado':'Neón';
+   upgrades.innerHTML=`<div class="item-upgrade-panel ${target===2?'xifre-grade-neon':'xifre-grade-gold'}"><strong>✦ Mejorar a ${label}</strong><p>Combina ${needed} copias ${target===1?'normales':'doradas'} del mismo objeto. Disponibles: <b>${available}/${needed}</b>.</p><p>Valor resultante: <b>${esc(platformFormatValue(resultValue))}</b> · La rareza original se mantiene.</p><button type="button" class="inventory-primary-button" data-upgrade-item="${esc(platformTypeId(item))}" data-upgrade-target="${target}" ${available<needed?'disabled':''}>Mejorar a ${label}</button></div>`;
+   upgrades.classList.remove('hidden');
+  }
+ }
+ if(sell){
+   const free=source==='collection'?platformInventoryItems.find(x=>platformGroupSignature(x)===platformGroupSignature(item)&&!x.reserved):null;
+   sell.classList.toggle('hidden',!free);
+   if(free){sell.dataset.sellInstance=platformItemKey(free);sell.textContent=`⚡ Venta rápida · ${platformMoney(feature.instant_sell_cents??1)}`;}
+   else sell.removeAttribute('data-sell-instance');
+ }
+}
+async function platformUpgradeItem(itemId,tier){
+ const definition=platformItemDefinitions.get(String(itemId));
+ if(!definition || ![1,2].includes(Number(tier)))return;
+ const required=Number(tier===1?definition.gold_required:definition.neon_required);
+ const available=platformAvailableCopies(itemId,Number(tier)-1).length;
+ if(available<required)return toast('No tienes suficientes copias libres.','info');
+ const target=platformGradeName(tier);
+ const confirmed=await askConfirm(`Mejora ${target}`,`Se utilizarán ${required} copias ${tier===1?'normales':'doradas'} de ${definition.name} para crear 1 copia ${target}. No se puede deshacer.`, 'Confirmar mejora');
+ if(!confirmed)return;
+ const button=$(`[data-upgrade-item="${CSS.escape(String(itemId))}"]`);
+ if(button?.disabled)return; if(button)button.disabled=true;
+ try{
+  const {data,error}=await supabase.rpc('xifre_upgrade_item',{p_item_id:itemId,p_target_tier:Number(tier)});
+  if(error)throw error;
+  closeModal('item-details-modal');
+  await platformLoadItemFeatures(true);
+  await Promise.all([platformRefreshInventory(),platformLoadMarket(true)]);
+  toast(`¡${definition.name} mejorado a ${target}! Valor: ${platformFormatValue(data?.value)}.`, 'success');
+ }catch(error){toast(friendlyError(error),'error');if(button)button.disabled=false;}
+}
+function platformPopulateOriginBoxSelect(){
+ const select=$('#admin-item-origin-box');if(!select)return;
+ const previous=select.value;
+ select.innerHTML='<option value="">Ninguna / no indicar</option>'+platformAdminItems.filter(item=>item.is_box).map(box=>`<option value="${esc(box.id)}">${esc(box.name)}</option>`).join('');
+ if(previous && select.querySelector(`option[value="${CSS.escape(previous)}"]`))select.value=previous;
+}
+function platformPopulateItemFeatureEditor(item){
+ const field=(id,value)=>{const el=$('#'+id);if(el)el.value=value??'';};
+ const checkbox=(id,value)=>{const el=$('#'+id);if(el)el.checked=Boolean(value);};
+ field('admin-item-series',item?.series_name||'');checkbox('admin-item-show-series',item?.show_series);
+ platformPopulateOriginBoxSelect();field('admin-item-origin-box',item?.source_box_id||'');checkbox('admin-item-show-origin',item?.show_source_box);
+ checkbox('admin-item-upgradable',item?.upgrade_enabled);field('admin-item-gold-count',item?.gold_required||3);
+ field('admin-item-gold-value',item?.gold_value??0);field('admin-item-neon-count',item?.neon_required||3);field('admin-item-neon-value',item?.neon_value??0);
+ checkbox('admin-item-emoji-enabled',item?.emoji_enabled);field('admin-item-emoji-code',item?.emoji_shortcode||'');
+}
+async function platformAdminSaveItemFeatures(id){
+ const i=n=>$('#admin-item-'+n), enabled=i('emoji-enabled')?.checked;
+ const payload={
+  p_item_id:id,p_series_name:String(i('series')?.value||'').trim(),p_show_series:!!i('show-series')?.checked,
+  p_source_box_id:i('origin-box')?.value||null,p_show_source_box:!!i('show-origin')?.checked,
+  p_upgrade_enabled:!!i('upgradable')?.checked,p_gold_required:Number(i('gold-count')?.value||3),
+  p_gold_value:Number(i('gold-value')?.value||0),p_neon_required:Number(i('neon-count')?.value||3),
+  p_neon_value:Number(i('neon-value')?.value||0),p_emoji_enabled:!!enabled,
+  p_emoji_shortcode:enabled?String(i('emoji-code')?.value||'').toLowerCase().trim():''
+ };
+ if(![payload.p_gold_required,payload.p_neon_required,payload.p_gold_value,payload.p_neon_value].every(v=>Number.isSafeInteger(v) && v>=0))
+  throw new Error('Los requisitos y valores de los upgrades deben ser números enteros válidos.');
+ if(payload.p_upgrade_enabled && (payload.p_gold_required<2||payload.p_neon_required<2))throw new Error('Cada upgrade debe necesitar al menos dos copias.');
+ if(enabled&&!/^[a-z][a-z0-9_]{1,25}$/.test(payload.p_emoji_shortcode))throw new Error('El código del emoji debe tener 2-26 caracteres, empezar con letra y no contener espacios.');
+ const {error}=await supabase.rpc('xifre_admin_item_features',payload);
+ if(error)throw error;
 }
 
 function platformUpdateClock() {
@@ -3824,6 +4097,7 @@ async function platformInitialize() {
   $('#inventory-admin-nav-group')?.classList.toggle('hidden', !isXifreAdmin);
   $('#release-admin-editor')?.classList.toggle('hidden', !isXifreAdmin);
   await platformLoadBoxMeta();
+  await platformLoadItemFeatures();
   await platformLoadSystemApps();
   if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
   void platformLoadReleases();
@@ -3841,9 +4115,13 @@ async function platformInitialize() {
       platformUpdateChatBadges();
     }
   },30000);
-  void platformUiLoad();
+  void (async()=>{await platformUiLoad();await platformInlineLoad();})().catch(error=>console.warn('XIFRE UI START',error));
   void platformLoadMarket(false);
-  $$('.xifre-edit-launch').forEach(button=>button.classList.toggle('hidden',!platformShopOwner));
+  if(platformGiftPollTimer)clearInterval(platformGiftPollTimer);
+  platformGiftPollTimer=setInterval(()=>{if(currentUser&&currentConversation&&document.visibilityState==='visible')void platformLoadChatGifts(true);},8000);
+  if(currentConversation)void platformLoadChatGifts(true);
+  $$('.xifre-edit-launch').forEach(button=>button.remove());
+  platformInlinePrepare();
   if (platformDisplayVersionTimer) clearInterval(platformDisplayVersionTimer);
   platformDisplayVersionTimer = setInterval(() => {
     if (currentUser && String(currentUser.id) === owner && document.visibilityState === 'visible') void platformLoadDisplayVersion();
@@ -3873,7 +4151,12 @@ async function platformInitialize() {
 }
 
 function platformStop() {
+  platformInlineEndEdit(true);platformInlineData={texts:[],images:[]};platformInlinePrepared=false;
+  $$('.xi-inline-pencil,.xi-overlay-image').forEach(node=>node.remove());
   platformSessionGeneration += 1;
+  if(platformGiftPollTimer)clearInterval(platformGiftPollTimer);platformGiftPollTimer=null;
+  platformChatGifts.clear();platformGiftChatId='';platformGiftLastLoaded=0;platformGiftSendRequest=null;platformGiftSending=false;
+  platformItemDefinitions.clear();platformInstanceFeatures.clear();platformOwnedItemTypes.clear();platformEmojiCodes.clear();platformFeaturesLoadedAt=0;
   if (platformClockTimer) clearInterval(platformClockTimer);
   if (platformTradeTimer) clearInterval(platformTradeTimer);
   if (platformTradeDetailTimer) clearInterval(platformTradeDetailTimer);
@@ -4129,7 +4412,8 @@ async function platformRefreshInventory() {
     const urls = await platformSignImagePaths(rawItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
     const marketReserved=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
-    platformInventoryItems = rawItems.map(item => ({ ...item, is_box: platformItemIsBox(item), reserved:Boolean(item.reserved||marketReserved.has(platformItemKey(item))), image_url: urls.get(item.image_path) || '' }));
+    await platformLoadItemFeatures();
+    platformInventoryItems = rawItems.map(item => platformHydrateItem({ ...item, is_box: platformItemIsBox(item), reserved:Boolean(item.reserved||marketReserved.has(platformItemKey(item))), image_url: urls.get(item.image_path) || '' }));
     platformRenderInventory();
     // Don't redraw the entire trade workspace: its item selection is interactive.
     if (platformActiveTradeId && !platformTradeOfferMutationBusy) platformRenderTradeAvailableItems();
@@ -4227,7 +4511,9 @@ async function platformLoadAdminData() {
     }
     const urls = await platformSignImagePaths(platformAdminItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || !isXifreAdmin) return;
-    platformAdminItems = platformAdminItems.map(item => ({ ...item, is_box: platformBoxIds.has(String(item.id)), image_url: urls.get(item.image_path) || '' }));
+    await platformLoadItemFeatures();
+    platformAdminItems = platformAdminItems.map(item => platformHydrateItem({ ...item, is_box: platformBoxIds.has(String(item.id)), image_url: urls.get(item.image_path) || '' }));
+    platformPopulateOriginBoxSelect();
     platformRenderAdminItems();
     platformPopulateGrantItemSelect();
     if (platformShopOwner) platformPopulateShopAdminSelect();
@@ -4300,6 +4586,7 @@ function platformResetItemForm() {
   platformSetMessage('admin-item-message', '');
   platformSetPreview('admin-item-image-preview', null, '');
   platformToggleBoxFields();
+  platformPopulateItemFeatureEditor(null);
   $('#admin-box-drops')?.replaceChildren();
   platformUpdateBoxPercent();
 }
@@ -4318,6 +4605,7 @@ function platformEditItem(itemId) {
   if(priceInput)priceInput.value=(Number(item.instant_sell_cents??1)/100).toFixed(2);
   $('#admin-item-image').value = '';
   $('#admin-item-is-box').checked = Boolean(item.is_box);
+  platformPopulateItemFeatureEditor(item);
   platformToggleBoxFields();
   $('#admin-box-drops')?.replaceChildren();
   if (item.is_box) void platformLoadBoxEditor(item.id);
@@ -4348,6 +4636,20 @@ async function platformSaveItem(event) {
     if (!name) throw new Error('Escribe un nombre para el objeto.');
     if (!/^\d+$/.test(valueText) || !Number.isSafeInteger(Number(valueText)) || Number(valueText) < 0) throw new Error('Introduce un valor entero válido.');
     if (isBox && !drops.length) throw new Error('Añade premios a la caja y suma un 100%.');
+    // Check new fields BEFORE creating/updating the base item: prevent avoidable partial saves.
+    const upgradeEnabled=Boolean($('#admin-item-upgradable')?.checked);
+    const goldRequired=Number($('#admin-item-gold-count')?.value);
+    const neonRequired=Number($('#admin-item-neon-count')?.value);
+    const goldValue=Number($('#admin-item-gold-value')?.value);
+    const neonValue=Number($('#admin-item-neon-value')?.value);
+    if (![goldRequired,neonRequired,goldValue,neonValue].every(v=>Number.isSafeInteger(v) && v>=0))
+      throw new Error('Las cantidades y los valores de mejora deben ser enteros válidos.');
+    if(goldRequired<2 || goldRequired>100 || neonRequired<2 || neonRequired>100)
+      throw new Error('Cada mejora requiere entre 2 y 100 copias.');
+    if(upgradeEnabled && isBox) throw new Error('Las cajas no pueden tener acabado Dorado o Neón.');
+    const emojiEnabled=Boolean($('#admin-item-emoji-enabled')?.checked);
+    if(emojiEnabled && !/^[a-z][a-z0-9_]{1,25}$/.test(String($('#admin-item-emoji-code')?.value||'').trim().toLowerCase()))
+      throw new Error('El código del emoji debe tener 2-26 caracteres y empezar por letra.');
     if (file) uploadedPath = await platformUploadImage(file, 'items');
     const imagePath = uploadedPath || platformAdminEditingItemImagePath;
     if (!imagePath) throw new Error('Selecciona una imagen para el objeto.');
@@ -4374,6 +4676,8 @@ async function platformSaveItem(event) {
     const configured = await supabase.rpc('xifre_admin_configure_box',{p_item_id:savedId,p_is_box:isBox,p_drops:drops});
     if (configured.error) throw new Error(`Objeto guardado, pero no se configuró la caja: ${friendlyError(configured.error)}. Edita el objeto e inténtalo otra vez.`);
     await platformAdminSaveInstantPrice(savedId,platformMoneyToCents($('#admin-item-instant-price')?.value||'0.01'));
+    await platformAdminSaveItemFeatures(savedId);
+    await platformLoadItemFeatures(true);
     await platformLoadBoxMeta();
     if (uploadedPath && platformAdminEditingItemImagePath && uploadedPath !== platformAdminEditingItemImagePath) {
       await platformDeleteImage(platformAdminEditingItemImagePath);
@@ -4723,10 +5027,20 @@ async function platformRefreshTradeDetail(withInventory = false) {
     const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId || revision !== platformTradeOfferRevision || platformTradeOfferMutationBusy) return;
     if (inventory) {
-      platformInventoryItems = inventory.map(item => ({ ...item, is_box: platformItemIsBox(item), image_url: urls.get(item.image_path) || '' }));
+      await platformLoadItemFeatures();
+      platformInventoryItems = inventory.map(item => platformHydrateItem({ ...item, is_box: platformItemIsBox(item), image_url: urls.get(item.image_path) || '' }));
       platformRenderInventory();
     }
-    const nextDetail = { ...data, offers: (data.offers || []).map(item => ({ ...item, image_url: urls.get(item.image_path) || '' })) };
+    let tradeFinishes=new Map();
+    try{
+      const updated=await supabase.rpc('xifre_trade_upgrade_values',{p_trade_id:tradeId});
+      if(!updated.error && Array.isArray(updated.data))tradeFinishes=new Map(updated.data.map(v=>[String(v.instance_id),v]));
+    }catch(error){console.warn('XIFRE TRADE GRADES',error);}
+    const nextDetail = { ...data, offers: (data.offers || []).map(item => {
+      const grade=tradeFinishes.get(String(item.instance_id||''));
+      return platformHydrateItem({ ...item, upgrade_tier:grade?.upgrade_tier??item.upgrade_tier,
+       value:grade?.value??item.value, image_url: urls.get(item.image_path) || '' });
+    }) };
     const ownOfferIds = (nextDetail.offers || []).filter(item => String(item.user_id) === owner).map(item => String(item.instance_id));
     if (platformTradeDraftTradeId !== tradeId || !platformTradeOfferDraft || !platformTradeOfferDraftDirty) {
       platformTradeOfferDraft = new Set(ownOfferIds);
@@ -4783,7 +5097,7 @@ function platformRenderTradeWorkspace() {
   }
   const markup = items => items.length ? items.map(item => {
     const rarity = platformRarity(item);
-    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)}" data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto"><span class="trade-offer-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(platformFormatValue(item.value))}</small></span></button>`;
+    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto"><span class="trade-offer-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(platformFormatValue(item.value))}</small></span></button>`;
   }).join('') : '<div class="trade-offer-empty">Ningún objeto todavía</div>';
   platformApplyMarkup($('#trade-own-offer'), markup(ownOffer));
   platformApplyMarkup($('#trade-other-offer'), markup(otherOffer));
@@ -5606,7 +5920,7 @@ const PLATFORM_UI_SELECTORS = {
   'inventory-title':'.inventory-header-title h1',
   'inventory-subtitle':'.inventory-header-title p',
   'inventory-trades':'[data-inventory-tab="trades"] > span:nth-child(2)',
-  'shop-title':'.shop-header h1',
+  'shop-title':'#shop-title-text',
   'shop-subtitle':'.shop-header > div:first-of-type p',
   'market-title':'#market-heading',
   'market-subtitle':'#market-subheading'
@@ -5683,9 +5997,10 @@ async function platformLoadMarket(withInventory=false) {
     const urls=await platformSignImagePaths([...all,...mine,...inv].map(x=>x.image_path));
     if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
     const img=(r)=>({...r,image_url:urls.get(r.image_path)||''});
-    platformMarketListings=all.map(img);
-    platformMarketMyListings=mine.map(img);
-    if(results[2])platformMarketInventory=inv.map(img);
+    await platformLoadItemFeatures();
+    platformMarketListings=all.map(row=>platformHydrateItem(img(row)));
+    platformMarketMyListings=mine.map(row=>platformHydrateItem(img(row)));
+    if(results[2])platformMarketInventory=inv.map(row=>platformHydrateItem(img(row)));
     if(platformInventoryItems.length) {
       const reservedIds=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
       for(const item of platformInventoryItems) if(reservedIds.has(platformItemKey(item))) item.reserved=true;
@@ -5708,7 +6023,7 @@ function platformMarketListingHTML(listing,{mine=false}={}) {
   const owner=String(currentUser?.id||'')===String(listing.seller_id);
   const rarity=platformRarity(listing);
   const status=listing.status;
-  return `<article class="market-listing ${platformRarityMarketClass(listing)}">
+  return `<article class="market-listing ${platformRarityMarketClass(listing)} ${platformGradeClass(listing)}">
     <div class="market-art">${platformImageMarkup(listing.image_url,listing.name)}</div>
     <span class="market-rarity">${esc(rarity.label.toUpperCase())}</span>
     <h3 title="${esc(listing.name)}">${esc(listing.name)}</h3>
@@ -5793,9 +6108,9 @@ async function platformMarketBuy(id) {
   }catch(error){toast(friendlyError(error),'error');}
   finally{platformMarketMutations.delete(id);}
 }
-async function platformMarketInstantSell() {
-  const id=platformMarketSelectedInstance;
-  const row=platformMarketInventory.find(i=>String(i.instance_id)===id);
+async function platformMarketInstantSell(forcedInstanceId=null) {
+  const id=String(forcedInstanceId||platformMarketSelectedInstance);
+  const row=platformMarketInventory.find(i=>String(i.instance_id)===id)||platformInventoryItems.find(i=>platformItemKey(i)===id);
   if(!row || platformMarketMutations.has(id))return;
   const confirmed=await askConfirm('Venta instantánea',`¿Vender ${row.name} por ${platformMoney(row.instant_sell_cents)}? No se puede recuperar esta copia.`, 'Vender ahora');
   if(!confirmed)return;
@@ -5804,7 +6119,9 @@ async function platformMarketInstantSell() {
   try {
     const {data,error}=await supabase.rpc('xifre_market_instant_sell',{p_instance_id:id,p_request_id:requestId});
     if(error)throw error;
-    platformMarketSelectedInstance='';
+    if(platformMarketSelectedInstance===id)platformMarketSelectedInstance='';
+    closeModal('item-details-modal');
+    await platformLoadItemFeatures(true);
     if(typeof data?.balance_cents==='number')platformSetWalletUI(data.balance_cents);
     await Promise.all([platformLoadWallet(false),platformLoadMarket(true),platformRefreshInventory(),platformLoadBoxMeta()]);
     toast(`Vendido inmediatamente por ${platformMoney(data.price_cents)}.`, 'success');
@@ -5939,15 +6256,231 @@ async function platformUiSave(event){
     setText('xifre-editor-feedback','Error: '+friendlyError(error));
   }finally{setLoading(button,false);}
 }
+
+/* -------------------------------------------------------------------
+   ALPHA 1.5 — Inline section editor. No modal, no executable HTML,
+   positioned decorations use percentages to survive responsive layout.
+   ------------------------------------------------------------------- */
+const PLATFORM_INLINE_SECTIONS={
+ 'chat-nav':{root:'#chat-app-view .left-pane-head',fields:{'xi-chat-title':'.chat-brand-label > span','xi-chat-new-group':'[data-action="open-group"] > span:last-child','xi-chat-friends':'[data-action="open-people"] > span:nth-child(2)'}},
+ 'chat-main':{root:'#chat-app-view .center-pane',fields:{}},
+ 'chat-right':{root:'#chat-app-view .right-pane',fields:{}},
+ 'chat-people':{root:'#people-modal .modal-card',fields:{}},
+ 'chat-settings':{root:'#settings-modal',fields:{}},
+ 'inventory-header':{root:'#inventory-app-view .inventory-header',fields:{'xi-inventory-title':'.inventory-header-title h1','xi-inventory-description':'.inventory-header-title p'}},
+ 'inventory-collection':{root:'#inventory-panel-collection',fields:{'xi-collection-title':'.inventory-panel-heading h2','xi-collection-desc':'.inventory-panel-heading p'}},
+ 'inventory-trades':{root:'#inventory-panel-trades',fields:{'xi-trades-title':'#trade-list-view .inventory-panel-heading h2','xi-trades-desc':'#trade-list-view .inventory-panel-heading p','xi-trades-new':'#trade-request-form .trade-request-copy > strong'}},
+ 'inventory-trade-workspace':{root:'#trade-workspace',fields:{'xi-tradework-title':'.trade-workspace-heading h2'}},
+ 'inventory-admin':{root:'#inventory-panel-admin',fields:{'xi-invadmin-title':'.inventory-panel-heading h2'}},
+ 'shop-header':{root:'#shop-app-view .shop-header',fields:{'xi-shop-title':'#shop-title-text','xi-shop-description':'.shop-header > div:first-of-type p'}},
+ 'shop-catalog':{root:'#shop-app-view .shop-scroller',fields:{'xi-shop-intro':'.shop-intro > span','xi-shop-catalog':'.shop-section-heading h2'}},
+ 'shop-admin':{root:'#shop-admin',fields:{'xi-shop-admin-title':'.shop-admin-top h2'}},
+ 'market-header':{root:'#market-app-view .market-header',fields:{'xi-market-title':'#market-heading','xi-market-description':'#market-subheading'}},
+ 'market-explore':{root:'#market-app-view .market-summary',fields:{'xi-market-explore-title':'.market-summary h2','xi-market-explore-desc':'.market-summary span'}},
+ 'market-sell':{root:'#market-panel-sell',fields:{'xi-market-sell-title':'.market-panel-heading h2','xi-market-sell-desc':'.market-panel-heading p'}},
+ 'market-my':{root:'#market-panel-my',fields:{'xi-market-my-title':'.market-panel-heading h2','xi-market-my-desc':'.market-panel-heading p'}},
+ 'market-history':{root:'#market-panel-history',fields:{'xi-market-history-title':'.market-panel-heading h2'}},
+ 'updates':{root:'#updates-modal .updates-modal-card',fields:{'xi-updates-title':'#updates-title'}}
+};
+let platformInlineData={texts:[],images:[]};
+let platformInlineEditSection='';
+let platformInlineLoading=null;
+let platformInlineDragging=null;
+let platformInlinePrepared=false;
+function platformInlineRoot(section){const config=PLATFORM_INLINE_SECTIONS[section];return config?$(config.root):null;}
+function platformInlineTextNode(section,key){const config=PLATFORM_INLINE_SECTIONS[section];const root=platformInlineRoot(section);return config&&root&&config.fields[key]?$(config.fields[key],root):null;}
+function platformInlineTextSet(node,value){
+ if(!node)return;
+ const spark=node.querySelector?.('.shop-header-spark');
+ if(spark){
+   let first=[...node.childNodes].find(n=>n.nodeType===Node.TEXT_NODE);
+   if(!first){first=document.createTextNode('');node.insertBefore(first,node.firstChild);}
+   first.textContent=value;return;
+ }
+ node.textContent=value;
+}
+async function platformInlineLoad(){
+ if(!currentUser)return;
+ if(platformInlineLoading)return platformInlineLoading;
+ const uid=String(currentUser.id),gen=platformSessionGeneration;
+ platformInlineLoading=(async()=>{
+  const {data,error}=await supabase.rpc('xifre_ui_inline_get');
+  if(error){console.warn('XIFRE INLINE EDITOR',error);return;}
+  if(!currentUser||String(currentUser.id)!==uid||gen!==platformSessionGeneration)return;
+  platformInlineData={texts:Array.isArray(data?.texts)?data.texts:[],images:Array.isArray(data?.images)?data.images:[]};
+  await platformInlineApply();
+  platformInlinePrepare();
+ })().finally(()=>{platformInlineLoading=null;});
+ return platformInlineLoading;
+}
+function platformInlinePrepare(){
+ for(const [key,config] of Object.entries(PLATFORM_INLINE_SECTIONS)){
+  const root=platformInlineRoot(key);if(!root)continue;
+  root.classList.add('xi-inline-surface');root.dataset.xiSection=key;
+  if(!platformShopOwner){root.querySelector('.xi-inline-pencil')?.remove();continue;}
+  if(root.querySelector(':scope > .xi-inline-pencil'))continue;
+  const button=document.createElement('button');button.type='button';button.className='xi-inline-pencil';button.title=`Editar este apartado: ${key}`;
+  button.setAttribute('aria-label',`Editar sección ${key}`);button.dataset.xiEdit=key;button.innerHTML='✎';root.appendChild(button);
+ }
+ platformInlinePrepared=true;
+}
+async function platformInlineApply(){
+ for(const [section,config] of Object.entries(PLATFORM_INLINE_SECTIONS)){
+  for(const [key] of Object.entries(config.fields)){
+   const node=platformInlineTextNode(section,key);if(!node)continue;
+   if(node.__xiInitialText===undefined)node.__xiInitialText=node.textContent.trim();
+   if(platformInlineEditSection===section)continue;
+   const record=platformInlineData.texts.find(row=>row.key===key);
+   if(record)platformInlineTextSet(node,record.text_value??node.__xiInitialText);
+  }
+ }
+ await platformInlineDrawImages();
+}
+async function platformInlineDrawImages(){
+ const records=platformInlineData.images;
+ const urls=await platformSignImagePaths(records.map(row=>row.image_path));
+ for(const section of Object.keys(PLATFORM_INLINE_SECTIONS)){
+  const root=platformInlineRoot(section);if(!root)continue;
+  root.querySelectorAll(':scope > .xi-overlay-image').forEach(node=>node.remove());
+  for(const rec of records.filter(i=>i.section_key===section)){
+   const url=urls.get(rec.image_path);if(!url)continue;
+   const wrapper=document.createElement('div');wrapper.className='xi-overlay-image';wrapper.dataset.xiImage=rec.id;
+   wrapper.style.left=`${Number(rec.x_pct)||0}%`;wrapper.style.top=`${Number(rec.y_pct)||0}%`;wrapper.style.width=`${Number(rec.width_pct)||20}%`;
+   wrapper.dataset.x=String(rec.x_pct);wrapper.dataset.y=String(rec.y_pct);wrapper.dataset.w=String(rec.width_pct);
+   wrapper.innerHTML=`<img src="${esc(url)}" alt="Decoración de XIFRE" draggable="false"><button type="button" data-xi-image-delete="${esc(rec.id)}" title="Quitar esta imagen" aria-label="Eliminar imagen">×</button><span class="xi-overlay-drag-hint">Arrastra para mover</span>`;
+   root.appendChild(wrapper);
+  }
+  root.classList.toggle('xi-inline-editing',platformInlineEditSection===section);
+ }
+}
+function platformInlineEndEdit(discard=false){
+ const section=platformInlineEditSection;
+ if(!section)return;
+ const root=platformInlineRoot(section);
+ if(root){
+  for(const key of Object.keys(PLATFORM_INLINE_SECTIONS[section].fields)){
+   const node=platformInlineTextNode(section,key);
+   if(node){node.contentEditable='false';node.classList.remove('xi-inline-text-edit');}
+  }
+  root.querySelector(':scope > .xi-inline-toolbar')?.remove();root.classList.remove('xi-inline-editing');
+ }
+ platformInlineEditSection='';
+ if(discard)void platformInlineApply();
+}
+function platformInlineStart(section){
+ if(!platformShopOwner||!PLATFORM_INLINE_SECTIONS[section])return;
+ if(platformInlineEditSection===section){platformInlineEndEdit(true);return;}
+ platformInlineEndEdit(true);
+ const root=platformInlineRoot(section);if(!root)return;
+ platformInlineEditSection=section;root.classList.add('xi-inline-editing');
+ for(const key of Object.keys(PLATFORM_INLINE_SECTIONS[section].fields)){
+  const node=platformInlineTextNode(section,key);
+  if(node){node.contentEditable='plaintext-only';node.spellcheck=false;node.classList.add('xi-inline-text-edit');node.dataset.xiKey=key;}
+ }
+ const toolbar=document.createElement('div');toolbar.className='xi-inline-toolbar';toolbar.innerHTML=`<span>✎ Editando este apartado · Haz clic en los textos o arrastra imágenes</span>
+ <label class="xi-inline-upload">＋ Imagen<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-xi-upload="${esc(section)}"></label>
+ <button type="button" data-xi-save="${esc(section)}">Guardar textos</button><button type="button" data-xi-cancel>Salir</button>`;
+ root.appendChild(toolbar);
+ void platformInlineDrawImages();
+}
+async function platformInlineSaveText(section){
+ if(!platformShopOwner||platformInlineEditSection!==section)return;
+ const values={};
+ for(const key of Object.keys(PLATFORM_INLINE_SECTIONS[section].fields)){
+  const node=platformInlineTextNode(section,key);if(node){
+   const text=node.textContent.trim();if(text.length>160)return toast('Los textos pueden tener como máximo 160 caracteres.','error');
+   values[key]=text;
+  }
+ }
+ const {error}=await supabase.rpc('xifre_admin_ui_inline_save',{p_section:section,p_values:values});
+ if(error)return toast(friendlyError(error),'error');
+ platformInlineEndEdit();await platformInlineLoad();toast('Textos guardados para todos los usuarios.','success');
+}
+async function platformInlineUpload(section,file){
+ if(!platformShopOwner||platformInlineEditSection!==section)return;
+ if(platformInlineData.images.filter(i=>i.section_key===section).length>=14)return toast('Máximo 14 imágenes por apartado.','error');
+ let fresh='';
+ try{
+  fresh=await platformUploadImage(file,'ui');
+  const {data,error}=await supabase.rpc('xifre_admin_ui_image_save',{p_id:null,p_section:section,p_path:fresh,p_x:12,p_y:14,p_width:20});
+  if(error)throw error;
+  const response={id:data,section_key:section,image_path:fresh,x_pct:12,y_pct:14,width_pct:20};
+  platformInlineData.images.push(response);await platformInlineDrawImages();toast('Imagen añadida. Puedes arrastrarla a otra posición.','success');
+ }catch(error){if(fresh)await platformDeleteImage(fresh);toast(friendlyError(error),'error');}
+}
+async function platformInlineDeleteImage(id){
+ if(!platformShopOwner)return;
+ const record=platformInlineData.images.find(row=>String(row.id)===String(id));if(!record)return;
+ const {error}=await supabase.rpc('xifre_admin_ui_image_delete',{p_id:id});
+ if(error)return toast(friendlyError(error),'error');
+ platformInlineData.images=platformInlineData.images.filter(row=>String(row.id)!==String(id));
+ await platformInlineDrawImages();toast('Imagen eliminada de la interfaz.','success');
+}
+function platformInlineMoveStart(event){
+ if(!platformInlineEditSection || event.button!==0)return;
+ const image=event.target.closest('.xi-overlay-image');
+ if(!image||event.target.closest('[data-xi-image-delete]'))return;
+ const record=platformInlineData.images.find(row=>String(row.id)===String(image.dataset.xiImage));
+ const root=platformInlineRoot(platformInlineEditSection);if(!record||!root||!root.contains(image))return;
+ const rect=root.getBoundingClientRect();if(rect.width<40||rect.height<40)return;
+ event.preventDefault();image.setPointerCapture(event.pointerId);
+ platformInlineDragging={id:record.id,image,record,section:platformInlineEditSection,rect,startX:event.clientX,startY:event.clientY,x:Number(record.x_pct),y:Number(record.y_pct)};
+ image.classList.add('xi-dragging');
+}
+function platformInlineMove(event){
+ const d=platformInlineDragging;if(!d||!d.image.hasPointerCapture(event.pointerId))return;
+ const x=Math.max(0,Math.min(95-Number(d.record.width_pct),d.x+(event.clientX-d.startX)/d.rect.width*100));
+ const y=Math.max(0,Math.min(90,d.y+(event.clientY-d.startY)/d.rect.height*100));
+ d.image.style.left=`${x}%`;d.image.style.top=`${y}%`;d.nextX=x;d.nextY=y;
+}
+async function platformInlineMoveEnd(event){
+ const d=platformInlineDragging;if(!d)return;
+ if(event.pointerId!=null && d.image.hasPointerCapture(event.pointerId))d.image.releasePointerCapture(event.pointerId);
+ platformInlineDragging=null;d.image.classList.remove('xi-dragging');
+ if(d.nextX==null)return;
+ try{
+  const {error}=await supabase.rpc('xifre_admin_ui_image_save',{
+   p_id:d.id,p_section:d.section,p_path:d.record.image_path,p_x:Number(d.nextX.toFixed(2)),p_y:Number(d.nextY.toFixed(2)),p_width:Number(d.record.width_pct)});
+  if(error)throw error;
+  d.record.x_pct=d.nextX;d.record.y_pct=d.nextY;
+ }catch(error){toast('No se pudo guardar la posición: '+friendlyError(error),'error');void platformInlineDrawImages();}
+}
+function platformInlineBind(){
+ document.addEventListener('click',event=>{
+  const pencil=event.target.closest('[data-xi-edit]');if(pencil){event.preventDefault();platformInlineStart(pencil.dataset.xiEdit);return;}
+  const save=event.target.closest('[data-xi-save]');if(save){void platformInlineSaveText(save.dataset.xiSave);return;}
+  if(event.target.closest('[data-xi-cancel]')){platformInlineEndEdit(true);return;}
+  const remove=event.target.closest('[data-xi-image-delete]');if(remove){void platformInlineDeleteImage(remove.dataset.xiImageDelete);return;}
+ },true);
+ document.addEventListener('change',event=>{
+  const input=event.target.closest('[data-xi-upload]');if(input?.files?.[0])void platformInlineUpload(input.dataset.xiUpload,input.files[0]);
+ });
+ // Prevent text editing from accidentally opening group/people buttons.
+ document.addEventListener('click',event=>{
+  if(platformInlineEditSection && event.target.closest('[contenteditable="plaintext-only"]')){event.preventDefault();event.stopImmediatePropagation();}
+ },true);
+ document.addEventListener('pointerdown',platformInlineMoveStart,true);
+ document.addEventListener('pointermove',platformInlineMove,true);
+ document.addEventListener('pointerup',event=>{void platformInlineMoveEnd(event);},true);
+ document.addEventListener('pointercancel',event=>{void platformInlineMoveEnd(event);},true);
+}
+
 function platformAlpha14Bind(){
+  platformInlineBind();
   document.addEventListener('click',event=>{
     const tab=event.target.closest('[data-market-tab]');if(tab){platformSetMarketTab(tab.dataset.marketTab);return;}
     const pick=event.target.closest('[data-market-select]');if(pick){platformSelectMarketItem(pick.dataset.marketSelect);return;}
     const buy=event.target.closest('[data-market-buy]');if(buy){void platformMarketBuy(buy.dataset.marketBuy);return;}
     const cancel=event.target.closest('[data-market-cancel]');if(cancel){void platformMarketCancelListing(cancel.dataset.marketCancel);return;}
+    const giftPick=event.target.closest('[data-gift-pick]');if(giftPick){void platformSendChatGift(giftPick.dataset.giftPick);return;}
+    const giftClaim=event.target.closest('[data-gift-claim]');if(giftClaim){void platformActionChatGift(giftClaim.dataset.giftClaim,'claim');return;}
+    const giftCancel=event.target.closest('[data-gift-cancel]');if(giftCancel){void platformActionChatGift(giftCancel.dataset.giftCancel,'cancel');return;}
+    const sellDetail=event.target.closest('#item-instant-sell');if(sellDetail?.dataset.sellInstance){void platformMarketInstantSell(sellDetail.dataset.sellInstance);return;}
+    const upgrade=event.target.closest('[data-upgrade-item]');if(upgrade){void platformUpgradeItem(upgrade.dataset.upgradeItem,Number(upgrade.dataset.upgradeTarget));return;}
     const edit=event.target.closest('[data-editor-open]');if(edit){platformUiOpenEditor(edit.dataset.editorOpen);return;}
     const remove=event.target.closest('[data-admin-remove-instance]');if(remove){void platformAdminRemoveInstance(remove.dataset.adminRemoveInstance);return;}
   });
+  $('#composer-gift-button')?.addEventListener('click',platformOpenGiftPicker);
   $('#market-list-form')?.addEventListener('submit',event=>void platformMarketCreateListing(event));
   $('#market-instant-button')?.addEventListener('click',()=>void platformMarketInstantSell());
   $('#market-refresh')?.addEventListener('click',()=>{void platformLoadMarket(true);void platformLoadWallet(false);});
