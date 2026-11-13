@@ -2297,3 +2297,164 @@ html[data-theme="light"] .shop-admin-card input:not([type=checkbox]),html[data-t
 .admin-asset-thumb{height:40px;width:40px;flex:0 0 40px;display:grid;place-items:center;border:1px solid var(--item-color,#8395ff);border-radius:9px;background:#1c202d}
 .admin-asset-thumb .platform-image-frame{height:100%;width:100%;display:grid;place-items:center}
 .admin-asset-thumb img{max-height:100%;max-width:100%;object-fit:contain}
+
+/* =======================================================================
+   XIFRE ALPHA 1.5 — real instance upgrades / custom gift / inline editor
+   ======================================================================= */
+
+/* Gold and Neon are instance finishes, not new rarity values. A base rarity
+   always remains visible via the rarity name and its native color. */
+.xifre-grade-gold {--xi-grade:#ffe079;--xi-grade-rgb:255,211,94;}
+.xifre-grade-neon {--xi-grade:#78fff3;--xi-grade-rgb:91,255,238;}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold,
+#inventory-app-view .trade-select-item.xifre-grade-gold,
+.market-app .market-listing.xifre-grade-gold,
+.xi-gift-picker-item.xifre-grade-gold {
+  border-color:rgba(255,210,82,.94)!important;
+  background:radial-gradient(ellipse at 45% 14%,rgba(255,207,70,.43),transparent 75%),linear-gradient(145deg,#54401c,#262b32 75%)!important;
+  box-shadow:inset 0 0 24px rgba(255,210,76,.29),0 0 18px rgba(255,195,56,.5),0 10px 23px rgba(0,0,0,.3)!important;
+}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold img {filter:drop-shadow(0 0 15px rgba(255,207,66,.88)) drop-shadow(0 6px 9px rgba(0,0,0,.4));}
+#inventory-app-view .xifre-mini-item.xifre-grade-neon,
+#inventory-app-view .trade-select-item.xifre-grade-neon,
+.market-app .market-listing.xifre-grade-neon,
+.xi-gift-picker-item.xifre-grade-neon {
+  border:2px solid rgba(116,255,246,.99)!important;
+  background:radial-gradient(ellipse at 38% 16%,rgba(77,245,235,.35),transparent 73%),linear-gradient(155deg,#163b49,#222134 77%)!important;
+  box-shadow:inset 0 0 18px rgba(102,255,240,.34),inset 0 0 0 1px rgba(204,255,253,.32),0 0 23px rgba(74,255,231,.62),0 0 48px rgba(81,194,255,.22)!important;
+  animation:xi-neon-breathe 3.8s ease-in-out infinite alternate;
+}
+@keyframes xi-neon-breathe {
+  from {filter:brightness(.94) saturate(1.03)}
+  to   {filter:brightness(1.17) saturate(1.22)}
+}
+#inventory-app-view .xifre-mini-item.xifre-grade-neon img {filter:drop-shadow(0 0 16px rgba(80,255,237,.99)) drop-shadow(0 0 32px rgba(80,138,255,.55));}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold .mini-item-value {color:#ffe495;text-shadow:0 0 13px #ffbe69c7;}
+#inventory-app-view .xifre-mini-item.xifre-grade-neon .mini-item-value {color:#a3fff8;text-shadow:0 0 14px #43fff3c9;}
+.xifre-grade-tag {position:absolute;z-index:5;bottom:3px;left:4px;pointer-events:none;color:#ffdb79;font-size:8px;letter-spacing:.5px;font-weight:900;text-shadow:0 0 8px #ffc75d;}
+.xifre-grade-neon>.xifre-grade-tag {color:#b7fff8;text-shadow:0 0 10px #38ffef;}
+#inventory-app-view .trade-select-item>.xifre-grade-tag {top:6px;bottom:auto;left:38px;}
+#inventory-app-view .inventory-item-card.xifre-mini-item {padding-bottom:20px;}
+#item-details-modal.xifre-grade-gold .item-details-card {border-color:#eec75f;box-shadow:0 0 52px #ffc65065,0 24px 75px #0008;}
+#item-details-modal.xifre-grade-neon .item-details-card {border-color:#68ffed;box-shadow:0 0 60px #45ffed87,0 24px 75px #0008;}
+#item-details-modal.xifre-grade-gold .item-details-value-wrap strong{color:#ffe89c;text-shadow:0 0 12px #ffd35d;}
+#item-details-modal.xifre-grade-neon .item-details-value-wrap strong{color:#aafff6;text-shadow:0 0 16px #4affe7;}
+.item-details-extras {display:grid;gap:7px;margin:11px 0 13px;padding:13px 12px;border:1px solid #8e9ab23b;border-radius:11px;background:#1018283c;}
+.item-feature-row {display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:11px;line-height:1.5;}
+.item-feature-row span {color:#a4b2cb;flex:0 0 auto;}
+.item-feature-row strong {color:#f5f8ff;font-weight:800;text-align:right;overflow-wrap:anywhere;}
+.item-feature-row strong.xifre-grade-gold {color:#ffdd77;text-shadow:0 0 13px #ffc13b89;}
+.item-feature-row strong.xifre-grade-neon {color:#88fff2;text-shadow:0 0 13px #2dfff28c;}
+.item-details-upgrades {margin:14px 0;}
+.item-upgrade-panel {border:1px solid #f2c87169;border-radius:12px;padding:15px;background:radial-gradient(circle at 18% 18%,#b18b443e,transparent 72%),#1e2431;box-shadow:inset 0 0 24px #fbd27417;}
+.item-upgrade-panel.xifre-grade-neon {border-color:#4ff3e388;background:radial-gradient(circle at 14% 16%,#37e6e938,transparent 68%),#1b2936;box-shadow:0 0 20px #21ffdc24;}
+.item-upgrade-panel>strong {color:#fbd485;font-size:15px;}
+.item-upgrade-panel.xifre-grade-neon>strong {color:#9ffff6;}
+.item-upgrade-panel>p {color:#b5c1d1;font-size:11px;line-height:1.55;margin:7px 0;}
+.item-upgrade-panel b {color:#fff;}
+.item-upgrade-panel button{width:100%;margin-top:9px;}
+.item-upgrade-panel button:disabled{filter:grayscale(.55);opacity:.42;cursor:not-allowed;}
+.item-details-actions {display:flex;margin:11px 0;gap:9px;}
+.item-details-actions button {flex:1;min-height:41px;border-radius:10px;background:#2d3544;color:#c8ffea;border-color:#6cf6c06b;font-size:11px;}
+.item-details-actions button:hover{background:#315044;}
+.admin-item-feature-set {display:grid;gap:13px;padding:17px;margin:12px 0;border:1px solid #a799ff48;border-radius:13px;background:linear-gradient(150deg,#686eff12,#0a0e1610);min-width:0;}
+.admin-item-feature-set legend {color:#b7acff;letter-spacing:.6px;font-size:12px;font-weight:900;padding:0 8px;}
+.admin-item-feature-set>label:not(.xifre-check-row){display:grid;gap:6px;min-width:0;}
+.admin-item-feature-set>strong {font-size:13px;color:#cdd8f7;}
+.admin-item-feature-set input:not([type=checkbox]),.admin-item-feature-set select {width:100%;min-width:0;border:1px solid #9ca9c33e;background:#1d2230;color:#eaf0ff;border-radius:8px;padding:10px;font-size:12px;}
+.admin-item-feature-set .admin-form-row {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;}
+.admin-item-feature-set .admin-form-row label {min-width:0;}
+.admin-feature-divider{height:1px;background:#abb2ce27;margin:5px 0;}
+.admin-feature-hint{color:#9caac5;font-size:10px;line-height:1.6;}
+
+/* Correct the box preview's color inheritance: each prize owns its rarity.
+   This was the cause of prizes displaying the color of the BOX itself. */
+#item-details-modal .box-detail-prize.rarity-common {--xi-rarity:#dbe3f0;--xi-rgb:219,227,240;}
+#item-details-modal .box-detail-prize.rarity-uncommon {--xi-rarity:#39f28e;--xi-rgb:57,242,142;}
+#item-details-modal .box-detail-prize.rarity-rare {--xi-rarity:#429bff;--xi-rgb:66,155,255;}
+#item-details-modal .box-detail-prize.rarity-epic {--xi-rarity:#b875ff;--xi-rgb:184,117,255;}
+#item-details-modal .box-detail-prize.rarity-legendary {--xi-rarity:#ffd044;--xi-rgb:255,208,68;}
+#item-details-modal .box-detail-prize.rarity-mythic {--xi-rarity:#ff4db8;--xi-rgb:255,77,184;}
+#item-details-modal .box-detail-prize.rarity-divine {--xi-rarity:#39ffed;--xi-rgb:57,255,237;}
+#item-details-modal .box-detail-prize {border:1.5px solid var(--xi-rarity);background:radial-gradient(circle at 52% 13%,rgba(var(--xi-rgb),.28),transparent 85%),#242a35;box-shadow:inset 0 0 12px rgba(var(--xi-rgb),.2),0 0 14px rgba(var(--xi-rgb),.25);}
+#item-details-modal .box-detail-prize strong{color:var(--xi-rarity);text-shadow:0 0 8px rgba(var(--xi-rgb),.36);}
+#item-details-modal .box-detail-prize .box-secret-shadow {color:var(--xi-rarity);filter:drop-shadow(0 0 12px rgba(var(--xi-rgb),.8));}
+
+/* CHAT: collectible emoji and atomic first-claim gift cards. */
+.composer-gift-button {flex:0 0 29px;display:grid;place-items:center;background:transparent;color:#c4c5cb;border-radius:7px;font-size:19px;cursor:pointer;transition:transform .16s,background .16s;}
+.composer-gift-button:hover{background:#52555f;transform:translateY(-2px) scale(1.09);}
+.xifre-chat-item-emoji {width:32px;height:32px;vertical-align:middle;display:inline-block;object-fit:contain;border-radius:6px;margin:0 2px;filter:drop-shadow(0 0 5px #a1bcff88);}
+.emoji-grid .xifre-item-emoji-choice {position:relative;display:flex;flex-direction:column;gap:2px;justify-content:center;aspect-ratio:1;min-height:42px;}
+.xifre-item-emoji-choice img{width:27px;height:27px;object-fit:contain;}
+.xifre-item-emoji-choice small{font-size:7px;max-width:100%;color:#b6c2d5;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;}
+.chat-gift-modal-card {width:min(650px,calc(100vw - 28px));max-height:85vh;overflow:auto;padding:28px;}
+.chat-gift-modal-card h2 {font-size:24px;margin:9px 0;}
+.chat-gift-intro {color:#a8b4c8;font-size:12px;line-height:1.6;margin:7px 0 17px;}
+.chat-gift-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:12px;max-height:53vh;overflow:auto;padding:5px;}
+.xi-gift-picker-item {position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;border:1px solid var(--xi-rarity,#a4aec8);border-radius:12px;padding:11px;background:radial-gradient(circle at 50% 10%,rgba(var(--xi-rgb,110,120,185),.2),transparent 67%),#252b39;color:#fff;cursor:pointer;transition:transform .17s,box-shadow .17s;}
+.xi-gift-picker-item:hover {transform:translateY(-3px);box-shadow:0 0 21px rgba(var(--xi-rgb,110,120,185),.45);}
+.xi-gift-picker-art {width:100%;height:95px;display:grid;place-items:center;}
+.xi-gift-picker-art .platform-image-frame{display:grid;place-items:center;width:100%;height:100%;}
+.xi-gift-picker-art img{max-height:90px;max-width:100%;object-fit:contain;}
+.xi-gift-picker-item>strong{font-size:11px;text-align:center;}
+.xi-gift-picker-item>small{font-size:9px;color:var(--xi-rarity,#b4c4e6);}
+.xi-gift-picker-item>b{font-size:16px;color:#f0f5ff;}
+.xi-gift-picker-item .mini-item-quantity{position:absolute;top:6px;right:6px;z-index:4;padding:3px 7px;background:#131723ee;border-radius:7px;font-size:11px;}
+.xifre-gift-card {--xi-rarity:#8bb9ff;--xi-rgb:102,162,235;display:block;width:min(340px,100%);margin:7px 0 9px;padding:14px;border:1.5px solid var(--xi-rarity);border-radius:14px;background:radial-gradient(ellipse at 25% 0%,rgba(var(--xi-rgb),.3),transparent 68%),linear-gradient(145deg,#272f41,#202632);box-shadow:inset 0 0 17px rgba(var(--xi-rgb),.12),0 0 18px rgba(var(--xi-rgb),.15);}
+.xifre-gift-card.rarity-common{--xi-rarity:#dbe3f0;--xi-rgb:219,227,240;}
+.xifre-gift-card.rarity-uncommon{--xi-rarity:#39f28e;--xi-rgb:57,242,142;}
+.xifre-gift-card.rarity-rare{--xi-rarity:#429bff;--xi-rgb:66,155,255;}
+.xifre-gift-card.rarity-epic{--xi-rarity:#b875ff;--xi-rgb:184,117,255;}
+.xifre-gift-card.rarity-legendary{--xi-rarity:#ffd044;--xi-rgb:255,208,68;}
+.xifre-gift-card.rarity-mythic{--xi-rarity:#ff4db8;--xi-rgb:255,77,184;}
+.xifre-gift-card.rarity-divine{--xi-rarity:#39ffed;--xi-rgb:57,255,237;}
+.xi-gift-heading {display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:9px;font-weight:950;letter-spacing:.7px;color:#e1ebff;}
+.xi-gift-open{color:#7bffc2}.xi-gift-claimed{color:#d0d0db}.xi-gift-cancelled{color:#ff9a9f}
+.xi-gift-middle {display:flex;align-items:center;gap:12px;margin:12px 0;}
+.xi-gift-art {flex:0 0 78px;width:78px;height:78px;display:grid;place-items:center;border-radius:10px;background:radial-gradient(circle,rgba(var(--xi-rgb),.39),transparent 80%);}
+.xi-gift-art .platform-image-frame{display:grid;place-items:center;height:100%;width:100%;}
+.xi-gift-art img {max-height:75px;max-width:75px;object-fit:contain;filter:drop-shadow(0 0 10px rgba(var(--xi-rgb),.72));}
+.xi-gift-middle>div:last-child{display:grid;gap:4px;min-width:0;}
+.xi-gift-middle strong {font-size:14px;font-weight:900;overflow-wrap:anywhere;}
+.xi-gift-middle small{font-size:10px;color:var(--xi-rarity)}
+.xi-gift-middle b{font-size:11px;color:#e4ecff;}
+.xi-gift-button{width:100%;min-height:38px;background:linear-gradient(100deg,#596cf5,#4fbd9f);color:white;font-weight:900;font-size:11px;border-radius:9px;cursor:pointer;transition:filter .18s,transform .18s;}
+.xi-gift-button:hover{filter:brightness(1.15);transform:translateY(-1px);}
+.xi-gift-button.secondary{background:#313949;color:#d0dbec;border:1px solid #8c9cb248;}
+.xi-gift-button:disabled{opacity:.4;cursor:wait;}
+.xi-gift-result {color:#b3c3d7;font-size:11px;line-height:1.5;}
+.xifre-gift-pending{color:#c0cbdf;font-size:11px;}
+
+/* Tiny per-section pencil, no pop-up editor. Decorations cannot intercept
+   normal chat buttons unless the administrator explicitly enables editing. */
+.xi-inline-surface {position:relative;}
+.xi-inline-pencil {position:absolute;z-index:19;top:5px;right:6px;width:24px;height:24px;display:grid;place-items:center;border:1px solid #b4c7e535;border-radius:6px;background:#141c2a85;color:#e8f3ffb0;font-size:13px;line-height:1;cursor:pointer;opacity:.4;transition:opacity .14s,background .14s,transform .14s;}
+.xi-inline-surface:hover>.xi-inline-pencil,.xi-inline-pencil:focus-visible {opacity:1;}
+.xi-inline-pencil:hover{background:#5865f2;color:white;transform:scale(1.09);}
+.xi-inline-editing>.xi-inline-pencil {background:#5865f2;opacity:1;}
+.xi-inline-toolbar {position:sticky;top:0;left:0;z-index:45;display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 28px 8px 0;padding:8px;border:1px solid #8b99ff88;border-radius:10px;background:#171b31f2;box-shadow:0 6px 25px #0006;}
+.xi-inline-toolbar>span {flex:1;min-width:155px;font-size:10px;color:#e3e8ff;line-height:1.5;}
+.xi-inline-toolbar button,.xi-inline-upload {display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:8px 10px;border:1px solid #a3acff75;border-radius:7px;background:#454d82;color:#fff;font-size:10px;font-weight:850;cursor:pointer;}
+.xi-inline-toolbar button:hover,.xi-inline-upload:hover{background:#5e66ab;}
+.xi-inline-upload input{display:none;}
+.xi-inline-text-edit {outline:2px dashed #8d91ff!important;outline-offset:3px;border-radius:4px;background:#818aff21!important;cursor:text!important;min-width:8px;}
+.xi-overlay-image {position:absolute;z-index:6;display:block;max-width:45%;height:auto;pointer-events:none;user-select:none;-webkit-user-select:none;filter:drop-shadow(0 6px 13px #0006);}
+.xi-overlay-image>img {display:block;width:100%;height:auto;object-fit:contain;pointer-events:none;}
+.xi-overlay-image>button,.xi-overlay-drag-hint{display:none;}
+.xi-inline-editing>.xi-overlay-image{pointer-events:auto;cursor:grab;touch-action:none;outline:1px dashed #999cffaa;border-radius:5px;}
+.xi-inline-editing>.xi-overlay-image:hover{outline-color:#a6ffff;}
+.xi-inline-editing>.xi-overlay-image>button{display:grid;place-items:center;position:absolute;top:-10px;right:-10px;width:23px;height:23px;background:#d9425a;color:#fff;border-radius:50%;font-size:15px;cursor:pointer;z-index:10;}
+.xi-inline-editing>.xi-overlay-image>.xi-overlay-drag-hint {position:absolute;bottom:0;left:0;display:block;background:#151b2ac2;color:#fff;font-size:9px;padding:3px 7px;border-radius:4px;pointer-events:none;}
+.xi-overlay-image.xi-dragging {cursor:grabbing;opacity:.85;filter:drop-shadow(0 0 14px #79b7ffb9);}
+@media (max-width:680px){.admin-item-feature-set .admin-form-row{grid-template-columns:1fr}.chat-gift-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}.xi-gift-art{flex-basis:58px;width:58px;height:58px}.xi-overlay-image{max-width:45%;}.xi-inline-toolbar{margin-right:0}}
+@media (prefers-reduced-motion:reduce){.xifre-grade-neon,.xifre-grade-gold{animation:none!important}.xi-inline-pencil,.xi-overlay-image,.xi-gift-picker-item{transition:none!important}}
+
+
+/* Rarezas del selector de regalos (el modal vive fuera del Inventario). */
+.xi-gift-picker-item.rarity-common{--xi-rarity:#dbe3f0;--xi-rgb:219,227,240;}
+.xi-gift-picker-item.rarity-uncommon{--xi-rarity:#39f28e;--xi-rgb:57,242,142;}
+.xi-gift-picker-item.rarity-rare{--xi-rarity:#429bff;--xi-rgb:66,155,255;}
+.xi-gift-picker-item.rarity-epic{--xi-rarity:#b875ff;--xi-rgb:184,117,255;}
+.xi-gift-picker-item.rarity-legendary{--xi-rarity:#ffd044;--xi-rgb:255,208,68;}
+.xi-gift-picker-item.rarity-mythic{--xi-rarity:#ff4db8;--xi-rgb:255,77,184;}
+.xi-gift-picker-item.rarity-divine{--xi-rarity:#39ffed;--xi-rgb:57,255,237;}
