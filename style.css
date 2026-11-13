@@ -2458,3 +2458,153 @@ html[data-theme="light"] .shop-admin-card input:not([type=checkbox]),html[data-t
 .xi-gift-picker-item.rarity-legendary{--xi-rarity:#ffd044;--xi-rgb:255,208,68;}
 .xi-gift-picker-item.rarity-mythic{--xi-rarity:#ff4db8;--xi-rgb:255,77,184;}
 .xi-gift-picker-item.rarity-divine{--xi-rarity:#39ffed;--xi-rgb:57,255,237;}
+
+/* ===========================================================
+   XIFRE ALPHA 1.6 · visual stability, messages and gifts
+   =========================================================== */
+/* One authoritative six-column layout for all composer controls. The hidden
+   attachment popover and file input are positioned, not grid children. */
+.center-pane {min-width:0;min-height:0;}
+#messages.messages-scroll {min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overflow-wrap:anywhere;scrollbar-gutter:stable;}
+#messages .message-row,#messages .message-body,#messages .message-content {min-width:0;max-width:100%;}
+#messages .message-content,#messages .message-caption{white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;}
+#messages .message-actions{max-width:calc(100% - 20px);flex-wrap:wrap;}
+#message-form.composer-area {min-width:0;width:100%;padding:7px 14px max(12px,env(safe-area-inset-bottom));}
+#message-form .composer-box {
+  display:grid!important;
+  width:100%;min-width:0;
+  grid-template-columns:38px minmax(0,1fr) repeat(4,34px)!important;
+  gap:2px!important;
+  justify-items:stretch;align-items:center;
+  padding:6px 6px!important;
+  height:auto!important;min-height:50px;
+  overflow:visible;
+}
+#message-form .composer-box>#composer-plus-button{grid-column:1!important;grid-row:1!important;}
+#message-form .composer-box>#message-input{grid-column:2!important;grid-row:1!important;min-width:0;width:100%;margin:0!important;max-height:128px;resize:none;}
+#message-form .composer-box>#send-button{grid-column:3!important;grid-row:1!important;display:grid!important;}
+#message-form .composer-box>#composer-gift-button{grid-column:4!important;grid-row:1!important;}
+#message-form .composer-box>#composer-emoji-button{grid-column:5!important;grid-row:1!important;}
+#message-form .composer-box>#composer-keyboard-button{grid-column:6!important;grid-row:1!important;}
+#message-form .composer-box>#composer-plus-button,
+#message-form .composer-box>#send-button,
+#message-form .composer-box>#composer-gift-button,
+#message-form .composer-box>#composer-emoji-button,
+#message-form .composer-box>#composer-keyboard-button {
+  box-sizing:border-box;width:30px!important;height:30px!important;min-width:0!important;
+  padding:0!important;margin:0 auto!important;justify-self:center!important;align-self:center!important;
+  display:grid!important;place-items:center!important;border-radius:9px;line-height:1;
+  position:relative;top:auto;right:auto;left:auto;bottom:auto;transform:none;
+}
+#message-form .composer-box>#send-button{border-radius:50%;}
+#message-form .composer-box>#composer-gift-button{font-size:19px;}
+#message-form .composer-box>#message-character-count{position:absolute;top:-20px;bottom:auto;right:145px;z-index:8;line-height:1.1;}
+#message-form .composer-box>#attachment-menu{position:fixed;grid-column:auto!important;}
+#message-form .composer-box>#chat-attachment-input{position:absolute!important;}
+@media(max-width:760px){
+  #message-form.composer-area{padding-left:9px;padding-right:9px;}
+  #message-form .composer-box{grid-template-columns:32px minmax(0,1fr) repeat(4,29px)!important;gap:1px!important;padding:5px 3px!important;}
+  #message-form .composer-box>#composer-plus-button,
+  #message-form .composer-box>#send-button,
+  #message-form .composer-box>#composer-gift-button,
+  #message-form .composer-box>#composer-emoji-button,
+  #message-form .composer-box>#composer-keyboard-button{width:27px!important;height:27px!important;}
+  #message-form .composer-box>#message-character-count{right:122px;}
+  #messages.messages-scroll{scrollbar-gutter:auto;}
+}
+
+/* Discord-like landscape gift, with a compact claim/cancel control at right. */
+#messages .xifre-gift-card {box-sizing:border-box;width:min(490px,100%);max-width:100%;padding:11px 13px;border-radius:11px;box-shadow:inset 0 0 14px rgba(var(--xi-rgb),.1),0 6px 22px #0002;}
+#messages .xi-gift-heading {font-size:10px;letter-spacing:.65px;}
+#messages .xi-gift-middle {display:grid;grid-template-columns:67px minmax(0,1fr) minmax(94px,125px);gap:12px;align-items:center;margin:9px 0 0;min-width:0;}
+#messages .xi-gift-art {width:67px;height:67px;min-width:0;min-height:0;border:1px solid rgba(var(--xi-rgb),.38);border-radius:8px;}
+#messages .xi-gift-art img {width:auto;height:auto;max-width:58px;max-height:58px;}
+#messages .xi-gift-info{min-width:0;display:flex;flex-direction:column;gap:5px;}
+#messages .xi-gift-info strong{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px;}
+#messages .xi-gift-info small{font-size:10px;}
+#messages .xi-gift-action {display:flex;justify-content:flex-end;align-items:center;min-width:0;}
+#messages .xi-gift-button {min-height:36px;padding:6px 8px;line-height:1.2;white-space:normal;font-size:10px;}
+#messages .xi-gift-result {margin:0;line-height:1.35;font-size:10px;text-align:right;}
+@media(max-width:480px){
+ #messages .xi-gift-middle{grid-template-columns:56px minmax(0,1fr);gap:9px;}
+ #messages .xi-gift-art{width:56px;height:56px;}
+ #messages .xi-gift-art img{max-width:50px;max-height:50px;}
+ #messages .xi-gift-action{grid-column:1/-1;}
+ #messages .xi-gift-button{width:100%;}
+ #messages .xi-gift-result{text-align:left;}
+}
+
+/* Real backend availability monitor. Not a red alert for routine permission errors. */
+.xifre-server-alert{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:10000;box-sizing:border-box;width:min(610px,calc(100vw - 22px));min-height:63px;display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:14px;border:1px solid rgba(255,104,105,.65);background:linear-gradient(110deg,rgba(71,19,30,.97),rgba(31,19,38,.98));color:#fff;box-shadow:0 12px 40px #0009,0 0 28px #ff515337;backdrop-filter:blur(15px);pointer-events:none;}
+.xifre-server-alert.hidden{display:none!important;}
+.xifre-server-alert-icon{display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;background:#ff686b;color:#241118;border-radius:9px;font-size:21px;font-weight:950;}
+.xifre-server-alert-copy{min-width:0;display:flex;flex:1;flex-direction:column;gap:4px;}
+.xifre-server-alert-copy strong{font-size:12px;line-height:1.3;}
+.xifre-server-alert-copy small{font-size:10px;color:#ffbbc3;line-height:1.45;}
+.xifre-server-alert-clock{text-align:right;display:grid;gap:2px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.xifre-server-alert-clock small{font-size:8px;color:#feb6bc;font-weight:850;letter-spacing:.5px;}
+.xifre-server-alert-clock b{font-size:18px;font-weight:900;}
+@media(max-width:460px){.xifre-server-alert{top:5px;gap:7px;padding:9px;}.xifre-server-alert-clock small{font-size:7px;}.xifre-server-alert-copy strong{font-size:11px;}}
+
+/* Hidden prizes: always an anonymous silhouette; no accidental image/name or chances. */
+#item-details-modal .box-detail-prize.box-detail-secret .box-detail-image{overflow:hidden;filter:none;}
+#item-details-modal .box-detail-prize.box-detail-secret .box-secret-shadow{clip-path:none;border-radius:14px;background:linear-gradient(145deg,#121721,#2e3143);color:var(--xi-rarity);font-size:54px;filter:drop-shadow(0 0 9px rgba(var(--xi-rgb),.7));}
+#item-details-modal .box-detail-prize.box-detail-secret strong{color:var(--xi-rarity);}
+
+/* Grade effects use an independent metallic / holographic FRAME, never replace
+   original item rarity coloring. No whole-card flashing that hides the rarity. */
+#inventory-app-view .xifre-mini-item.xifre-grade-gold,
+#inventory-app-view .trade-select-item.xifre-grade-gold,
+.market-app .market-listing.xifre-grade-gold,
+.xi-gift-picker-item.xifre-grade-gold,
+#inventory-app-view .xifre-mini-item.xifre-grade-neon,
+#inventory-app-view .trade-select-item.xifre-grade-neon,
+.market-app .market-listing.xifre-grade-neon,
+.xi-gift-picker-item.xifre-grade-neon {
+  animation:none!important;
+  border-color:rgba(var(--xi-rgb),.92)!important;
+  background:radial-gradient(circle at 46% 20%,rgba(var(--xi-rgb),.32),transparent 75%),linear-gradient(145deg,#252c3b,#191e29)!important;
+  box-shadow:inset 0 0 15px rgba(var(--xi-rgb),.13),0 0 15px rgba(var(--xi-rgb),.32),0 8px 22px #0004!important;
+}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold::after,
+#inventory-app-view .xifre-mini-item.xifre-grade-neon::after {
+  position:absolute;z-index:4;inset:2px;pointer-events:none;border-radius:inherit;filter:none;opacity:1;background:none;
+}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold::after {
+  border:2px solid #ffdf6c;
+  box-shadow:inset 0 0 0 1px #7d541b,0 0 0 2px #ffc54b88,0 0 14px #ffc04777,inset 0 0 14px #ffc34a52;
+}
+#inventory-app-view .xifre-mini-item.xifre-grade-neon::after {
+  border:2px solid #a2ffef;
+  box-shadow:inset 0 0 0 2px #274d74,0 0 0 2px #13f9ea8f,0 0 19px #32ffffbc,0 0 27px #815aff7d,inset 0 0 16px #33d8ff55;
+  animation:xi-holo-outline 4s linear infinite;
+}
+@keyframes xi-holo-outline{0%,100%{border-color:#affffa;box-shadow:inset 0 0 0 2px #274d74,0 0 0 2px #13f9ea8f,0 0 19px #32ffffbc,0 0 27px #815aff7d,inset 0 0 16px #33d8ff55}50%{border-color:#cfb7ff;box-shadow:inset 0 0 0 2px #274d74,0 0 0 2px #9e66ffad,0 0 25px #a473ffbd,0 0 24px #56fff89c,inset 0 0 18px #845aff52}}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold .xifre-grade-tag {color:#2f2100;text-shadow:none;background:linear-gradient(120deg,#ffefaa,#d8951c,#fff2b2);padding:3px 6px;border-radius:5px;border:1px solid #f6cd68;}
+#inventory-app-view .xifre-mini-item.xifre-grade-neon .xifre-grade-tag {color:#0b2535;text-shadow:none;background:linear-gradient(100deg,#a5fefa,#b891ff,#a4d5ff);padding:3px 6px;border-radius:5px;border:1px solid #66fff5;}
+#inventory-app-view .xifre-mini-item.xifre-grade-gold img,
+#inventory-app-view .xifre-mini-item.xifre-grade-neon img {filter:drop-shadow(0 6px 8px #0006)!important;}
+
+/* Epic vs Legendary reward reveals: different visual treatments, not rarity changes. */
+#box-opening-modal .box-opening-card{position:relative;isolation:isolate;}
+#box-rarity-celebration{position:absolute;z-index:7;inset:0;pointer-events:none;overflow:hidden;}
+#box-rarity-celebration:empty{display:none;}
+.box-celebration-burst{position:absolute;top:56%;left:50%;width:90px;height:90px;border-radius:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,var(--xi-celebrate) 0%,transparent 73%);filter:blur(3px);animation:xi-box-burst 1.25s ease-out both;}
+.box-celebration-ring{position:absolute;top:56%;left:50%;width:95px;height:95px;border-radius:50%;border:4px solid var(--xi-celebrate);box-shadow:0 0 40px var(--xi-celebrate),inset 0 0 28px var(--xi-celebrate);animation:xi-box-ring 1.65s ease-out both;}
+.box-celebration-particle{position:absolute;top:56%;left:50%;width:9px;height:16px;border-radius:3px;background:var(--xi-celebrate);box-shadow:0 0 13px var(--xi-celebrate);animation:xi-box-spark 1.75s cubic-bezier(.1,.6,.2,1) var(--pd,0s) both;}
+.box-celebrate-epic {--xi-celebrate:#c276ff;}
+.box-celebrate-legendary {--xi-celebrate:#ffe06f;}
+#box-opening-modal.box-celebrate-epic .box-opening-card{border-color:#ac6bff;background:radial-gradient(circle at 50% 58%,#61269a57,transparent 62%),linear-gradient(140deg,#29233f,#181b2c);box-shadow:0 0 80px #a25cff72,0 25px 90px #000a;}
+#box-opening-modal.box-celebrate-legendary .box-opening-card{border-color:#ffd75c;background:radial-gradient(circle at 50% 58%,#a775155c,transparent 65%),linear-gradient(140deg,#352e1d,#171c29);box-shadow:0 0 85px #fbc54c98,0 25px 90px #000a;}
+#box-opening-modal.box-celebrate-legendary .box-result-visual{animation:xi-box-legend-rise .9s cubic-bezier(.18,1.5,.3,1) both;box-shadow:0 0 20px #ffec9d,0 0 50px #f8b928,0 0 90px #ffe179a3,inset 0 0 22px #ffd25f75;}
+#box-opening-modal.box-celebrate-epic .box-result-visual{animation:xi-box-epic-rise .9s cubic-bezier(.2,1.5,.3,1) both;box-shadow:0 0 20px #c492ff,0 0 48px #af6cff,0 0 73px #9e55ff91,inset 0 0 22px #bf86ff75;}
+#box-opening-modal.box-celebrate-legendary .box-result-rarity{color:#ffe17d;font-size:15px;text-shadow:0 0 18px #ffd05d;}
+#box-opening-modal.box-celebrate-epic .box-result-rarity{color:#dcadff;font-size:13px;text-shadow:0 0 14px #b57aff;}
+#box-opening-modal.box-celebrate-legendary #box-opening-title{color:#ffe8a3;text-shadow:0 0 16px #ffc34e;}
+#box-opening-modal.box-celebrate-epic #box-opening-title{color:#e5c3ff;text-shadow:0 0 14px #b677ff;}
+@keyframes xi-box-burst{0%{opacity:0;transform:translate(-50%,-50%) scale(.1)}30%{opacity:.93}100%{opacity:0;transform:translate(-50%,-50%) scale(8)}}
+@keyframes xi-box-ring{0%{opacity:0;transform:translate(-50%,-50%) scale(.4)}25%{opacity:.92}100%{opacity:0;transform:translate(-50%,-50%) scale(7)}}
+@keyframes xi-box-spark{0%{opacity:0;transform:translate(-50%,-50%) scale(.4)}20%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) rotate(540deg) scale(.5)}}
+@keyframes xi-box-legend-rise{from{opacity:.3;transform:translateY(30px) scale(.6) rotate(-9deg)}to{opacity:1;transform:none}}
+@keyframes xi-box-epic-rise{from{opacity:.3;transform:translateY(22px) scale(.7) rotate(7deg)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){#box-rarity-celebration{display:none!important;}#box-opening-modal .box-result-visual{animation:none!important;}#inventory-app-view .xifre-mini-item.xifre-grade-neon::after{animation:none!important;}}
