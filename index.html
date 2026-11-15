@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261115-alpha-113">
+<link rel="stylesheet" href="style.css?v=20261115-alpha-114">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -290,6 +290,15 @@
                 <p>Elige objetos ya creados y reparte un 100% de probabilidades. No se permiten cajas dentro de cajas.</p>
                 <div id="admin-box-drops" class="admin-box-drops"></div>
                 <button id="admin-box-add-drop" type="button" class="inventory-secondary-button compact">+ Añadir premio</button>
+                <section id="xi-series-import" class="xi-series-import">
+                  <div class="xi-series-title"><strong>Crear una serie desde una carpeta</strong><small>Opcional al crear una caja nueva. Cada imagen será un objeto con el nombre del archivo.</small></div>
+                  <label class="xi-series-file-label">Seleccionar carpeta de imágenes (PNG, JPG, WEBP o GIF)
+                    <input id="xi-series-folder" type="file" webkitdirectory directory multiple accept="image/png,image/jpeg,image/webp,image/gif">
+                  </label>
+                  <p>Los ajustes del formulario (rareza, valor, upgrades, serie y rutas) se aplicarán a todos los artículos. Pulsa «Editar» en cualquier imagen para sobrescribirlos individualmente.</p>
+                  <div id="xi-series-list" class="xi-series-list"></div>
+                  <div class="xi-series-footer"><span id="xi-series-summary">Sin carpeta seleccionada</span><button id="xi-series-reset" type="button" class="inventory-secondary-button compact">Quitar carpeta</button></div>
+                </section>
                 <span id="admin-box-probability" class="admin-box-probability">Total: 0%</span>
               </div>
 
@@ -311,6 +320,22 @@
                 <label class="xifre-check-row"><input type="checkbox" id="admin-item-emoji-enabled"><span>Este artículo se puede utilizar como emoji en el chat</span></label>
                 <label>Código del emoji (sin espacios)<input id="admin-item-emoji-code" type="text" maxlength="26" pattern="[a-zA-Z][a-zA-Z0-9_]{1,25}" placeholder="ej. smilexifre"></label>
                 <p class="admin-feature-hint">Aparecerá en el selector de emojis a quienes tengan el artículo. Se enviará como :xi_codigo:.</p>
+                <div class="admin-feature-divider"></div>
+                <label class="xifre-check-row"><input type="checkbox" id="xi-decor-enabled"><span><strong>ITEM EQUIPABLE · Decoración para foto de perfil</strong></span></label>
+                <div id="xi-decor-editor" class="xi-decor-editor hidden">
+                  <p class="admin-feature-hint">Se muestra alrededor de los avatares de quienes equipen una copia. Edita la posición y la animación con vista previa.</p>
+                  <div class="xi-decor-edit-layout">
+                    <div class="xi-decor-controls">
+                      <label>Horizontal <output id="xi-decor-x-value">0</output><input id="xi-decor-x" type="range" min="-90" max="90" value="0"></label>
+                      <label>Vertical <output id="xi-decor-y-value">0</output><input id="xi-decor-y" type="range" min="-90" max="90" value="0"></label>
+                      <label>Tamaño <output id="xi-decor-scale-value">135%</output><input id="xi-decor-scale" type="range" min="30" max="300" value="135"></label>
+                      <label>Rotación <output id="xi-decor-rotation-value">0°</output><input id="xi-decor-rotation" type="range" min="-180" max="180" value="0"></label>
+                      <label>Brillo <output id="xi-decor-glow-value">10 px</output><input id="xi-decor-glow" type="range" min="0" max="40" value="10"></label>
+                      <label>Animación<select id="xi-decor-animation"><option value="none">Sin animación</option><option value="float">Flotando</option><option value="pulse">Pulsar</option><option value="spin">Rotación suave</option><option value="shimmer">Destellos</option></select></label>
+                    </div>
+                    <div class="xi-decor-preview-col"><strong>Vista previa del avatar</strong><div id="xi-decor-preview" class="xi-decor-preview"><span class="xi-decor-preview-avatar">X</span><img id="xi-decor-preview-image" alt="Vista previa de la decoración"></div><small>Se ajusta automáticamente a avatares de distintos tamaños.</small></div>
+                  </div>
+                </div>
               </fieldset>
               <label class="admin-upload-label">Imagen del objeto <span>PNG, JPG, WEBP o GIF · máximo 8 MB</span><input id="admin-item-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
               <div id="admin-item-image-preview" class="admin-image-preview"><span>Vista previa del objeto</span></div>
@@ -481,7 +506,7 @@
     </div>
     <div id="xi-plaza-game" class="xi-plaza-game hidden">
       <div class="xi-plaza-game-top">
-        <div><span class="xi-plaza-eyebrow">ARCADE · XIFRE</span><h2>Block Breaker</h2><p>Destruye todos los bloques. ¡Cuidado con la caída!</p></div>
+        <div><span class="xi-plaza-eyebrow">ARCADE · XIFRE</span><h2>Block Breaker</h2><p>Partidas rápidas, reflejos y recompensas.</p></div>
         <div class="xi-plaza-game-tools"><button type="button" id="xi-plaza-sound" title="Activar o silenciar sonidos" aria-label="Sonido">♪</button><button type="button" id="xi-plaza-fullscreen" title="Pantalla completa">⛶</button><button type="button" id="xi-plaza-pause" title="Pausar o reanudar">Ⅱ</button></div>
       </div>
       <div class="xi-plaza-stats"><span>Ronda <strong id="xi-plaza-round">1</strong></span><span>Vidas <strong id="xi-plaza-lives">♥♥♥</strong></span><span>Puntos <strong id="xi-plaza-score">0</strong></span><span>Ganado <strong id="xi-plaza-earned">0,00 €</strong></span></div>
@@ -490,7 +515,7 @@
         <div id="xi-plaza-overlay" class="xi-plaza-overlay"><div class="xi-plaza-overlay-card"><strong id="xi-plaza-overlay-title">¿Preparado?</strong><p id="xi-plaza-overlay-copy">Mueve la barra con ← → o A/D. Usa Espacio para lanzar la bola.</p><button id="xi-plaza-overlay-action" type="button" class="xi-plaza-primary">Empezar partida</button></div></div>
       </div>
       <div class="xi-plaza-touch"><button type="button" id="xi-plaza-left" aria-label="Mover a la izquierda">◀</button><span>← → o A/D para mover · Espacio para lanzar · P para pausar</span><button type="button" id="xi-plaza-right" aria-label="Mover a la derecha">▶</button></div>
-      <div class="xi-plaza-footer"><span id="xi-plaza-game-message" role="status">Los premios se añaden automáticamente a tu saldo virtual.</span><span>Poderes: azul/verde = ayuda · rojo = perjudica (barra pequeña, lenta o invertida) · Máximo 3 vidas</span></div>
+      <div class="xi-plaza-footer"><span id="xi-plaza-game-message" role="status">Los premios se añaden automáticamente a tu saldo virtual.</span><span>Recoge los símbolos: verde = ayuda · rojo = riesgo. Máximo 3 vidas.</span></div>
     </div>
   </div>
 </section>
@@ -551,6 +576,7 @@
       <div class="item-details-section"><strong>Descripción</strong><p id="item-details-description">Sin descripción.</p></div>
       <p id="item-details-status" class="item-details-status"></p>
       <div id="item-details-extras" class="item-details-extras hidden"></div>
+      <div id="xi-decor-detail-action" class="xi-decor-detail-action hidden"></div>
       <div id="item-details-upgrades" class="item-details-upgrades hidden"></div>
       <div class="item-details-actions"><button id="item-instant-sell" type="button" class="inventory-secondary-button hidden">Vender al instante</button></div>
       <div id="item-box-preview" class="item-box-preview hidden"></div>
@@ -815,6 +841,7 @@
 <button class="theme-card" type="button" data-theme-choice="light"><span class="theme-thumb light-thumb"><i></i><i></i><i></i></span><strong>Claro</strong><small>Fondo claro y texto oscuro.</small></button>
 </div>
 </div>
+<div class="appearance-section xi-decor-wardrobe-section"><div class="appearance-section-title">DECORACIÓN DEL PERFIL</div><p>Equipa un objeto de tu inventario para decorar tu avatar.</p><div id="xi-decor-wardrobe" class="xi-decor-wardrobe">Cargando objetos equipables...</div></div>
 </div>
 </section>
 </div>
@@ -822,7 +849,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261115-alpha-113"></script>
+<script src="app.js?v=20261115-alpha-114"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
