@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261113-alpha-16">
+<link rel="stylesheet" href="style.css?v=20261115-alpha-17">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -258,6 +258,11 @@
             <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">TU OFERTA</span><h3 id="trade-own-name">Tú</h3></div><span id="trade-own-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div class="trade-offer-total">Valor total <strong id="trade-own-total">0</strong></div><div id="trade-own-offer" class="trade-offer-items"></div></section>
             <section class="trade-offer-panel"><div class="trade-offer-panel-head"><div><span class="trade-offer-kicker">SU OFERTA</span><h3 id="trade-other-name">Amigo</h3></div><span id="trade-other-confirmed" class="trade-confirm-state">Sin confirmar</span></div><div class="trade-offer-total">Valor total <strong id="trade-other-total">0</strong></div><div id="trade-other-offer" class="trade-offer-items"></div></section>
           </div>
+          <section id="xi-trade-chat" class="xi-trade-chat" aria-label="Chat del intercambio">
+            <div class="xi-trade-chat-title"><div><strong><span aria-hidden="true">✉</span> Chat del intercambio</strong><small>Temporal · no se guarda · desaparece al finalizar</small></div><span id="xi-trade-chat-state">Conectando…</span></div>
+            <div id="xi-trade-chat-messages" class="xi-trade-chat-messages" role="log" aria-live="polite"><div class="xi-trade-chat-empty">Envía un mensaje a tu amigo.</div></div>
+            <form id="xi-trade-chat-form" class="xi-trade-chat-form"><input id="xi-trade-chat-input" type="text" maxlength="400" autocomplete="off" placeholder="Hablar durante el intercambio…" aria-label="Mensaje temporal del intercambio"><button type="submit" aria-label="Enviar mensaje del intercambio">Enviar</button></form>
+          </section>
           <section class="trade-select-items"><div class="trade-select-heading"><div><h3>Elige qué quieres ofrecer</h3><p>Haz clic en un objeto para añadirlo o quitarlo. Se guarda automáticamente. Los objetos de otros intercambios no están disponibles.</p></div><span id="trade-selected-count" aria-live="polite">0 ofrecidos</span></div><div id="trade-my-items" class="trade-select-grid"></div></section>
           <div class="trade-workspace-actions"><span id="trade-workspace-feedback" class="trade-feedback" aria-live="polite">Los dos debéis confirmar, aunque uno no ofrezca objetos (regalo).</span><div><button id="trade-save-offer-button" class="inventory-secondary-button hidden" type="button">Reintentar guardar</button><button id="trade-confirm-button" class="inventory-primary-button" type="button">Confirmar intercambio</button></div></div>
         </div>
@@ -359,7 +364,7 @@
         </form>
         <div class="shop-admin-card">
           <h3>Entregar saldo</h3><p>Abona créditos virtuales a la cuenta de un usuario.</p>
-          <form id="shop-money-form"><label>Buscar usuario<input type="search" id="shop-money-search" autocomplete="off" placeholder="Nombre o @usuario" required></label><div id="shop-money-results" class="shop-money-results">Escribe al menos 2 letras para buscar.</div><div id="shop-money-selected" class="shop-money-selected hidden"></div><label>Importe (€)<input id="shop-money-amount" type="number" step="0.01" min="0.01" value="1.00" required></label><button id="shop-money-submit" type="submit" class="inventory-primary-button">Entregar saldo</button></form>
+          <form id="shop-money-form"><div class="xi-bulk-money-row"><label>Buscar usuario<input type="search" id="shop-money-search" autocomplete="off" placeholder="Nombre o @usuario"></label><button type="button" id="shop-money-all" class="inventory-secondary-button" title="Selecciona todas las cuentas verificadas">Todos los usuarios</button></div><div id="shop-money-results" class="shop-money-results">Escribe al menos 2 letras para buscar.</div><div id="shop-money-selected" class="shop-money-selected hidden"></div><label>Importe (€)<input id="shop-money-amount" type="number" step="0.01" min="0.01" value="1.00" required></label><button id="shop-money-submit" type="submit" class="inventory-primary-button">Entregar saldo</button></form>
           <p id="shop-money-message" class="shop-admin-message"></p>
         </div>
       </div>
@@ -701,6 +706,6 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261113-alpha-16"></script>
+<script src="app.js?v=20261115-alpha-17"></script>
 </body>
 </html>
