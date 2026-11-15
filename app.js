@@ -3878,6 +3878,8 @@ function platformAvailableCopies(itemId,tier){
  return platformInventoryItems.filter(row=>platformTypeId(row)===String(itemId) && Number(row.upgrade_tier||0)===tier && !row.custom_upgrade_id && !row.reserved);
 }
 function platformGradeClass(item){if(xiStyleOf(item))return 'xi-custom-upgrade';const tier=Number(item?.upgrade_tier||0);return tier===2?'xifre-grade-neon':tier===1?'xifre-grade-gold':'';}
+// Todos los acabados usan la misma etiqueta e información de variante.
+function xiHasUpgrade(item){return !!(xiStyleOf(item)||Number(item?.upgrade_tier||0)>0);}
 function platformGradeTag(item){const style=xiStyleOf(item);if(style)return `<span class="xifre-grade-tag xi-custom-tag">${esc(style.symbol||'✦')} ${esc(style.name)}</span>`;const tier=Number(item?.upgrade_tier||0);return tier?`<span class="xifre-grade-tag">${tier===2?'✺ NEÓN':'✦ DORADO'}</span>`:'';}
 function platformItemEmojiHtml(sourceHtml){
  if(!platformEmojiCodes.size||!sourceHtml.includes(':xi_'))return sourceHtml;
@@ -3912,31 +3914,61 @@ function xiVariantName(item){
 }
 // Alpha 1.9: all visual extras are declarative and range-checked. Never execute
 // user-provided CSS, keyframes or code. The upgrade remains an inventory variant.
-const XI_EXTRA_COLORS=['#ff65d8','#ffd96b','#5eff9d','#ffe6fc'];
+// Alpha 1.10: unlimited ADD/REMOVE controls; server caps unusually large palettes
+// at 128 stops each to prevent abuse and excessive GPU work on shared clients.
+const XI_PALETTE_DEFAULT=['#7969ff','#2be7ff','#ff65d8','#ffd96b','#5eff9d','#ffe6fc'];
+const XI_PALETTE_MAX=128;
 function xiClampNumber(value,min,max,fallback){const n=Number(value);return Number.isFinite(n)?Math.min(max,Math.max(min,n)):fallback;}
+function xiPaletteClean(colors,fallback){
+ const given=Array.isArray(colors)?colors:[];
+ return (given.length>=2?given:fallback).slice(0,XI_PALETTE_MAX).map((color,index)=>xiStyleSafe(color,fallback[index%fallback.length]));
+}
+function xiGradientStops(colors,conic=false,loop=false){
+ const list=loop?[...colors,colors[0]]:colors;
+ return list.map((color,i)=>`${color} ${(i*100/Math.max(1,list.length-1)).toFixed(3)}%`).join(',');
+}
 function xiVisualFx(style={}){
  const raw=style.fx_config&&typeof style.fx_config==='object'&&!Array.isArray(style.fx_config)?style.fx_config:{};
  const a=xiStyleSafe(style.color_a),b=xiStyleSafe(style.color_b,'#2be7ff');
- const tail=Array.isArray(raw.colors)?raw.colors.slice(2,6):[];
- const count=Math.round(xiClampNumber(raw.colors_count??(tail.length?tail.length+2:2),2,6,2));
- const colors=[a,b,...Array.from({length:count-2},(_,i)=>xiStyleSafe(tail[i],XI_EXTRA_COLORS[i]))];
+ // Older Alpha 1.9 fx_config stores the number separately; preserve that data.
+ const oldCount=Math.round(xiClampNumber(raw.colors_count,2,XI_PALETTE_MAX,2));
+ const oldColors=Array.isArray(raw.colors)?raw.colors:[];
+ const colors=xiPaletteClean(oldColors.length>=2?oldColors.slice(0,Math.max(oldCount,oldColors.length)):[a,b],[a,b]);
+ const borderColors=xiPaletteClean(raw.border_colors?.length>=2?raw.border_colors:[...colors],colors);
+ const fillMode=['linear','conic'].includes(raw.fill_mode)?raw.fill_mode:'linear';
+ const borderMode=['linear','conic'].includes(raw.border_mode)?raw.border_mode:'conic';
  const duration=Math.round(xiClampNumber(raw.duration_ms,1000,20000,4000));
+ const borderDuration=Math.round(xiClampNumber(raw.border_duration_ms,1000,30000,6000));
  const driftX=xiClampNumber(raw.drift_x,-50,50,0),driftY=xiClampNumber(raw.drift_y,-50,50,-8);
  const rotation=xiClampNumber(raw.rotation,-180,180,8),scale=xiClampNumber(raw.scale,0,45,6);
  const spread=xiClampNumber(raw.spread,0,100,50);
  const easing=['linear','ease-in','ease-out','ease-in-out'].includes(raw.easing)?raw.easing:'ease-in-out';
  const direction=['normal','reverse','alternate'].includes(raw.direction)?raw.direction:'normal';
  const angle=Math.round(xiClampNumber(style.gradient_angle,0,360,135));
- const gradient=`linear-gradient(${angle}deg,${colors.map((c,i)=>`${c} ${(i*100/(colors.length-1)).toFixed(1)}%`).join(',')})`;
- return {colors,count,duration,driftX,driftY,rotation,scale,spread,easing,direction,angle,gradient};
+ const borderAngle=Math.round(xiClampNumber(raw.border_angle,0,360,0));
+ const borderAnimated=raw.border_animated!==false;
+ const gradient=fillMode==='conic'?
+   `conic-gradient(from ${angle}deg,${xiGradientStops(colors,true,true)})`:
+   `linear-gradient(${angle}deg,${xiGradientStops(colors)})`;
+ // Use CSS typed angle for smooth, seamless rotation, no 359->0 jump.
+ const borderGradient=borderMode==='conic'?
+   `conic-gradient(from calc(${borderAngle}deg + var(--xi-border-phase,0deg)),${xiGradientStops(borderColors,true,true)})`:
+   `linear-gradient(calc(${borderAngle}deg + var(--xi-border-phase,0deg)),${xiGradientStops(borderColors)})`;
+ return {colors,borderColors,fillMode,borderMode,borderAnimated,borderDuration,borderAngle,
+  count:colors.length,duration,driftX,driftY,rotation,scale,spread,easing,direction,angle,gradient,borderGradient};
 }
 function xiFxCSSVars(style){
  const fx=xiVisualFx(style),glow=xiClampNumber(style.glow,0,100,65);
  return `--xi-fx-a:${fx.colors[0]};--xi-fx-b:${fx.colors[1]};--xi-fx-glow:${(glow/100).toFixed(2)};`+
- `--xi-fx-angle:${fx.angle}deg;--xi-fx-gradient:${fx.gradient};--xi-fx-duration:${fx.duration}ms;`+
- `--xi-fx-easing:${fx.easing};--xi-fx-direction:${fx.direction};--xi-fx-drift-x:${fx.driftX}px;`+
- `--xi-fx-drift-y:${fx.driftY}px;--xi-fx-rotation:${fx.rotation}deg;--xi-fx-scale:${(1+fx.scale/100).toFixed(2)};`+
- `--xi-fx-spread:${(fx.spread/100).toFixed(2)};--xi-fx-glow-radius:${(5+fx.spread*.42).toFixed(1)}px;`;
+ `--xi-fx-angle:${fx.angle}deg;--xi-fx-gradient:${fx.gradient};--xi-fx-border-gradient:${fx.borderGradient};`+
+ `--xi-fx-border-angle:${fx.borderAngle}deg;`+
+ `--xi-fx-border-stops:${xiGradientStops(fx.borderColors,true,true)};`+
+ `--xi-fx-border-stops-linear:${xiGradientStops(fx.borderColors)};`+
+ `--xi-fx-duration:${fx.duration}ms;--xi-fx-easing:${fx.easing};--xi-fx-direction:${fx.direction};`+
+ `--xi-fx-border-duration:${fx.borderDuration}ms;--xi-fx-border-play:${fx.borderAnimated?'running':'paused'};`+
+ `--xi-fx-drift-x:${fx.driftX}px;--xi-fx-drift-y:${fx.driftY}px;--xi-fx-rotation:${fx.rotation}deg;`+
+ `--xi-fx-scale:${(1+fx.scale/100).toFixed(2)};--xi-fx-spread:${(fx.spread/100).toFixed(2)};`+
+ `--xi-fx-glow-radius:${(5+fx.spread*.42).toFixed(1)}px;`;
 }
 function xiCustomFxAttrs(item){
  const style=xiStyleOf(item);if(!style)return '';
@@ -3944,7 +3976,8 @@ function xiCustomFxAttrs(item){
  const animation=XI_ANIMATIONS.includes(style.animation)?style.animation:'none';
  const shape=['rounded','square','pill'].includes(style.card_shape)?style.card_shape:'rounded';
  const border=['solid','double','dashed','ridge'].includes(style.border_style)?style.border_style:'solid';
- return `data-xi-fx="${effect}" data-xi-motion="${animation}" data-xi-shape="${shape}" data-xi-border="${border}" style="${xiFxCSSVars(style)}"`;
+ const borderMode=xiVisualFx(style).borderMode;
+ return `data-xi-fx="${effect}" data-xi-motion="${animation}" data-xi-shape="${shape}" data-xi-border="${border}" data-xi-border-gradient="${borderMode}" style="${xiFxCSSVars(style)}"`;
 }
 function xiCustomCardClass(item){const style=xiStyleOf(item);return style?.card_size==='large'?' xi-custom-large':'';}
 function xiCustomClass(item){return xiStyleOf(item)?'xi-custom-upgrade':'';}
@@ -3981,7 +4014,7 @@ function xiAvailableRouteCopies(itemId,path){
    String(item.custom_upgrade_id||'')===String(path.source_style_id||''));
 }
 function xiSourceVariant(path){
- if(path.source_style_id)return xiCustomStyles.get(String(path.source_style_id))?.name||'Estilo personalizado';
+ if(path.source_style_id)return xiCustomStyles.get(String(path.source_style_id))?.name||'Acabado';
  return platformGradeName(Number(path.source_tier)||0);
 }
 function xiRenderUpgradePaths(item){
@@ -4037,34 +4070,75 @@ function xiPlayUpgradeReveal(style){
  veil.__hideTimer=setTimeout(()=>{veil.className='xi-custom-reveal hidden';veil.replaceChildren();veil.setAttribute('aria-hidden','true');},2400);
 }
 /* -------- Editor profesional de los estilos -------- */
+function xiPaletteRead(kind){
+ const root=$(`#xi-up-palette-${kind}`);
+ return root?[...root.querySelectorAll('input[type="color"]')].map(el=>xiStyleSafe(el.value)):[...XI_PALETTE_DEFAULT.slice(0,2)];
+}
+function xiPaletteRender(kind,colors){
+ const root=$(`#xi-up-palette-${kind}`);if(!root)return;
+ root.replaceChildren();
+ for(const [index,color] of colors.entries()){
+  const row=document.createElement('div');row.className='xi-palette-stop';
+  row.innerHTML=`<input type="color" value="${xiStyleSafe(color)}" aria-label="Color ${index+1}">`+
+    `<span class="xi-palette-index">${index+1}</span>`+
+    `<button type="button" data-xi-palette-step="-1" data-kind="${kind}" aria-label="Mover color a la izquierda" ${index===0?'disabled':''}>←</button>`+
+    `<button type="button" data-xi-palette-step="1" data-kind="${kind}" aria-label="Mover color a la derecha" ${index===colors.length-1?'disabled':''}>→</button>`+
+    `<button type="button" data-xi-palette-remove="${kind}" aria-label="Quitar color" ${colors.length<=2?'disabled':''}>×</button>`;
+  root.appendChild(row);
+ }
+ const count=$(`#xi-up-palette-${kind}-count`);if(count)count.textContent=`${colors.length} colores`;
+}
+function xiPaletteAction(button){
+ const kind=button.dataset.xiPaletteAdd||button.dataset.xiPaletteRemove||button.dataset.kind;
+ if(!['fill','border'].includes(kind))return;
+ const colors=xiPaletteRead(kind);
+ if(button.dataset.xiPaletteAdd){
+  if(colors.length>=XI_PALETTE_MAX)return toast('Límite de seguridad: 128 colores por paleta.', 'info');
+  colors.push(XI_PALETTE_DEFAULT[colors.length%XI_PALETTE_DEFAULT.length]);
+ }else if(button.hasAttribute('data-xi-palette-remove')){
+  if(colors.length<=2)return;
+  const index=[...button.parentNode.parentNode.children].indexOf(button.parentNode);
+  if(index>=0)colors.splice(index,1);
+ }else{
+  const index=[...button.parentNode.parentNode.children].indexOf(button.parentNode);
+  const next=index+Number(button.dataset.xiPaletteStep);
+  if(next>=0&&next<colors.length)[colors[index],colors[next]]=[colors[next],colors[index]];
+ }
+ xiPaletteRender(kind,colors);xiUpdateEditorPreview();
+}
 function xiStyleFormData(){
  const value=id=>String($('#xi-up-'+id)?.value||'').trim();
+ const colors=xiPaletteRead('fill'),borderColors=xiPaletteRead('border');
  return {name:value('name').slice(0,45),symbol:value('symbol').slice(0,8)||'✦',
-  color_a:xiStyleSafe(value('color-a')),color_b:xiStyleSafe(value('color-b'),'#2be7ff'),
+  color_a:colors[0],color_b:colors[1],
   effect:value('effect'),animation:value('animation'),reveal_effect:value('reveal'),
   border_style:value('border'),card_shape:value('shape'),card_size:value('size'),
   glow:Number(value('glow')),gradient_angle:Number(value('angle')),is_active:!!$('#xi-up-active')?.checked,
-  fx_config:{colors_count:Number(value('colors-count'))||2,
-   colors:['a','b','c','d','e','f'].slice(0,Number(value('colors-count'))||2).map(c=>xiStyleSafe(value('color-'+c))),
+  fx_config:{colors_count:colors.length,colors,border_colors:borderColors,
+   fill_mode:value('fill-mode'),border_mode:value('border-mode'),
+   border_animated:!!$('#xi-up-border-animated')?.checked,
+   border_duration_ms:Number(value('border-duration')),border_angle:Number(value('border-angle')),
    duration_ms:Number(value('duration'))||4000,easing:value('easing'),direction:value('direction'),
    spread:Number(value('spread')),drift_x:Number(value('drift-x')),drift_y:Number(value('drift-y')),
    rotation:Number(value('rotation')),scale:Number(value('scale'))}};
 }
 function xiFormAssign(style){
  const defaults={name:'Nueva mejora',symbol:'✦',color_a:'#7969ff',color_b:'#2be7ff',effect:'prism',animation:'pulse',reveal_effect:'forge',border_style:'solid',card_shape:'rounded',card_size:'normal',glow:65,gradient_angle:135,is_active:true};
- const d={...defaults,...(style||{})};
- const fx=xiVisualFx(d);
- for(const [key,v] of Object.entries({'name':d.name,'symbol':d.symbol,'color-a':d.color_a,'color-b':d.color_b,'effect':d.effect,'animation':d.animation,'reveal':d.reveal_effect,'border':d.border_style,'shape':d.card_shape,'size':d.card_size,'glow':d.glow,'angle':d.gradient_angle})){
+ const d={...defaults,...(style||{})},fx=xiVisualFx(d);
+ for(const [key,v] of Object.entries({'name':d.name,'symbol':d.symbol,'effect':d.effect,'animation':d.animation,
+  'reveal':d.reveal_effect,'border':d.border_style,'shape':d.card_shape,'size':d.card_size,'glow':d.glow,'angle':d.gradient_angle})){
   const el=$('#xi-up-'+key);if(el)el.value=String(v);
  }
- for(const [id,val] of Object.entries({'colors-count':fx.count,'duration':fx.duration,'easing':fx.easing,'direction':fx.direction,'spread':fx.spread,
-  'drift-x':fx.driftX,'drift-y':fx.driftY,'rotation':fx.rotation,'scale':fx.scale})){
+ for(const [id,val] of Object.entries({'duration':fx.duration,'easing':fx.easing,'direction':fx.direction,'spread':fx.spread,
+  'drift-x':fx.driftX,'drift-y':fx.driftY,'rotation':fx.rotation,'scale':fx.scale,
+  'fill-mode':fx.fillMode,'border-mode':fx.borderMode,'border-duration':fx.borderDuration,'border-angle':fx.borderAngle})){
   const el=$('#xi-up-'+id);if(el)el.value=String(val);
  }
- for(let i=2;i<6;i++){const el=$('#xi-up-color-'+['a','b','c','d','e','f'][i]);if(el)el.value=fx.colors[i]||XI_EXTRA_COLORS[i-2];}
+ if($('#xi-up-border-animated'))$('#xi-up-border-animated').checked=fx.borderAnimated;
+ xiPaletteRender('fill',fx.colors);xiPaletteRender('border',fx.borderColors);
  if($('#xi-up-active'))$('#xi-up-active').checked=d.is_active!==false;
  xiCustomEditingStyleId=style?.id||null;
- setText('xi-up-save',style?'Guardar estilo':'Crear estilo');xiUpdateEditorPreview();
+ setText('xi-up-save',style?'Guardar mejora':'Crear mejora');xiUpdateEditorPreview();
 }
 function xiRenderStyleList(){
  const host=$('#xi-up-style-list');if(!host||!isXifreAdmin)return;
@@ -4078,6 +4152,7 @@ function xiUpdateEditorPreview(){
  for(const [attr,raw,allowed] of [
   ['data-xi-fx',style.effect,XI_EFFECTS],['data-xi-motion',style.animation,XI_ANIMATIONS],
   ['data-xi-shape',style.card_shape,['rounded','square','pill']],
+  ['data-xi-border-gradient',fx.borderMode,['linear','conic']],
   ['data-xi-border',style.border_style,['solid','double','dashed','ridge']]]){
    const next=allowed.includes(raw)?raw:allowed[0];if(host.getAttribute(attr)!==next)host.setAttribute(attr,next);
  }
@@ -4091,7 +4166,9 @@ function xiUpdateEditorPreview(){
   'drift-x':fx.driftX+' px','drift-y':fx.driftY+' px','rotation':fx.rotation+'°','scale':fx.scale+'%'})){
   setText('xi-up-'+key+'-value',value);
  }
- for(const node of $$('[data-xi-extra-color]'))node.classList.toggle('hidden',Number(node.dataset.xiExtraColor)>fx.count);
+ for(const kind of ['fill','border']){const node=$(`#xi-up-palette-${kind}-count`);if(node)node.textContent=`${xiPaletteRead(kind).length} colores`;}
+ setText('xi-up-border-angle-value',fx.borderAngle+'°');
+ setText('xi-up-border-duration-value',(fx.borderDuration/1000).toFixed(2)+' s');
  const note=$('#xi-up-size-note');if(note)note.textContent=style.card_size==='large'?'Ocupará 2×2 espacios en la colección.':'Ocupa un espacio normal en la colección.';
 }
 async function xiSaveStyle(event){
@@ -4105,7 +4182,7 @@ async function xiSaveStyle(event){
   if(error)throw error;
   await xiLoadCustomCatalog(true);xiFormAssign(xiCustomStyles.get(String(result))||null);
   xiRenderStyleList();xiPopulateStyleChoices();
-  toast('Estilo de mejora guardado.','success');
+  toast('Mejora guardada.','success');
  }catch(error){toast(friendlyError(error),'error');}finally{if(button)button.disabled=false;}
 }
 function xiPopulateStyleChoices(){
@@ -4417,11 +4494,11 @@ function platformOpenItemDetails(key, source = 'collection') {
   // Applying .xi-custom-upgrade to the modal wrapper changed its stacking context
   // and backdrop. A custom grade must behave like Gold/Neon: only the item card varies.
   modal.className=`modal hidden rarity-${rarity.className} ${grade==='xi-custom-upgrade'?'xi-item-details-custom':grade}`;
-  for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border'])modal.removeAttribute(attr);
+  for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient'])modal.removeAttribute(attr);
   const dummy=document.createElement('div');dummy.innerHTML=`<span ${xiCustomFxAttrs(item)}></span>`;
   const customStyle=dummy.firstElementChild;
-  if(customStyle)for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border'])if(customStyle.hasAttribute(attr))modal.setAttribute(attr,customStyle.getAttribute(attr));
-  for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle','--xi-fx-gradient','--xi-fx-duration','--xi-fx-easing','--xi-fx-direction','--xi-fx-drift-x','--xi-fx-drift-y','--xi-fx-rotation','--xi-fx-scale','--xi-fx-spread','--xi-fx-glow-radius']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
+  if(customStyle)for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient'])if(customStyle.hasAttribute(attr))modal.setAttribute(attr,customStyle.getAttribute(attr));
+  for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle','--xi-fx-gradient','--xi-fx-duration','--xi-fx-easing','--xi-fx-direction','--xi-fx-drift-x','--xi-fx-drift-y','--xi-fx-rotation','--xi-fx-scale','--xi-fx-spread','--xi-fx-glow-radius','--xi-fx-border-gradient','--xi-fx-border-angle','--xi-fx-border-stops','--xi-fx-border-stops-linear','--xi-fx-border-duration','--xi-fx-border-play']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
   const hero = $('#item-details-hero');
   if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
@@ -4612,7 +4689,7 @@ function platformDrawItemExtras(item,source){
   }
  }
  if(upgrades){
-  upgrades.innerHTML='';upgrades.classList.add('hidden');
+  const variants=[];
   if(source==='collection' && feature.upgrade_enabled && !platformItemIsBox(item) && !item.custom_upgrade_id && Number(item.upgrade_tier)<2){
    const target=Number(item.upgrade_tier)+1;
    const needed=Number(target===1?feature.gold_required:feature.neon_required);
@@ -4620,13 +4697,15 @@ function platformDrawItemExtras(item,source){
    const resultValue=Number(target===1?feature.gold_value:feature.neon_value);
    const label=target===1?'Dorado':'Neón';
    const totalTier=platformInventoryItems.filter(x=>platformTypeId(x)===platformTypeId(item) && Number(x.upgrade_tier||0)===target-1 && !x.custom_upgrade_id).length;
-   upgrades.innerHTML=`<div class="item-upgrade-panel ${target===2?'xifre-grade-neon':'xifre-grade-gold'}"><strong>✦ Mejorar a ${label}</strong><p>Se consumen <b>${needed} copias ${target===1?'normales':'doradas'}</b> para crear <b>1 ${label}</b>. No se mezclan acabados.</p><div class="xi-upgrade-count"><span>Tienes <b>${totalTier}</b> ${target===1?'normales':'dorados'} · Libres <b>${available}</b></span><span class="${available>=needed?'xi-upgrade-ready':'xi-upgrade-missing'}">${available}/${needed} necesarios</span></div><p>Valor de la copia nueva: <b>${esc(platformFormatValue(resultValue))}</b> · La rareza original no cambia.</p><button type="button" class="inventory-primary-button" data-upgrade-item="${esc(platformTypeId(item))}" data-upgrade-target="${target}" ${available<needed?'disabled':''}>${available>=needed?'Convertir a '+label:'Faltan '+(needed-available)+' copias libres'}</button></div>`;
-   upgrades.classList.remove('hidden');
+   variants.push(`<div class="xi-route-card item-upgrade-panel ${target===2?'xifre-grade-neon':'xifre-grade-gold'}"><strong>✦ ${label}</strong><p>Se consumen <b>${needed} copias ${target===1?'normales':'doradas'}</b> para crear <b>1 ${label}</b>. No se mezclan acabados.</p><div class="xi-upgrade-count"><span>Tienes <b>${totalTier}</b> ${target===1?'normales':'dorados'} · Libres <b>${available}</b></span><span class="${available>=needed?'xi-upgrade-ready':'xi-upgrade-missing'}">${available}/${needed} necesarios</span></div><p>Valor de la copia nueva: <b>${esc(platformFormatValue(resultValue))}</b> · La rareza original no cambia.</p><button type="button" class="inventory-primary-button" data-upgrade-item="${esc(platformTypeId(item))}" data-upgrade-target="${target}" ${available<needed?'disabled':''}>${available>=needed?'Convertir a '+label:'Faltan '+(needed-available)+' copias libres'}</button></div>`);
   }
   if(source==='collection' && !platformItemIsBox(item)){
    const routes=xiRenderUpgradePaths(item);
-   if(routes){upgrades.insertAdjacentHTML('beforeend',`<div class="xi-branch-group"><h3>Mejoras personalizadas</h3><div class="xi-branch-list">${routes}</div></div>`);upgrades.classList.remove('hidden');}
+   if(routes)variants.push(routes);
   }
+  // Dorado, Neón y las demás mejoras ocupan un mismo panel de rutas.
+  upgrades.innerHTML=variants.length?`<div class="xi-upgrades-unified"><h3>Mejoras disponibles</h3><div class="xi-branch-list">${variants.join('')}</div></div>`:'';
+  upgrades.classList.toggle('hidden',!variants.length);
  }
  if(sell){
    const free=source==='collection'?platformInventoryItems.find(x=>platformGroupSignature(x)===platformGroupSignature(item)&&!x.reserved):null;
@@ -6698,7 +6777,8 @@ async function platformLoadMarket(withInventory=false) {
     const urls=await platformSignImagePaths([...all,...mine,...inv].map(x=>x.image_path));
     if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
     const img=(r)=>({...r,image_url:urls.get(r.image_path)||''});
-    await platformLoadItemFeatures();
+    await Promise.all([platformLoadItemFeatures(),xiLoadCustomCatalog()]);
+    if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
     platformMarketListings=all.map(row=>platformHydrateItem(img(row)));
     platformMarketMyListings=mine.map(row=>platformHydrateItem(img(row)));
     if(results[2])platformMarketInventory=inv.map(row=>platformHydrateItem(img(row)));
@@ -7277,6 +7357,10 @@ function platformBindEvents() {
   $('#trade-confirm-button')?.addEventListener('click', () => void platformConfirmTrade());
   $('#admin-item-form')?.addEventListener('submit', event => void platformSaveItem(event));
   $('#xi-up-form')?.addEventListener('submit',event=>void xiSaveStyle(event));
+  $('#xi-up-form')?.addEventListener('click',event=>{
+    const action=event.target.closest('[data-xi-palette-add],[data-xi-palette-remove],[data-xi-palette-step]');
+    if(action){event.preventDefault();xiPaletteAction(action);}
+  });
   $('#xi-up-form')?.addEventListener('input',xiUpdateEditorPreview);
   $('#xi-up-form')?.addEventListener('change',xiUpdateEditorPreview);
   $('#xi-up-new')?.addEventListener('click',()=>{xiFormAssign(null);xiRenderStyleList();});
