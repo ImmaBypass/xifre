@@ -3899,7 +3899,7 @@ let xiCustomCatalogReady=false;
 let xiCustomCatalogPromise=null;
 let xiCustomEditingStyleId=null;
 const XI_EFFECTS=['none','glow','prism','flame','ice','plasma','holo','galaxy','electric','aurora','sparkles','metal'];
-const XI_ANIMATIONS=['none','pulse','flow','spin','shimmer','float','flicker','breath'];
+const XI_ANIMATIONS=['none','pulse','flow','spin','shimmer','float','flicker','breath','custom'];
 const XI_REVEALS=['none','forge','portal','beam','constellation','flash','vortex'];
 const XI_HEX=/^#[\da-f]{6}$/i;
 function xiStyleOf(item){return xiCustomStyles.get(String(item?.custom_upgrade_id||''))||null;}
@@ -3910,16 +3910,41 @@ function xiVariantName(item){
  const style=xiStyleOf(item);
  return style?.name || platformGradeName(item?.upgrade_tier);
 }
+// Alpha 1.9: all visual extras are declarative and range-checked. Never execute
+// user-provided CSS, keyframes or code. The upgrade remains an inventory variant.
+const XI_EXTRA_COLORS=['#ff65d8','#ffd96b','#5eff9d','#ffe6fc'];
+function xiClampNumber(value,min,max,fallback){const n=Number(value);return Number.isFinite(n)?Math.min(max,Math.max(min,n)):fallback;}
+function xiVisualFx(style={}){
+ const raw=style.fx_config&&typeof style.fx_config==='object'&&!Array.isArray(style.fx_config)?style.fx_config:{};
+ const a=xiStyleSafe(style.color_a),b=xiStyleSafe(style.color_b,'#2be7ff');
+ const tail=Array.isArray(raw.colors)?raw.colors.slice(2,6):[];
+ const count=Math.round(xiClampNumber(raw.colors_count??(tail.length?tail.length+2:2),2,6,2));
+ const colors=[a,b,...Array.from({length:count-2},(_,i)=>xiStyleSafe(tail[i],XI_EXTRA_COLORS[i]))];
+ const duration=Math.round(xiClampNumber(raw.duration_ms,1000,20000,4000));
+ const driftX=xiClampNumber(raw.drift_x,-50,50,0),driftY=xiClampNumber(raw.drift_y,-50,50,-8);
+ const rotation=xiClampNumber(raw.rotation,-180,180,8),scale=xiClampNumber(raw.scale,0,45,6);
+ const spread=xiClampNumber(raw.spread,0,100,50);
+ const easing=['linear','ease-in','ease-out','ease-in-out'].includes(raw.easing)?raw.easing:'ease-in-out';
+ const direction=['normal','reverse','alternate'].includes(raw.direction)?raw.direction:'normal';
+ const angle=Math.round(xiClampNumber(style.gradient_angle,0,360,135));
+ const gradient=`linear-gradient(${angle}deg,${colors.map((c,i)=>`${c} ${(i*100/(colors.length-1)).toFixed(1)}%`).join(',')})`;
+ return {colors,count,duration,driftX,driftY,rotation,scale,spread,easing,direction,angle,gradient};
+}
+function xiFxCSSVars(style){
+ const fx=xiVisualFx(style),glow=xiClampNumber(style.glow,0,100,65);
+ return `--xi-fx-a:${fx.colors[0]};--xi-fx-b:${fx.colors[1]};--xi-fx-glow:${(glow/100).toFixed(2)};`+
+ `--xi-fx-angle:${fx.angle}deg;--xi-fx-gradient:${fx.gradient};--xi-fx-duration:${fx.duration}ms;`+
+ `--xi-fx-easing:${fx.easing};--xi-fx-direction:${fx.direction};--xi-fx-drift-x:${fx.driftX}px;`+
+ `--xi-fx-drift-y:${fx.driftY}px;--xi-fx-rotation:${fx.rotation}deg;--xi-fx-scale:${(1+fx.scale/100).toFixed(2)};`+
+ `--xi-fx-spread:${(fx.spread/100).toFixed(2)};--xi-fx-glow-radius:${(5+fx.spread*.42).toFixed(1)}px;`;
+}
 function xiCustomFxAttrs(item){
  const style=xiStyleOf(item);if(!style)return '';
- const a=xiStyleSafe(style.color_a),b=xiStyleSafe(style.color_b,'#2be7ff');
- const glow=Math.max(0,Math.min(100,Number(style.glow)||0));
- const angle=Math.max(0,Math.min(360,Number(style.gradient_angle)||0));
  const effect=XI_EFFECTS.includes(style.effect)?style.effect:'none';
  const animation=XI_ANIMATIONS.includes(style.animation)?style.animation:'none';
  const shape=['rounded','square','pill'].includes(style.card_shape)?style.card_shape:'rounded';
  const border=['solid','double','dashed','ridge'].includes(style.border_style)?style.border_style:'solid';
- return `data-xi-fx="${effect}" data-xi-motion="${animation}" data-xi-shape="${shape}" data-xi-border="${border}" style="--xi-fx-a:${a};--xi-fx-b:${b};--xi-fx-glow:${(glow/100).toFixed(2)};--xi-fx-angle:${angle}deg;"`;
+ return `data-xi-fx="${effect}" data-xi-motion="${animation}" data-xi-shape="${shape}" data-xi-border="${border}" style="${xiFxCSSVars(style)}"`;
 }
 function xiCustomCardClass(item){const style=xiStyleOf(item);return style?.card_size==='large'?' xi-custom-large':'';}
 function xiCustomClass(item){return xiStyleOf(item)?'xi-custom-upgrade':'';}
@@ -4005,6 +4030,7 @@ function xiPlayUpgradeReveal(style){
  veil.className=`xi-custom-reveal xi-reveal-${anim}`;
  veil.style.setProperty('--xi-fx-a',xiStyleSafe(style.color_a));
  veil.style.setProperty('--xi-fx-b',xiStyleSafe(style.color_b,'#2be7ff'));
+ veil.style.setProperty('--xi-fx-gradient',xiVisualFx(style).gradient);
  veil.innerHTML=`<div class="xi-reveal-inner"><i>${esc(style.symbol||'✦')}</i><strong>${esc(style.name)}</strong><span>¡NUEVA MEJORA!</span></div>`;
  veil.setAttribute('aria-hidden','false');
  clearTimeout(veil.__hideTimer);
@@ -4017,14 +4043,25 @@ function xiStyleFormData(){
   color_a:xiStyleSafe(value('color-a')),color_b:xiStyleSafe(value('color-b'),'#2be7ff'),
   effect:value('effect'),animation:value('animation'),reveal_effect:value('reveal'),
   border_style:value('border'),card_shape:value('shape'),card_size:value('size'),
-  glow:Number(value('glow')),gradient_angle:Number(value('angle')),is_active:!!$('#xi-up-active')?.checked};
+  glow:Number(value('glow')),gradient_angle:Number(value('angle')),is_active:!!$('#xi-up-active')?.checked,
+  fx_config:{colors_count:Number(value('colors-count'))||2,
+   colors:['a','b','c','d','e','f'].slice(0,Number(value('colors-count'))||2).map(c=>xiStyleSafe(value('color-'+c))),
+   duration_ms:Number(value('duration'))||4000,easing:value('easing'),direction:value('direction'),
+   spread:Number(value('spread')),drift_x:Number(value('drift-x')),drift_y:Number(value('drift-y')),
+   rotation:Number(value('rotation')),scale:Number(value('scale'))}};
 }
 function xiFormAssign(style){
  const defaults={name:'Nueva mejora',symbol:'✦',color_a:'#7969ff',color_b:'#2be7ff',effect:'prism',animation:'pulse',reveal_effect:'forge',border_style:'solid',card_shape:'rounded',card_size:'normal',glow:65,gradient_angle:135,is_active:true};
  const d={...defaults,...(style||{})};
+ const fx=xiVisualFx(d);
  for(const [key,v] of Object.entries({'name':d.name,'symbol':d.symbol,'color-a':d.color_a,'color-b':d.color_b,'effect':d.effect,'animation':d.animation,'reveal':d.reveal_effect,'border':d.border_style,'shape':d.card_shape,'size':d.card_size,'glow':d.glow,'angle':d.gradient_angle})){
   const el=$('#xi-up-'+key);if(el)el.value=String(v);
  }
+ for(const [id,val] of Object.entries({'colors-count':fx.count,'duration':fx.duration,'easing':fx.easing,'direction':fx.direction,'spread':fx.spread,
+  'drift-x':fx.driftX,'drift-y':fx.driftY,'rotation':fx.rotation,'scale':fx.scale})){
+  const el=$('#xi-up-'+id);if(el)el.value=String(val);
+ }
+ for(let i=2;i<6;i++){const el=$('#xi-up-color-'+['a','b','c','d','e','f'][i]);if(el)el.value=fx.colors[i]||XI_EXTRA_COLORS[i-2];}
  if($('#xi-up-active'))$('#xi-up-active').checked=d.is_active!==false;
  xiCustomEditingStyleId=style?.id||null;
  setText('xi-up-save',style?'Guardar estilo':'Crear estilo');xiUpdateEditorPreview();
@@ -4036,17 +4073,25 @@ function xiRenderStyleList(){
   <span class="xi-style-dot" style="--xi-fx-a:${xiStyleSafe(s.color_a)};--xi-fx-b:${xiStyleSafe(s.color_b,'#2be7ff')}">${esc(s.symbol)}</span><span><strong>${esc(s.name)}</strong><small>${esc(s.effect)} · ${esc(s.animation)} ${s.is_active?'':'· Desactivada'}</small></span></button>`).join(''):'<p class="admin-feature-hint">Todavía no hay estilos. Crea el primero.</p>';
 }
 function xiUpdateEditorPreview(){
- const style=xiStyleFormData();
- const host=$('#xi-up-live-card');if(!host)return;
- host.className=`xi-upgrade-card xi-custom-upgrade ${style.card_size==='large'?'xi-custom-large':''}`;
- host.setAttribute('data-xi-fx',XI_EFFECTS.includes(style.effect)?style.effect:'none');
- host.setAttribute('data-xi-motion',XI_ANIMATIONS.includes(style.animation)?style.animation:'none');
- host.setAttribute('data-xi-shape',style.card_shape);
- host.setAttribute('data-xi-border',style.border_style);
- host.style.setProperty('--xi-fx-a',style.color_a);host.style.setProperty('--xi-fx-b',style.color_b);
- host.style.setProperty('--xi-fx-glow',String(style.glow/100));host.style.setProperty('--xi-fx-angle',String(style.gradient_angle)+'deg');
- host.innerHTML=`<span class="xi-card-preview-caption">VISTA PREVIA</span><div class="xi-card-preview-art">${esc(style.symbol)}</div><strong>${esc(style.name||'Sin nombre')}</strong><small>Rareza original · Valor conceptual</small><span class="xi-card-preview-footer">✦ ${style.card_size==='large'?'TARJETA GRANDE':'ACABADO PERSONALIZADO'}</span>`;
- setText('xi-up-glow-value',String(style.glow)+'%');setText('xi-up-angle-value',String(style.gradient_angle)+'°');
+ const style=xiStyleFormData(),fx=xiVisualFx(style),host=$('#xi-up-live-card');if(!host)return;
+ host.classList.toggle('xi-custom-large',style.card_size==='large');
+ for(const [attr,raw,allowed] of [
+  ['data-xi-fx',style.effect,XI_EFFECTS],['data-xi-motion',style.animation,XI_ANIMATIONS],
+  ['data-xi-shape',style.card_shape,['rounded','square','pill']],
+  ['data-xi-border',style.border_style,['solid','double','dashed','ridge']]]){
+   const next=allowed.includes(raw)?raw:allowed[0];if(host.getAttribute(attr)!==next)host.setAttribute(attr,next);
+ }
+ // Update CSS variables, not innerHTML: the running preview animation is preserved.
+ host.style.cssText=xiFxCSSVars(style);
+ const art=host.querySelector('.xi-card-preview-art');if(art)art.textContent=style.symbol||'✦';
+ const name=host.querySelector('strong');if(name)name.textContent=style.name||'Sin nombre';
+ const footer=host.querySelector('.xi-card-preview-footer');if(footer)footer.textContent=style.card_size==='large'?'✦ TARJETA GRANDE':'✦ ACABADO PERSONALIZADO';
+ for(const [key,value] of Object.entries({'glow':style.glow+'%','angle':style.gradient_angle+'°',
+  'duration':(fx.duration/1000).toFixed(2)+' s','spread':fx.spread+'%',
+  'drift-x':fx.driftX+' px','drift-y':fx.driftY+' px','rotation':fx.rotation+'°','scale':fx.scale+'%'})){
+  setText('xi-up-'+key+'-value',value);
+ }
+ for(const node of $$('[data-xi-extra-color]'))node.classList.toggle('hidden',Number(node.dataset.xiExtraColor)>fx.count);
  const note=$('#xi-up-size-note');if(note)note.textContent=style.card_size==='large'?'Ocupará 2×2 espacios en la colección.':'Ocupa un espacio normal en la colección.';
 }
 async function xiSaveStyle(event){
@@ -4055,7 +4100,8 @@ async function xiSaveStyle(event){
  if(!data.name)return toast('Pon nombre a la mejora.','error');
  const button=$('#xi-up-save');if(button)button.disabled=true;
  try{
-  const {data:result,error}=await supabase.rpc('xifre_admin_save_upgrade_style',{p_style_id:xiCustomEditingStyleId,p_style:data});
+  // Single transaction on Supabase: base fields + advanced palette/motion together.
+  const {data:result,error}=await supabase.rpc('xifre_admin_save_upgrade_style_v19',{p_style_id:xiCustomEditingStyleId,p_style:data});
   if(error)throw error;
   await xiLoadCustomCatalog(true);xiFormAssign(xiCustomStyles.get(String(result))||null);
   xiRenderStyleList();xiPopulateStyleChoices();
@@ -4367,12 +4413,15 @@ function platformOpenItemDetails(key, source = 'collection') {
   if (!item) return toast('Ese objeto ya no está disponible.', 'info');
   const rarity = platformRarity(item);
   const modal = $('#item-details-modal');
-  modal.className = `modal hidden rarity-${rarity.className} ${platformGradeClass(item)}`;
+  const grade=platformGradeClass(item);
+  // Applying .xi-custom-upgrade to the modal wrapper changed its stacking context
+  // and backdrop. A custom grade must behave like Gold/Neon: only the item card varies.
+  modal.className=`modal hidden rarity-${rarity.className} ${grade==='xi-custom-upgrade'?'xi-item-details-custom':grade}`;
   for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border'])modal.removeAttribute(attr);
   const dummy=document.createElement('div');dummy.innerHTML=`<span ${xiCustomFxAttrs(item)}></span>`;
   const customStyle=dummy.firstElementChild;
   if(customStyle)for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border'])if(customStyle.hasAttribute(attr))modal.setAttribute(attr,customStyle.getAttribute(attr));
-  for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
+  for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle','--xi-fx-gradient','--xi-fx-duration','--xi-fx-easing','--xi-fx-direction','--xi-fx-drift-x','--xi-fx-drift-y','--xi-fx-rotation','--xi-fx-scale','--xi-fx-spread','--xi-fx-glow-radius']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
   const hero = $('#item-details-hero');
   if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
