@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261115-alpha-112">
+<link rel="stylesheet" href="style.css?v=20261115-alpha-113">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -477,7 +477,7 @@
       <p>La Plaza es un proyecto de XIFRE en desarrollo que traerá trabajos, actividades variadas y, sobre todo, mucha vida a la web. Sin embargo, un proyecto tan ambicioso necesita tiempo para implementarse, pulirse y perfeccionarse dentro de la plataforma. ¡Por ahora seguimos trabajando en ello!</p>
       <p class="xi-plaza-invitation">Mientras tanto, prueba este minijuego para ganar un poco de dinero virtual.</p>
       <button id="xi-plaza-open-game" class="xi-plaza-primary" type="button">🎮 Abrir Block Breaker</button>
-      <span class="xi-plaza-small-note">+0,01 € virtuales por ronda superada · Máximo diario: 2,00 € · Sin valor real</span>
+      <span class="xi-plaza-small-note">+0,03 € virtuales por ronda superada · Sin límite diario · Sin valor real</span>
     </div>
     <div id="xi-plaza-game" class="xi-plaza-game hidden">
       <div class="xi-plaza-game-top">
@@ -490,7 +490,7 @@
         <div id="xi-plaza-overlay" class="xi-plaza-overlay"><div class="xi-plaza-overlay-card"><strong id="xi-plaza-overlay-title">¿Preparado?</strong><p id="xi-plaza-overlay-copy">Mueve la barra con ← → o A/D. Usa Espacio para lanzar la bola.</p><button id="xi-plaza-overlay-action" type="button" class="xi-plaza-primary">Empezar partida</button></div></div>
       </div>
       <div class="xi-plaza-touch"><button type="button" id="xi-plaza-left" aria-label="Mover a la izquierda">◀</button><span>← → o A/D para mover · Espacio para lanzar · P para pausar</span><button type="button" id="xi-plaza-right" aria-label="Mover a la derecha">▶</button></div>
-      <div class="xi-plaza-footer"><span id="xi-plaza-game-message" role="status">Los premios se añaden automáticamente a tu saldo virtual.</span><span>Bloques especiales: ⇧ barra · ✚ vida · ◉ multibola · ✦ láser · ◈ ralentizar · 💥 explosión</span></div>
+      <div class="xi-plaza-footer"><span id="xi-plaza-game-message" role="status">Los premios se añaden automáticamente a tu saldo virtual.</span><span>Poderes: azul/verde = ayuda · rojo = perjudica (barra pequeña, lenta o invertida) · Máximo 3 vidas</span></div>
     </div>
   </div>
 </section>
@@ -822,7 +822,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261115-alpha-112"></script>
+<script src="app.js?v=20261115-alpha-113"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
