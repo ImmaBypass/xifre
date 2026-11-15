@@ -3158,3 +3158,92 @@ html[data-theme="light"] #item-details-modal.xi-item-details-custom #item-detail
 #item-details-upgrades .xi-branch-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,195px),1fr));gap:9px;align-items:stretch}
 #item-details-upgrades .xi-route-card.item-upgrade-panel{margin:0;min-width:0;width:100%;display:flex;flex-direction:column;gap:6px}
 #item-details-upgrades .xi-route-card .inventory-primary-button{margin-top:auto}
+
+/* XIFRE Alpha 1.11 — mejoras visuales unificadas */
+#xi-upgrade-confirm-modal{z-index:2000!important;position:fixed;inset:0;isolation:isolate;backdrop-filter:blur(11px);background:rgba(5,6,19,.78)}
+#xi-upgrade-confirm-modal .xi-upgrade-confirm-card{max-width:450px;border:1px solid #ad9df56e;border-radius:17px;background:linear-gradient(140deg,#292a40,#1b1d2c);box-shadow:0 0 0 1px #fff1,0 30px 95px #000c,0 0 75px #7976ff24;padding:27px}
+#xi-upgrade-confirm-modal .xi-upgrade-confirm-symbol{width:52px;height:52px;display:grid;place-items:center;border:1px solid #b4a1ff88;border-radius:14px;background:#7971ff21;color:#c6b5ff;font-size:29px;margin-bottom:15px}
+#xi-upgrade-confirm-modal[data-variant="gold"] .xi-upgrade-confirm-symbol{background:#e4a12633;border-color:#ffd070;color:#ffe4a3}
+#xi-upgrade-confirm-modal[data-variant="neon"] .xi-upgrade-confirm-symbol{background:#30eed033;border-color:#80fff4;color:#8ffff5}
+#xi-upgrade-confirm-modal .xi-upgrade-confirm-actions{display:flex;justify-content:end;gap:10px;margin-top:22px;flex-wrap:wrap}
+#xi-upgrade-confirm-modal .xi-upgrade-confirm-actions button{width:auto;min-height:42px;padding:0 16px}
+#xi-upgrade-confirm-modal h2{font-size:21px}
+#xi-upgrade-confirm-modal p{font-size:12px;line-height:1.6;white-space:pre-line}
+/* Advanced finish: configurable outline thickness, applied to mini cards and detail windows. */
+:is(#inventory-app-view .xifre-mini-item,#inventory-app-view .trade-offer-item,.market-listing,.market-inventory-item,.admin-asset-row,.xi-gift-picker-item,.xi-upgrade-card,.xi-route-card,.xifre-gift-card).xi-custom-upgrade::after{padding:var(--xi-border-width,2.5px)!important;}
+#item-details-modal.xi-item-details-custom .item-details-card{border-width:var(--xi-border-width,2.5px)!important}
+:is(.xi-custom-upgrade .mini-item-value,.xi-custom-upgrade .market-seller + .market-price-row strong,.xi-custom-upgrade .trade-offer-copy small,.xi-custom-upgrade .xi-gift-info small,.xi-custom-upgrade .xi-preview-value),
+#item-details-modal.xi-item-details-custom #item-details-value{
+ background-image:var(--xi-fx-value-gradient,linear-gradient(90deg,#7969ff,#2be7ff));
+ background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;color:transparent!important;
+ filter:drop-shadow(0 0 4px color-mix(in srgb,var(--xi-fx-a,#7969ff) 45%,transparent));
+}
+/* The default gold and neon never disappear in compact cards. */
+:is(.market-app .market-listing,.market-inventory-item,.shop-listing,.xi-gift-picker-item,.trade-offer-item,.admin-asset-row).xifre-grade-gold{
+ border:2px solid #ffd86d!important;
+ box-shadow:inset 0 0 20px #f5b43a66,0 0 14px #ffd46b8a,0 8px 24px #0006!important;
+ background:radial-gradient(ellipse at 40% 20%,#ffd77833,transparent 66%),linear-gradient(135deg,#463019,#242938)!important;
+}
+:is(.market-app .market-listing,.market-inventory-item,.shop-listing,.xi-gift-picker-item,.trade-offer-item,.admin-asset-row).xifre-grade-neon{
+ border:2px solid #73fff5!important;
+ box-shadow:inset 0 0 21px #64fff379,0 0 16px #48f8efad,0 0 30px #5f7aff55!important;
+ background:radial-gradient(ellipse at 40% 20%,#4fffe938,transparent 67%),linear-gradient(135deg,#143744,#242537)!important;
+}
+:is(.market-listing,.market-inventory-item,.shop-listing).xifre-grade-gold img{filter:drop-shadow(0 0 13px #f7bf50c9)!important}
+:is(.market-listing,.market-inventory-item,.shop-listing).xifre-grade-neon img{filter:drop-shadow(0 0 14px #4ef9efda)!important}
+/* Standard finish plaque, optional per style, stays bottom-left. */
+:is(.market-listing,.market-inventory-item,#inventory-app-view .xifre-mini-item,.xi-gift-picker-item,.trade-offer-item,.admin-asset-row).xi-custom-upgrade > .xifre-grade-tag.xi-grade-plate{
+ position:absolute!important;top:auto!important;bottom:5px!important;left:7px!important;
+ display:inline-block!important;width:max-content!important;max-width:calc(100% - 14px)!important;
+ padding:2px 6px!important;border:1px solid color-mix(in srgb,var(--xi-fx-b) 80%,white)!important;
+ border-radius:5px!important;background:var(--xi-fx-gradient)!important;
+ color:#fff!important;text-shadow:0 1px 3px #000b!important;
+ box-shadow:0 0 10px color-mix(in srgb,var(--xi-fx-a) 42%,transparent)!important;
+}
+:is(.market-listing,.market-inventory-item,#inventory-app-view .xifre-mini-item,.xi-gift-picker-item,.trade-offer-item,.admin-asset-row).xi-custom-upgrade > .xifre-grade-tag.xi-grade-no-plate{
+ padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;
+}
+#xi-up-live-card[data-xi-plate="on"] strong{display:inline-block;width:fit-content;max-width:100%;padding:4px 9px;border-radius:6px;background:var(--xi-fx-gradient);border:1px solid var(--xi-fx-b);text-shadow:0 1px 5px #000c}
+#xi-up-live-card .xi-preview-value{font-weight:900;font-size:12px;display:inline-block}
+#xi-up-value-builder{grid-column:1/-1}
+#xi-up-value-builder.hidden{display:none!important}
+/* Preset reveals: dedicated celebration visual for gold and neon. */
+.xi-custom-reveal:has(.xi-reveal-inner strong){will-change:opacity}
+.xi-custom-reveal:has(.xi-reveal-inner i) .xi-reveal-inner i{transform-origin:center}
+.xi-reveal-forge .xi-reveal-inner i{animation:xiPresetForge 1.45s cubic-bezier(.18,.82,.12,1) both}
+@keyframes xiPresetForge{0%{opacity:0;transform:scale(.15) rotate(-38deg);filter:brightness(2)}45%{opacity:1;transform:scale(1.23) rotate(6deg);filter:brightness(2.3)}73%{transform:scale(.96);filter:brightness(1.15)}100%{transform:scale(1);filter:brightness(1)}}
+@media (prefers-reduced-motion:reduce){.xi-reveal-forge .xi-reveal-inner i{animation:none!important}#xi-upgrade-confirm-modal .modal-card{animation:none!important}}
+
+/* Alpha 1.11 · Celebraciones propias, sin alterar el objeto real */
+#xi-custom-reveal[data-preset="gold"]{
+ background:radial-gradient(circle at 50% 45%,#ffdf7a5e 0,#a8582163 29%,#070713de 74%)!important;
+}
+#xi-custom-reveal[data-preset="gold"] .xi-reveal-inner i{
+ color:#ffdf70;border:3px double #fff0b0;
+ background:radial-gradient(circle,#fff6bf50,#ffc43308 60%,transparent 70%);
+ box-shadow:0 0 18px #ffe189,0 0 70px #f6bc48ab,inset 0 0 32px #ffe6a47a;
+ text-shadow:0 0 28px #fff1ad,0 0 60px #e9a931;
+}
+#xi-custom-reveal[data-preset="gold"] .xi-reveal-inner::after{
+ content:'✦　✧　✦　✧　✦';position:absolute;left:50%;top:50%;width:max-content;
+ transform:translate(-50%,-50%);color:#fff1a3;text-shadow:0 0 20px #ffd14d;
+ letter-spacing:10px;font-size:24px;animation:xiGoldSparkle 2.2s ease-out both;pointer-events:none;
+}
+#xi-custom-reveal[data-preset="neon"]{
+ background:radial-gradient(circle at 50% 45%,#3bfbea48 0,#4932ab74 37%,#060b19e8 78%)!important;
+}
+#xi-custom-reveal[data-preset="neon"] .xi-reveal-inner i{
+ border:3px solid #82fff6;color:#9dfff6;
+ box-shadow:0 0 18px #39f5ff,0 0 58px #66b6ff,inset 0 0 36px #725dff;
+ text-shadow:0 0 22px #50fff3,0 0 43px #9290ff;
+ animation:xiNeonArrival 2s ease-out both!important;
+}
+#xi-custom-reveal[data-preset="neon"] .xi-reveal-inner::after{
+ content:'';position:absolute;width:215px;height:215px;border:2px dashed #86fff9;
+ border-radius:50%;box-shadow:0 0 24px #48fff4,inset 0 0 18px #6e67ff;
+ opacity:0;animation:xiNeonRing 2.1s ease-out both;pointer-events:none;
+}
+@keyframes xiGoldSparkle{0%,5%{opacity:0;transform:translate(-50%,-50%) scale(.4) rotate(-25deg)}40%{opacity:1;transform:translate(-50%,-50%) scale(1.25) rotate(8deg)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.3) rotate(24deg)}}
+@keyframes xiNeonArrival{0%{opacity:0;transform:scale(.15) rotate(-180deg);filter:brightness(2)}47%{opacity:1;transform:scale(1.18) rotate(16deg);filter:brightness(1.6)}100%{transform:scale(1) rotate(0);filter:brightness(1)}}
+@keyframes xiNeonRing{5%{opacity:0;transform:scale(.3) rotate(20deg)}42%{opacity:.95;transform:scale(1) rotate(-10deg)}100%{opacity:0;transform:scale(1.65) rotate(-75deg)}}
+@media(prefers-reduced-motion:reduce){#xi-custom-reveal[data-preset] .xi-reveal-inner::after,#xi-custom-reveal[data-preset] .xi-reveal-inner i{animation:none!important}}
