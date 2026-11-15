@@ -3837,15 +3837,18 @@ function platformHydrateItem(row) {
   const typeId=platformTypeId(row);
   const definition=platformItemDefinitions.get(typeId)||{};
   const instance=platformInstanceFeatures.get(platformItemKey(row))||{};
-  const tier=Number(instance.upgrade_tier ?? row.upgrade_tier ?? 0);
-  const customId=String(row.custom_upgrade_id||xiCustomInstanceStyles.get(platformItemKey(row))||'');
+  const isListing=Object.prototype.hasOwnProperty.call(row,'status') && Object.prototype.hasOwnProperty.call(row,'price_cents');
+  const tier=Number(isListing ? (row.upgrade_tier??0) : (instance.upgrade_tier ?? row.upgrade_tier ?? 0));
+  const customId=String(row.custom_upgrade_id||(isListing?'':xiCustomInstanceStyles.get(platformItemKey(row)))||'');
   const value=Number(customId ? (xiCustomRoute(typeId,customId)?.target_value ?? row.value ?? definition.value ?? 0) :
     tier===1 ? (definition.gold_value ?? row.value ?? 0) : tier===2 ? (definition.neon_value ?? row.value ?? 0) : (definition.value ?? row.value ?? 0));
   // La definición del tipo puede no tener URL (las imágenes solo se firman
   // previamente para los objetos configurados como emoji). No permitir que
   // ese valor vacío sobrescriba la URL firmada de esta copia del inventario.
   const {id:ignored,image_url:definitionImageUrl,...features}=definition;
-  return xiCustomApplyHydration({...row,...features,upgrade_tier:tier,value,base_value:Number(definition.value ?? row.value ?? 0),
+  // Ofertas cerradas: usar SIEMPRE los datos congelados al publicarlas.
+  const historicalValue=isListing && row.finish_snapshot_recorded && row.snapshot_value!=null ? Number(row.snapshot_value) : value;
+  return xiCustomApplyHydration({...row,...features,upgrade_tier:tier,value:historicalValue,base_value:Number(definition.value ?? row.value ?? 0),
     image_url:row.image_url || definitionImageUrl || '',
     reserved:Boolean(row.reserved||instance.gift_reserved),gift_reserved:Boolean(instance.gift_reserved),
     instant_sell_cents:Number(row.instant_sell_cents ?? definition.instant_sell_cents ?? 1)});
@@ -3880,7 +3883,7 @@ function platformAvailableCopies(itemId,tier){
 function platformGradeClass(item){if(xiStyleOf(item))return 'xi-custom-upgrade';const tier=Number(item?.upgrade_tier||0);return tier===2?'xifre-grade-neon':tier===1?'xifre-grade-gold':'';}
 // Todos los acabados usan la misma etiqueta e información de variante.
 function xiHasUpgrade(item){return !!(xiStyleOf(item)||Number(item?.upgrade_tier||0)>0);}
-function platformGradeTag(item){const style=xiStyleOf(item);if(style)return `<span class="xifre-grade-tag xi-custom-tag">${esc(style.symbol||'✦')} ${esc(style.name)}</span>`;const tier=Number(item?.upgrade_tier||0);return tier?`<span class="xifre-grade-tag">${tier===2?'✺ NEÓN':'✦ DORADO'}</span>`:'';}
+function platformGradeTag(item){ const style=xiStyleOf(item);if(style){const plate=xiVisualFx(style).labelPlate;return `<span class="xifre-grade-tag xi-custom-tag ${plate?'xi-grade-plate':'xi-grade-no-plate'}">${esc(style.symbol||'✦')} ${esc(item?.finish_snapshot_name||style.name)}</span>`;}const tier=Number(item?.upgrade_tier||0);return tier?`<span class="xifre-grade-tag">${tier===2?'✺ NEÓN':'✦ DORADO'}</span>`:'';}
 function platformItemEmojiHtml(sourceHtml){
  if(!platformEmojiCodes.size||!sourceHtml.includes(':xi_'))return sourceHtml;
  return sourceHtml.replace(/(^|>)([^<]*)(?=<|$)/g,(part,prefix,text)=>prefix+text.replace(/:xi_([a-z][a-z0-9_]{1,25}):/gi,(token,code)=>{
@@ -3904,13 +3907,17 @@ const XI_EFFECTS=['none','glow','prism','flame','ice','plasma','holo','galaxy','
 const XI_ANIMATIONS=['none','pulse','flow','spin','shimmer','float','flicker','breath','custom'];
 const XI_REVEALS=['none','forge','portal','beam','constellation','flash','vortex'];
 const XI_HEX=/^#[\da-f]{6}$/i;
-function xiStyleOf(item){return xiCustomStyles.get(String(item?.custom_upgrade_id||''))||null;}
+function xiStyleOf(item){
+ if(item?.finish_snapshot_recorded && item?.finish_snapshot && typeof item.finish_snapshot==='object' && item.finish_snapshot.id===item.custom_upgrade_id)return item.finish_snapshot;
+ return xiCustomStyles.get(String(item?.custom_upgrade_id||''))||null;
+}
 function xiStyleSafe(value,defaultValue='#7969ff'){return XI_HEX.test(String(value||''))?String(value):defaultValue;}
 function xiCustomRoute(itemId,toId){return (xiCustomPaths.get(String(itemId))||[]).find(p=>String(p.target_style_id)===String(toId));}
 function xiVariantName(item){
  if(typeof item==='number')return platformGradeName(item);
  const style=xiStyleOf(item);
- return style?.name || platformGradeName(item?.upgrade_tier);
+ if(item?.finish_snapshot_missing)return 'Acabado no registrado';
+ return item?.finish_snapshot_name || style?.name || platformGradeName(item?.upgrade_tier);
 }
 // Alpha 1.9: all visual extras are declarative and range-checked. Never execute
 // user-provided CSS, keyframes or code. The upgrade remains an inventory variant.
@@ -3947,6 +3954,10 @@ function xiVisualFx(style={}){
  const angle=Math.round(xiClampNumber(style.gradient_angle,0,360,135));
  const borderAngle=Math.round(xiClampNumber(raw.border_angle,0,360,0));
  const borderAnimated=raw.border_animated!==false;
+ const borderWidth=xiClampNumber(raw.border_width,1,10,2.5);
+ const labelPlate=raw.label_plate!==false;
+ const hasValuePalette=Array.isArray(raw.value_colors)&&raw.value_colors.length>=2;
+ const valueColors=hasValuePalette?xiPaletteClean(raw.value_colors,borderColors):borderColors;
  const gradient=fillMode==='conic'?
    `conic-gradient(from ${angle}deg,${xiGradientStops(colors,true,true)})`:
    `linear-gradient(${angle}deg,${xiGradientStops(colors)})`;
@@ -3954,7 +3965,7 @@ function xiVisualFx(style={}){
  const borderGradient=borderMode==='conic'?
    `conic-gradient(from calc(${borderAngle}deg + var(--xi-border-phase,0deg)),${xiGradientStops(borderColors,true,true)})`:
    `linear-gradient(calc(${borderAngle}deg + var(--xi-border-phase,0deg)),${xiGradientStops(borderColors)})`;
- return {colors,borderColors,fillMode,borderMode,borderAnimated,borderDuration,borderAngle,
+ return {colors,borderColors,valueColors,hasValuePalette,borderWidth,labelPlate,fillMode,borderMode,borderAnimated,borderDuration,borderAngle,
   count:colors.length,duration,driftX,driftY,rotation,scale,spread,easing,direction,angle,gradient,borderGradient};
 }
 function xiFxCSSVars(style){
@@ -3966,6 +3977,7 @@ function xiFxCSSVars(style){
  `--xi-fx-border-stops-linear:${xiGradientStops(fx.borderColors)};`+
  `--xi-fx-duration:${fx.duration}ms;--xi-fx-easing:${fx.easing};--xi-fx-direction:${fx.direction};`+
  `--xi-fx-border-duration:${fx.borderDuration}ms;--xi-fx-border-play:${fx.borderAnimated?'running':'paused'};`+
+ `--xi-border-width:${fx.borderWidth}px;--xi-fx-value-gradient:linear-gradient(90deg,${xiGradientStops(fx.valueColors)});`+
  `--xi-fx-drift-x:${fx.driftX}px;--xi-fx-drift-y:${fx.driftY}px;--xi-fx-rotation:${fx.rotation}deg;`+
  `--xi-fx-scale:${(1+fx.scale/100).toFixed(2)};--xi-fx-spread:${(fx.spread/100).toFixed(2)};`+
  `--xi-fx-glow-radius:${(5+fx.spread*.42).toFixed(1)}px;`;
@@ -3977,7 +3989,7 @@ function xiCustomFxAttrs(item){
  const shape=['rounded','square','pill'].includes(style.card_shape)?style.card_shape:'rounded';
  const border=['solid','double','dashed','ridge'].includes(style.border_style)?style.border_style:'solid';
  const borderMode=xiVisualFx(style).borderMode;
- return `data-xi-fx="${effect}" data-xi-motion="${animation}" data-xi-shape="${shape}" data-xi-border="${border}" data-xi-border-gradient="${borderMode}" style="${xiFxCSSVars(style)}"`;
+ return `data-xi-fx="${effect}" data-xi-motion="${animation}" data-xi-shape="${shape}" data-xi-border="${border}" data-xi-border-gradient="${borderMode}" data-xi-plate="${xiVisualFx(style).labelPlate?'on':'off'}" style="${xiFxCSSVars(style)}"`;
 }
 function xiCustomCardClass(item){const style=xiStyleOf(item);return style?.card_size==='large'?' xi-custom-large':'';}
 function xiCustomClass(item){return xiStyleOf(item)?'xi-custom-upgrade':'';}
@@ -4001,12 +4013,13 @@ async function xiLoadCustomCatalog(force=false){
 }
 function xiCustomApplyHydration(row){
  const instanceId=platformItemKey(row);
- const styleId=String(row.custom_upgrade_id||xiCustomInstanceStyles.get(instanceId)||'');
+ const isListing=Object.prototype.hasOwnProperty.call(row,'status') && Object.prototype.hasOwnProperty.call(row,'price_cents');
+ const styleId=String(row.custom_upgrade_id || (isListing?'':xiCustomInstanceStyles.get(instanceId)) || '');
  const route=xiCustomRoute(platformTypeId(row),styleId);
- return styleId&&xiCustomStyles.has(styleId)?{
-  ...row,custom_upgrade_id:styleId,upgrade_tier:0,
-  value:Number(route?.target_value??row.value??0)
- }:row;
+ if(!styleId || !(xiCustomStyles.has(styleId)||row.finish_snapshot))return row;
+ // Los anuncios congelados no vuelven a calcularse con la ruta actual.
+ return {...row,custom_upgrade_id:styleId,upgrade_tier:0,
+  value:Number(isListing&&row.finish_snapshot_recorded ? (row.snapshot_value??row.value??0) : (route?.target_value??row.value??0))};
 }
 function xiAvailableRouteCopies(itemId,path){
  return platformInventoryItems.filter(item=>platformTypeId(item)===String(itemId) && !item.reserved &&
@@ -4036,12 +4049,48 @@ function xiRenderUpgradePaths(item){
    </div>`;
   }).join('');
 }
+// El diálogo de upgrades se monta por encima de TODAS las fichas y ventanas.
+let xiUpgradeConfirmPending=false;
+function xiAskUpgradeConfirm(title,description,variant='custom'){
+ const modal=$('#xi-upgrade-confirm-modal');
+ if(!modal || xiUpgradeConfirmPending)return Promise.resolve(false);
+ xiUpgradeConfirmPending=true;
+ const titleEl=$('#xi-upgrade-confirm-title'),textEl=$('#xi-upgrade-confirm-text');
+ if(titleEl)titleEl.textContent=title;
+ if(textEl)textEl.textContent=description;
+ modal.dataset.variant=['gold','neon','custom'].includes(variant)?variant:'custom';
+ modal.classList.remove('hidden');
+ const accept=$('#xi-upgrade-confirm-yes'),cancel=$('#xi-upgrade-confirm-no');
+ const prior=document.activeElement;
+ return new Promise(resolve=>{
+  let finished=false;
+  const done=(value)=>{
+   if(finished)return;finished=true;xiUpgradeConfirmPending=false;
+   accept?.removeEventListener('click',onYes);cancel?.removeEventListener('click',onNo);
+   document.removeEventListener('keydown',onKey,true);
+   modal.classList.add('hidden');
+   if(prior?.isConnected)prior.focus({preventScroll:true});
+   resolve(value);
+  };
+  const onYes=()=>done(true),onNo=()=>done(false);
+  const onKey=(ev)=>{
+   if(ev.key==='Escape'){ev.preventDefault();ev.stopPropagation();done(false);}
+   if(ev.key==='Tab'){
+    const target=ev.shiftKey?cancel:accept;
+    if(target){ev.preventDefault();target.focus({preventScroll:true});}
+   }
+  };
+  accept?.addEventListener('click',onYes,{once:true});cancel?.addEventListener('click',onNo,{once:true});
+  document.addEventListener('keydown',onKey,true);
+  accept?.focus({preventScroll:true});
+ });
+}
 async function xiDoCustomUpgrade(itemId,targetId){
  const route=xiCustomRoute(itemId,targetId),style=xiCustomStyles.get(String(targetId));
  if(!route||!style)return;
  const ready=xiAvailableRouteCopies(itemId,route).length>=Number(route.copies_required);
  if(!ready)return toast('No tienes las copias necesarias del mismo acabado.', 'info');
- const yes=await askConfirm('Crear '+style.name,`Se consumirán ${route.copies_required} copias de ${xiSourceVariant(route)}. Obtendrás una de ${style.name}, valor ${platformFormatValue(route.target_value)}. ¿Continuar?`,'Confirmar mejora');
+ const yes=await xiAskUpgradeConfirm('Crear '+style.name,`Se consumirán ${route.copies_required} copias de ${xiSourceVariant(route)}. Obtendrás una de ${style.name}, valor ${platformFormatValue(route.target_value)}. Esta operación no se puede deshacer.`);
  if(!yes)return;
  const btn=$(`[data-xi-custom-upgrade="${CSS.escape(String(targetId))}"]`);if(btn)btn.disabled=true;
  try{
@@ -4061,6 +4110,7 @@ function xiPlayUpgradeReveal(style){
  const veil=$('#xi-custom-reveal');if(!veil)return;
  const anim=XI_REVEALS.includes(style.reveal_effect)?style.reveal_effect:'forge';
  veil.className=`xi-custom-reveal xi-reveal-${anim}`;
+ if(['gold','neon'].includes(style.preset))veil.dataset.preset=style.preset;else veil.removeAttribute('data-preset');
  veil.style.setProperty('--xi-fx-a',xiStyleSafe(style.color_a));
  veil.style.setProperty('--xi-fx-b',xiStyleSafe(style.color_b,'#2be7ff'));
  veil.style.setProperty('--xi-fx-gradient',xiVisualFx(style).gradient);
@@ -4088,9 +4138,20 @@ function xiPaletteRender(kind,colors){
  }
  const count=$(`#xi-up-palette-${kind}-count`);if(count)count.textContent=`${colors.length} colores`;
 }
+function xiUpdateValuePaletteVisibility(){
+ const checked=!!$('#xi-up-value-custom')?.checked;
+ $('#xi-up-value-builder')?.classList.toggle('hidden',!checked);
+ xiUpdateEditorPreviewValue();
+}
+function xiUpdateEditorPreviewValue(){
+ const host=$('#xi-up-live-card');if(!host)return;
+ const fx=xiVisualFx(xiStyleFormData());
+ const el=host.querySelector('.xi-preview-value');
+ if(el)el.style.setProperty('--xi-fx-value-gradient',`linear-gradient(90deg,${xiGradientStops(fx.valueColors)})`);
+}
 function xiPaletteAction(button){
  const kind=button.dataset.xiPaletteAdd||button.dataset.xiPaletteRemove||button.dataset.kind;
- if(!['fill','border'].includes(kind))return;
+ if(!['fill','border','value'].includes(kind))return;
  const colors=xiPaletteRead(kind);
  if(button.dataset.xiPaletteAdd){
   if(colors.length>=XI_PALETTE_MAX)return toast('Límite de seguridad: 128 colores por paleta.', 'info');
@@ -4118,6 +4179,8 @@ function xiStyleFormData(){
    fill_mode:value('fill-mode'),border_mode:value('border-mode'),
    border_animated:!!$('#xi-up-border-animated')?.checked,
    border_duration_ms:Number(value('border-duration')),border_angle:Number(value('border-angle')),
+   border_width:Number(value('border-width')),label_plate:!!$('#xi-up-label-plate')?.checked,
+   value_colors:$('#xi-up-value-custom')?.checked?xiPaletteRead('value'):null,
    duration_ms:Number(value('duration'))||4000,easing:value('easing'),direction:value('direction'),
    spread:Number(value('spread')),drift_x:Number(value('drift-x')),drift_y:Number(value('drift-y')),
    rotation:Number(value('rotation')),scale:Number(value('scale'))}};
@@ -4129,13 +4192,16 @@ function xiFormAssign(style){
   'reveal':d.reveal_effect,'border':d.border_style,'shape':d.card_shape,'size':d.card_size,'glow':d.glow,'angle':d.gradient_angle})){
   const el=$('#xi-up-'+key);if(el)el.value=String(v);
  }
- for(const [id,val] of Object.entries({'duration':fx.duration,'easing':fx.easing,'direction':fx.direction,'spread':fx.spread,
+ for(const [id,val] of Object.entries({'border-width':fx.borderWidth,'duration':fx.duration,'easing':fx.easing,'direction':fx.direction,'spread':fx.spread,
   'drift-x':fx.driftX,'drift-y':fx.driftY,'rotation':fx.rotation,'scale':fx.scale,
   'fill-mode':fx.fillMode,'border-mode':fx.borderMode,'border-duration':fx.borderDuration,'border-angle':fx.borderAngle})){
   const el=$('#xi-up-'+id);if(el)el.value=String(val);
  }
  if($('#xi-up-border-animated'))$('#xi-up-border-animated').checked=fx.borderAnimated;
- xiPaletteRender('fill',fx.colors);xiPaletteRender('border',fx.borderColors);
+ if($('#xi-up-label-plate'))$('#xi-up-label-plate').checked=fx.labelPlate;
+ if($('#xi-up-value-custom'))$('#xi-up-value-custom').checked=fx.hasValuePalette;
+ xiPaletteRender('fill',fx.colors);xiPaletteRender('border',fx.borderColors);xiPaletteRender('value',fx.valueColors);
+ xiUpdateValuePaletteVisibility();
  if($('#xi-up-active'))$('#xi-up-active').checked=d.is_active!==false;
  xiCustomEditingStyleId=style?.id||null;
  setText('xi-up-save',style?'Guardar mejora':'Crear mejora');xiUpdateEditorPreview();
@@ -4148,6 +4214,7 @@ function xiRenderStyleList(){
 }
 function xiUpdateEditorPreview(){
  const style=xiStyleFormData(),fx=xiVisualFx(style),host=$('#xi-up-live-card');if(!host)return;
+ host.dataset.xiPlate=fx.labelPlate?'on':'off';
  host.classList.toggle('xi-custom-large',style.card_size==='large');
  for(const [attr,raw,allowed] of [
   ['data-xi-fx',style.effect,XI_EFFECTS],['data-xi-motion',style.animation,XI_ANIMATIONS],
@@ -4159,14 +4226,15 @@ function xiUpdateEditorPreview(){
  // Update CSS variables, not innerHTML: the running preview animation is preserved.
  host.style.cssText=xiFxCSSVars(style);
  const art=host.querySelector('.xi-card-preview-art');if(art)art.textContent=style.symbol||'✦';
+ const previewValue=host.querySelector('.xi-preview-value');if(previewValue)previewValue.style.backgroundImage=`linear-gradient(90deg,${xiGradientStops(fx.valueColors)})`;
  const name=host.querySelector('strong');if(name)name.textContent=style.name||'Sin nombre';
  const footer=host.querySelector('.xi-card-preview-footer');if(footer)footer.textContent=style.card_size==='large'?'✦ TARJETA GRANDE':'✦ ACABADO PERSONALIZADO';
  for(const [key,value] of Object.entries({'glow':style.glow+'%','angle':style.gradient_angle+'°',
-  'duration':(fx.duration/1000).toFixed(2)+' s','spread':fx.spread+'%',
+  'duration':(fx.duration/1000).toFixed(2)+' s','border-width':fx.borderWidth.toFixed(1)+' px','spread':fx.spread+'%',
   'drift-x':fx.driftX+' px','drift-y':fx.driftY+' px','rotation':fx.rotation+'°','scale':fx.scale+'%'})){
   setText('xi-up-'+key+'-value',value);
  }
- for(const kind of ['fill','border']){const node=$(`#xi-up-palette-${kind}-count`);if(node)node.textContent=`${xiPaletteRead(kind).length} colores`;}
+ for(const kind of ['fill','border','value']){const node=$(`#xi-up-palette-${kind}-count`);if(node)node.textContent=`${xiPaletteRead(kind).length} colores`;}
  setText('xi-up-border-angle-value',fx.borderAngle+'°');
  setText('xi-up-border-duration-value',(fx.borderDuration/1000).toFixed(2)+' s');
  const note=$('#xi-up-size-note');if(note)note.textContent=style.card_size==='large'?'Ocupará 2×2 espacios en la colección.':'Ocupa un espacio normal en la colección.';
@@ -4494,11 +4562,11 @@ function platformOpenItemDetails(key, source = 'collection') {
   // Applying .xi-custom-upgrade to the modal wrapper changed its stacking context
   // and backdrop. A custom grade must behave like Gold/Neon: only the item card varies.
   modal.className=`modal hidden rarity-${rarity.className} ${grade==='xi-custom-upgrade'?'xi-item-details-custom':grade}`;
-  for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient'])modal.removeAttribute(attr);
+  for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient','data-xi-plate'])modal.removeAttribute(attr);
   const dummy=document.createElement('div');dummy.innerHTML=`<span ${xiCustomFxAttrs(item)}></span>`;
   const customStyle=dummy.firstElementChild;
-  if(customStyle)for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient'])if(customStyle.hasAttribute(attr))modal.setAttribute(attr,customStyle.getAttribute(attr));
-  for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle','--xi-fx-gradient','--xi-fx-duration','--xi-fx-easing','--xi-fx-direction','--xi-fx-drift-x','--xi-fx-drift-y','--xi-fx-rotation','--xi-fx-scale','--xi-fx-spread','--xi-fx-glow-radius','--xi-fx-border-gradient','--xi-fx-border-angle','--xi-fx-border-stops','--xi-fx-border-stops-linear','--xi-fx-border-duration','--xi-fx-border-play']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
+  if(customStyle)for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient','data-xi-plate'])if(customStyle.hasAttribute(attr))modal.setAttribute(attr,customStyle.getAttribute(attr));
+  for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle','--xi-fx-gradient','--xi-fx-duration','--xi-fx-easing','--xi-fx-direction','--xi-fx-drift-x','--xi-fx-drift-y','--xi-fx-rotation','--xi-fx-scale','--xi-fx-spread','--xi-fx-glow-radius','--xi-fx-border-gradient','--xi-fx-border-angle','--xi-fx-border-stops','--xi-fx-border-stops-linear','--xi-fx-border-duration','--xi-fx-border-play','--xi-border-width','--xi-fx-value-gradient']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
   const hero = $('#item-details-hero');
   if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
@@ -4721,7 +4789,7 @@ async function platformUpgradeItem(itemId,tier){
  const available=platformAvailableCopies(itemId,Number(tier)-1).length;
  if(available<required)return toast('No tienes suficientes copias libres.','info');
  const target=platformGradeName(tier);
- const confirmed=await askConfirm(`Mejora ${target}`,`Se utilizarán ${required} copias ${tier===1?'normales':'doradas'} de ${definition.name} para crear 1 copia ${target}. No se puede deshacer.`, 'Confirmar mejora');
+ const confirmed=await xiAskUpgradeConfirm(`Mejora ${target}`,`Se utilizarán ${required} copias ${tier===1?'normales':'doradas'} de ${definition.name} para crear 1 copia ${target}. No se puede deshacer.`,tier===1?'gold':'neon');
  if(!confirmed)return;
  const button=$(`[data-upgrade-item="${CSS.escape(String(itemId))}"]`);
  if(button?.disabled)return; if(button)button.disabled=true;
@@ -4732,6 +4800,9 @@ async function platformUpgradeItem(itemId,tier){
   await platformLoadItemFeatures(true);
   await Promise.all([platformRefreshInventory(),platformLoadMarket(true)]);
   toast(`¡${definition.name} mejorado a ${target}! Valor: ${platformFormatValue(data?.value)}.`, 'success');
+  xiPlayUpgradeReveal(tier===1?
+   {preset:'gold',name:'DORADO',symbol:'✦',color_a:'#ffc135',color_b:'#fff1a3',reveal_effect:'forge',fx_config:{colors:['#ffc135','#fff1a3']}}:
+   {preset:'neon',name:'NEÓN',symbol:'✺',color_a:'#34fdeb',color_b:'#b47aff',reveal_effect:'portal',fx_config:{colors:['#34fdeb','#b47aff']}});
  }catch(error){toast(friendlyError(error),'error');if(button)button.disabled=false;}
 }
 function platformPopulateOriginBoxSelect(){
@@ -6363,7 +6434,7 @@ function platformShopListingMarkup(listing, featured = false) {
   const disabled=!listing.active || !listing.item_active || listing.stock===0;
   const price=platformMoney(listing.price_cents);
   const theme=['indigo','gold','rose','cyan','green','violet'].includes(listing.theme)?listing.theme:'indigo';
-  return `<article class="shop-listing rarity-${esc(rarity.className)} shop-theme-${esc(theme)} ${featured?'shop-listing-featured':listing.placement==='special'?'shop-listing-special':''} ${listing.glow?'shop-listing-glow':''} ${disabled?'shop-listing-disabled':''}">
+  return `<article class="shop-listing rarity-${esc(rarity.className)} ${platformGradeClass(listing)} shop-theme-${esc(theme)} ${featured?'shop-listing-featured':listing.placement==='special'?'shop-listing-special':''} ${listing.glow?'shop-listing-glow':''} ${disabled?'shop-listing-disabled':''}" ${xiCustomFxAttrs(listing)}>${platformGradeTag(listing)}
     <div class="shop-listing-visual"><span class="shop-listing-rings"></span>${listing.badge_text?`<span class="shop-listing-badge">${esc(listing.badge_text)}</span>`:''}
       ${listing.is_box?'<span class="shop-listing-box-mark">✦ CAJA SORPRESA</span>':''}
       <div class="shop-listing-image">${platformImageMarkup(listing.image_url,listing.name)}</div>
@@ -6808,7 +6879,7 @@ function platformMarketListingHTML(listing,{mine=false}={}) {
     <div class="market-art">${platformImageMarkup(listing.image_url,listing.name)}</div>
     <span class="market-rarity">${esc(rarity.label.toUpperCase())}</span>
     <h3 title="${esc(listing.name)}">${esc(listing.name)}</h3>
-    <small class="market-seller">${mine?`Estado: ${esc(status==='active'?'En venta':status==='sold'?'Vendida':'Cancelada')}`:`Vendedor: @${esc(listing.seller_name||'Usuario')}`}</small>
+    <small class="market-seller">${mine?`Estado: ${esc(status==='active'?'En venta':status==='sold'?'Vendida':'Cancelada')}`:`Vendedor: @${esc(listing.seller_name||'Usuario')}`} · ${esc(xiVariantName(listing))}</small>
     <div class="market-price-row"><strong>${esc(platformMoney(listing.price_cents))}</strong>
       ${mine&&status==='active'?`<button data-market-cancel="${esc(listing.id)}" type="button" class="inventory-secondary-button compact">Retirar</button>`:
         owner?'<span class="market-own-tag">Tu oferta</span>':status==='active'?`<button data-market-buy="${esc(listing.id)}" class="inventory-primary-button compact" type="button" ${platformWalletBalance<Number(listing.price_cents)?'disabled title="Saldo insuficiente"':''}>Comprar</button>`:'<span class="market-own-tag">Cerrada</span>'}
@@ -6924,7 +6995,7 @@ async function platformMarketLoadHistory(){
   if(error){toast('No se pudo cargar el historial: '+friendlyError(error),'error');return;}
   if(String(currentUser?.id)!==owner)return;
   platformMarketHistory=Array.isArray(data)?data:[];
-  platformApplyMarkup($('#market-history'),platformMarketHistory.length?platformMarketHistory.map(r=>`<div class="market-history-row"><span>${esc(r.action==='venta'?'Vendido':r.action==='instant'?'Venta inmediata':'Comprado')}: ${esc(r.name)} · ${esc(platformRarity(r).label)}</span><strong>${esc(platformMoney(r.price_cents))}</strong></div>`).join(''):'<div class="market-empty">No hay compras ni ventas todavía.</div>');
+  platformApplyMarkup($('#market-history'),platformMarketHistory.length?platformMarketHistory.map(r=>`<div class="market-history-row"><span>${esc(r.action==='venta'?'Vendido':r.action==='instant'?'Venta inmediata':'Comprado')}: ${esc(r.name)} · ${esc(platformRarity(r).label)} · ${esc(r.finish_snapshot_recorded===false?'Acabado no registrado':r.finish_snapshot_name||platformGradeName(r.upgrade_tier))}</span><strong>${esc(platformMoney(r.price_cents))}</strong></div>`).join(''):'<div class="market-empty">No hay compras ni ventas todavía.</div>');
 }
 
 async function platformAdminLoadAssets(){
@@ -7362,7 +7433,7 @@ function platformBindEvents() {
     if(action){event.preventDefault();xiPaletteAction(action);}
   });
   $('#xi-up-form')?.addEventListener('input',xiUpdateEditorPreview);
-  $('#xi-up-form')?.addEventListener('change',xiUpdateEditorPreview);
+  $('#xi-up-form')?.addEventListener('change',event=>{if(event.target?.id==='xi-up-value-custom')xiUpdateValuePaletteVisibility();xiUpdateEditorPreview();});
   $('#xi-up-new')?.addEventListener('click',()=>{xiFormAssign(null);xiRenderStyleList();});
   $('#xi-up-preview-reveal')?.addEventListener('click',()=>xiPlayUpgradeReveal(xiStyleFormData()));
   $('#xi-route-add')?.addEventListener('click',()=>xiAddRouteRow());
