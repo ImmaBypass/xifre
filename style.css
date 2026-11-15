@@ -2878,3 +2878,117 @@ html[data-theme="light"] .shop-admin-card input:not([type=checkbox]),html[data-t
  position:absolute;left:4px;bottom:4px;z-index:3;font-size:8px;max-width:90%;
 }
 .trade-offer-item,.market-inventory-item,.admin-asset-row{position:relative;}
+
+
+/* ========================================================================
+   XIFRE ALPHA 1.9 · Focused visual fixes / programmable upgrade palettes
+   ======================================================================== */
+/* The hidden prize symbol must fit the actual 50px preview viewport.
+   Legacy rules used min-height:78px, clipping the question mark. */
+#item-details-modal .box-detail-prize.box-detail-secret .box-detail-image{
+  height:56px;min-height:56px;display:grid;place-items:center;overflow:visible!important;
+  filter:none!important;padding:0;margin:0;
+}
+#item-details-modal .box-detail-prize.box-detail-secret .box-detail-image .box-secret-shadow{
+  display:grid!important;place-items:center!important;flex:none!important;
+  box-sizing:border-box!important;width:46px!important;min-width:46px!important;max-width:46px!important;
+  height:46px!important;min-height:0!important;max-height:46px!important;
+  margin:0 auto!important;padding:0!important;border-radius:11px!important;clip-path:none!important;
+  font-family:Arial,Helvetica,sans-serif!important;font-size:37px!important;font-weight:800!important;
+  line-height:46px!important;letter-spacing:0!important;text-align:center!important;
+  color:var(--xi-rarity,#c4c9dc)!important;
+  background:linear-gradient(160deg,#171b27,#282d40)!important;
+  border:1px solid color-mix(in srgb,var(--xi-rarity,#b5b5d0) 45%,transparent)!important;
+  text-shadow:0 0 13px color-mix(in srgb,var(--xi-rarity,#bbb) 35%,transparent)!important;
+  box-shadow:inset 0 0 12px #0005!important;filter:none!important;transform:none!important;
+}
+#box-opening-modal .box-reel-card .box-secret-shadow{
+ display:grid;place-items:center;width:64px;height:64px;min-height:0;clip-path:none;border-radius:12px;
+ font:800 46px/1 Arial,Helvetica,sans-serif;background:#1e2635;color:#c9cced;
+}
+/* The modal backdrop never receives .xi-custom-upgrade. Its body and heading
+   are identical to normal/Gold/Neon, with the item's FX in the artwork only. */
+#item-details-modal.xi-item-details-custom .item-details-card{
+ border:1.5px solid var(--xi-fx-a,#8c8fff)!important;
+ background:linear-gradient(160deg,#30343e,#22252d)!important;
+ box-shadow:0 0 35px color-mix(in srgb,var(--xi-fx-a) 33%,transparent),0 25px 75px #0008!important;
+}
+#item-details-modal.xi-item-details-custom .item-details-hero{
+ position:relative;isolation:isolate;overflow:hidden;
+ /* preserve the original item rarity background rather than replacing it */
+ background:radial-gradient(circle,rgba(var(--xi-rgb),.42),transparent 68%),linear-gradient(160deg,#2b3443,#22262e);
+}
+#item-details-modal.xi-item-details-custom .item-details-hero::before{
+ content:"";position:absolute;inset:0;pointer-events:none;z-index:0;opacity:.13;
+ background:var(--xi-fx-gradient,linear-gradient(135deg,var(--xi-fx-a),var(--xi-fx-b)));
+}
+#item-details-modal.xi-item-details-custom .item-details-hero>*{position:relative;z-index:1;}
+#item-details-modal.xi-item-details-custom #item-details-name{display:block;text-align:left;position:static;margin:10px 0 0;color:#fff;}
+#item-details-modal.xi-item-details-custom .item-details-body{text-align:left;}
+#item-details-modal.xi-item-details-custom .item-details-value-wrap strong{color:var(--xi-fx-b)!important;text-shadow:0 0 12px color-mix(in srgb,var(--xi-fx-a) 60%,transparent);}
+html[data-theme="light"] #item-details-modal.xi-item-details-custom .item-details-card{background:linear-gradient(150deg,#fff,#f1f3f8)!important;}
+html[data-theme="light"] #item-details-modal.xi-item-details-custom #item-details-name{color:#263044;}
+/* More than two palette colors; original rarity remains in the card background. */
+.xi-custom-upgrade[data-xi-fx="prism"]::before,
+.xi-custom-upgrade[data-xi-fx="holo"]::before,
+.xi-custom-upgrade[data-xi-fx="aurora"]::before,
+.xi-custom-upgrade[data-xi-fx="metal"]::before,
+.xi-custom-upgrade[data-xi-fx="plasma"]::before{
+ background-image:var(--xi-fx-gradient)!important;
+ background-size:220% 220%;
+ opacity:calc(.18 + var(--xi-fx-glow) * .42);
+}
+.xi-custom-upgrade[data-xi-fx="galaxy"]::before{background-image:radial-gradient(circle at 15% 25%,var(--xi-fx-a),transparent 50%),var(--xi-fx-gradient);background-blend-mode:screen;}
+.xi-custom-upgrade[data-xi-fx="flame"]::before{background-image:linear-gradient(20deg,transparent 20%,var(--xi-fx-a),transparent 75%),var(--xi-fx-gradient);background-blend-mode:screen;}
+.xi-custom-upgrade[data-xi-fx="ice"]::before{background-image:repeating-linear-gradient(120deg,transparent 0 15px,#fff3 16px 17px,transparent 18px 30px),var(--xi-fx-gradient);background-blend-mode:screen;}
+/* Use identical beginning/end values; the old flow was 0% -> 220% and jumped
+   back abruptly every cycle. Here all periodic effects return to their origin. */
+@keyframes xiFxFlow{0%,100%{background-position:0% 50%;opacity:.18}50%{background-position:100% 50%;opacity:.55}}
+@keyframes xiFxFlicker{0%,100%{opacity:.42}22%{opacity:.24}48%{opacity:.73}74%{opacity:.35}}
+@keyframes xiFxFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes xiFxPulse{0%,100%{opacity:.12}50%{opacity:.66}}
+@keyframes xiFxCustomLoop{
+ 0%,100%{transform:translate3d(0,0,0) rotate(0deg) scale(1);opacity:.24;}
+ 50%{transform:translate3d(var(--xi-fx-drift-x,0px),var(--xi-fx-drift-y,-8px),0) rotate(var(--xi-fx-rotation,8deg)) scale(var(--xi-fx-scale,1.06));opacity:.72;}
+}
+.xi-custom-upgrade[data-xi-motion="pulse"]::before,
+.xi-custom-upgrade[data-xi-motion="flow"]::before,
+.xi-custom-upgrade[data-xi-motion="spin"]::before,
+.xi-custom-upgrade[data-xi-motion="shimmer"]::before,
+.xi-custom-upgrade[data-xi-motion="float"]::before,
+.xi-custom-upgrade[data-xi-motion="flicker"]::before,
+.xi-custom-upgrade[data-xi-motion="breath"]::before,
+.xi-custom-upgrade[data-xi-motion="custom"]::before{
+ animation-duration:var(--xi-fx-duration,4000ms)!important;
+ animation-timing-function:var(--xi-fx-easing,ease-in-out)!important;
+ animation-direction:var(--xi-fx-direction,normal)!important;
+ animation-iteration-count:infinite!important;
+}
+.xi-custom-upgrade[data-xi-motion="custom"]::before{animation-name:xiFxCustomLoop!important;}
+/* Seamless color motion on precious and grade cards, too. */
+@keyframes xifreItemShine{0%,100%{background-position:100% 0;opacity:.34}50%{background-position:0% 0;opacity:.76}}
+@keyframes xi-neon-breathe{0%,100%{filter:brightness(1);opacity:1}50%{filter:brightness(1.13);opacity:.92}}
+/* Independent finished-grade glows in every compact interface, not only
+   inside the collection grid. Never alter the rarity class or its color. */
+:is(.market-listing,.market-inventory-item,.trade-offer-item,.trade-select-item,.admin-asset-row,.xi-gift-picker-item,.xifre-gift-card).xifre-grade-gold{
+ border-color:#efc865!important;
+ box-shadow:inset 0 0 13px #ffc45425,0 0 0 1px #f8d37b90,0 0 19px #f9bc5c70!important;
+}
+:is(.market-listing,.market-inventory-item,.trade-offer-item,.trade-select-item,.admin-asset-row,.xi-gift-picker-item,.xifre-gift-card).xifre-grade-neon{
+ border-color:#62ffed!important;
+ box-shadow:inset 0 0 14px #52ffff22,0 0 0 1px #62f8edb0,0 0 19px #42f1ff9c,0 0 24px #8060ff61!important;
+}
+:is(.market-listing,.market-inventory-item,.trade-offer-item,.trade-select-item,.admin-asset-row,.xi-gift-picker-item,.xifre-gift-card).xifre-grade-gold :is(img,.platform-image-frame img){filter:drop-shadow(0 0 9px #ffcc669b) drop-shadow(0 0 16px #ffc44a75)!important;}
+:is(.market-listing,.market-inventory-item,.trade-offer-item,.trade-select-item,.admin-asset-row,.xi-gift-picker-item,.xifre-gift-card).xifre-grade-neon :is(img,.platform-image-frame img){filter:drop-shadow(0 0 10px #55fff4b3) drop-shadow(0 0 19px #8070ff85)!important;}
+/* Custom palette controls; hidden extra swatches don't occupy layout room. */
+.xi-up-extra-color.hidden{display:none!important;}
+.xi-up-motion-title{grid-column:1/-1;margin-top:7px;border-top:1px solid #9baae02b;padding:13px 0 1px;color:#dfe8ff;font-size:12px;font-weight:800;}
+.xi-up-motion-title small{display:block;margin-top:4px;font-size:10px;line-height:1.45;font-weight:400;color:#9daec9;}
+#xi-up-live-card .xi-card-preview-art{background:var(--xi-fx-gradient);background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+@media(prefers-reduced-motion:reduce){.xi-custom-upgrade::before,#inventory-app-view .xifre-mini-item.xifre-grade-neon::after{animation:none!important;will-change:auto!important;}}
+
+/* The aura width slider affects real cards as well as the editor preview. */
+:is(#inventory-app-view .xifre-mini-item,#inventory-app-view .trade-offer-item,.market-listing,.market-inventory-item,.xi-gift-picker-item,.xi-upgrade-card,.xi-route-card).xi-custom-upgrade{
+ box-shadow:0 0 var(--xi-fx-glow-radius,20px) color-mix(in srgb,var(--xi-fx-a) 36%,transparent),
+ inset 0 0 14px color-mix(in srgb,var(--xi-fx-b) 15%,transparent),0 8px 20px #0005!important;
+}
