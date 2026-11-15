@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261115-alpha-19">
+<link rel="stylesheet" href="style.css?v=20261115-alpha-110">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -298,7 +298,7 @@
                 <div class="admin-form-row"><label>Normales necesarias para Dorado<input id="admin-item-gold-count" type="number" min="2" max="100" step="1" value="3"></label><label>Valor conceptual Dorado<input id="admin-item-gold-value" type="number" min="0" max="9000000000000000" step="1" value="0"></label></div>
                 <div class="admin-form-row"><label>Doradas necesarias para Neón<input id="admin-item-neon-count" type="number" min="2" max="100" step="1" value="3"></label><label>Valor conceptual Neón<input id="admin-item-neon-value" type="number" min="0" max="9000000000000000" step="1" value="0"></label></div>
                 <div class="admin-feature-divider"></div>
-                <div class="xi-item-route-head"><strong>Rutas de upgrades personalizados</strong><p class="admin-feature-hint">Puedes crear varias rutas que partan del mismo acabado (ramas). Cada una tiene un destino, copias necesarias y valor propio. Los estilos se diseñan en «Estudio de upgrades».</p></div>
+                <div class="xi-item-route-head"><strong>Rutas de mejora</strong><p class="admin-feature-hint">Normal, Dorado, Neón y las demás mejoras son acabados de copias individuales. Puedes crear ramas con sus propios requisitos y valores. Diseña su apariencia en «Estudio de mejoras».</p></div>
                 <div id="xi-item-route-list" class="xi-item-route-list"></div>
                 <button id="xi-route-add" type="button" class="inventory-secondary-button compact">+ Añadir ruta de mejora</button>
                 <div class="admin-feature-divider"></div><strong>Usos especiales</strong>
@@ -332,22 +332,28 @@
           <form id="admin-assets-money-form"><label>Ajustar saldo (€): número positivo para añadir, negativo para quitar<input id="admin-assets-money-delta" type="number" min="-10000000000" step="0.01" value="-0.01" required></label><button type="submit" class="inventory-secondary-button">Aplicar ajuste</button></form>
           <div id="admin-assets-items" class="admin-assets-items"></div></div>
         </section>
-        <!-- Alpha 1.8: editor de acabados independiente de la creación de objetos. -->
+        <!-- Diseño visual de las mejoras. Dorado y Neón son los acabados predefinidos. -->
         <section class="admin-card xi-up-editor">
-          <div class="admin-card-heading"><span class="admin-card-icon">✦</span><div><h3>Estudio de upgrades personalizados</h3><p>Diseña acabados y transformaciones sin cambiar la rareza base. Los estilos se crean aquí y se asignan a cada objeto en su ficha de edición.</p></div></div>
+          <div class="admin-card-heading"><span class="admin-card-icon">✦</span><div><h3>Estudio de mejoras</h3><p>Dorado y Neón son acabados predeterminados. Aquí diseñas otros acabados con exactamente la misma lógica: copias separadas, valor propio y transformación, sin modificar la rareza base.</p></div></div>
           <div class="xi-up-editor-layout">
-            <aside class="xi-up-editor-sidebar"><div class="xi-up-side-head"><strong>Biblioteca de acabados</strong><button id="xi-up-new" class="inventory-secondary-button compact" type="button">+ Nuevo</button></div><div id="xi-up-style-list" class="xi-up-style-list"><p class="admin-feature-hint">No hay estilos todavía.</p></div></aside>
+            <aside class="xi-up-editor-sidebar"><div class="xi-up-side-head"><strong>Mejoras disponibles</strong><button id="xi-up-new" class="inventory-secondary-button compact" type="button">+ Nuevo</button></div><div id="xi-up-style-list" class="xi-up-style-list"><p class="admin-feature-hint">No hay estilos todavía.</p></div></aside>
             <form id="xi-up-form" class="xi-up-form">
               <div class="xi-up-fields">
                 <label>Nombre del acabado<input id="xi-up-name" maxlength="45" value="Nueva mejora" required></label>
                 <label>Símbolo (hasta 8 caracteres)<input id="xi-up-symbol" maxlength="8" value="✦" required></label>
-                <label>Color principal<input id="xi-up-color-a" type="color" value="#7969ff"></label>
-                <label>Color secundario<input id="xi-up-color-b" type="color" value="#2be7ff"></label>
-                <label>Número de colores<select id="xi-up-colors-count"><option value="2">2 colores</option><option value="3">3 colores</option><option value="4">4 colores</option><option value="5">5 colores</option><option value="6">6 colores</option></select></label>
-                <label class="xi-up-extra-color" data-xi-extra-color="3">Color 3<input id="xi-up-color-c" type="color" value="#ff65d8"></label>
-                <label class="xi-up-extra-color" data-xi-extra-color="4">Color 4<input id="xi-up-color-d" type="color" value="#ffd96b"></label>
-                <label class="xi-up-extra-color" data-xi-extra-color="5">Color 5<input id="xi-up-color-e" type="color" value="#5eff9d"></label>
-                <label class="xi-up-extra-color" data-xi-extra-color="6">Color 6<input id="xi-up-color-f" type="color" value="#ffe6fc"></label>
+                <div class="xi-palette-builder">
+                  <div class="xi-palette-header"><div><strong>Colores del acabado</strong><small>Degradado y aura del objeto, independientes de la rareza.</small></div><button type="button" data-xi-palette-add="fill" class="inventory-secondary-button compact">+ Color</button></div>
+                  <span id="xi-up-palette-fill-count" class="xi-palette-count">2 colores</span><div id="xi-up-palette-fill" class="xi-palette-stops"></div>
+                </div>
+                <div class="xi-palette-builder">
+                  <div class="xi-palette-header"><div><strong>Colores del borde</strong><small>Paleta independiente; puedes crear bordes arcoíris.</small></div><button type="button" data-xi-palette-add="border" class="inventory-secondary-button compact">+ Color</button></div>
+                  <span id="xi-up-palette-border-count" class="xi-palette-count">2 colores</span><div id="xi-up-palette-border" class="xi-palette-stops"></div>
+                </div>
+                <label>Degradado del acabado<select id="xi-up-fill-mode"><option value="linear">Lineal</option><option value="conic">Circular / arcoíris</option></select></label>
+                <label>Degradado del borde<select id="xi-up-border-mode"><option value="conic">Circular / arcoíris</option><option value="linear">Lineal</option></select></label>
+                <label>Rotación inicial del borde <output id="xi-up-border-angle-value">0°</output><input id="xi-up-border-angle" type="range" min="0" max="360" value="0"></label>
+                <label>Vuelta completa del borde <output id="xi-up-border-duration-value">6.00 s</output><input id="xi-up-border-duration" type="range" min="1000" max="30000" step="250" value="6000"></label>
+                <label class="xi-palette-animation-toggle"><input id="xi-up-border-animated" type="checkbox" checked> Animar / rotar colores del borde</label>
                 <label>Efecto de material<select id="xi-up-effect"><option value="none">Sin efecto</option><option value="glow">Brillo</option><option value="prism" selected>Prisma</option><option value="flame">Fuego</option><option value="ice">Hielo</option><option value="plasma">Plasma</option><option value="holo">Holográfico</option><option value="galaxy">Galaxia</option><option value="electric">Eléctrico</option><option value="aurora">Aurora</option><option value="sparkles">Estrellas</option><option value="metal">Metal pulido</option></select></label>
                 <label>Animación del acabado<select id="xi-up-animation"><option value="none">Estático</option><option value="pulse" selected>Pulso</option><option value="flow">Flujo cromático</option><option value="spin">Rotación de halo</option><option value="shimmer">Destello diagonal</option><option value="float">Levitación</option><option value="flicker">Chispas</option><option value="breath">Respiración</option><option value="custom">Animación a medida</option></select></label>
                 <label>Animación al crear<select id="xi-up-reveal"><option value="none">Sin animación</option><option value="forge" selected>Forja</option><option value="portal">Portal</option><option value="beam">Rayo de luz</option><option value="constellation">Constelación</option><option value="flash">Destello</option><option value="vortex">Vórtice</option></select></label>
@@ -367,7 +373,7 @@
                 <label>Cambio de tamaño <output id="xi-up-scale-value">6%</output><input id="xi-up-scale" type="range" min="0" max="45" value="6"></label>
               </div>
               <label class="xifre-check-row"><input id="xi-up-active" type="checkbox" checked><span>Acabado activo y disponible para nuevas transformaciones</span></label>
-              <button id="xi-up-save" class="inventory-primary-button" type="submit">Crear estilo</button>
+              <button id="xi-up-save" class="inventory-primary-button" type="submit">Crear mejora</button>
             </form>
             <div class="xi-up-preview-col"><strong>Vista previa interactiva</strong><span>Los cambios se muestran al instante, sin guardarlos.</span><div class="xi-up-stage"><div id="xi-up-live-card" class="xi-upgrade-card xi-custom-upgrade"><span class="xi-card-preview-caption">VISTA PREVIA</span><div class="xi-card-preview-art">✦</div><strong>Nueva mejora</strong><small>Rareza original · Valor conceptual</small></div></div><p id="xi-up-size-note">Ocupa un espacio normal en la colección.</p><button id="xi-up-preview-reveal" class="inventory-secondary-button compact" type="button">▶ Probar animación de transformación</button><p class="admin-feature-hint">Las animaciones se adaptan a la preferencia de movimiento reducido del usuario.</p></div>
           </div>
@@ -750,7 +756,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261115-alpha-19"></script>
+<script src="app.js?v=20261115-alpha-110"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
