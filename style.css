@@ -2608,3 +2608,98 @@ html[data-theme="light"] .shop-admin-card input:not([type=checkbox]),html[data-t
 @keyframes xi-box-legend-rise{from{opacity:.3;transform:translateY(30px) scale(.6) rotate(-9deg)}to{opacity:1;transform:none}}
 @keyframes xi-box-epic-rise{from{opacity:.3;transform:translateY(22px) scale(.7) rotate(7deg)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){#box-rarity-celebration{display:none!important;}#box-opening-modal .box-result-visual{animation:none!important;}#inventory-app-view .xifre-mini-item.xifre-grade-neon::after{animation:none!important;}}
+
+
+/* ===========================================================
+  XIFRE ALPHA 1.7 · focused interface repairs, no global resets
+   =========================================================== */
+/* Composer '+' adopts the surface of the input rather than a bright circular CTA. */
+#message-form .composer-plus, #message-form #composer-plus-button {
+  width:29px!important;height:29px!important;min-width:29px!important;
+  background:transparent!important;color:var(--text-muted)!important;
+  border:1px solid transparent!important;border-radius:9px!important;
+  box-shadow:none!important;font-size:21px!important;
+  padding:0!important;line-height:1!important;
+}
+#message-form .composer-plus:hover,#message-form #composer-plus-button:hover {
+  background:var(--composer-hover)!important;color:var(--text)!important;
+}
+/* Keep the typing prompt under messages, above composer; never squeeze text out. */
+#chat-app-view .center-pane {grid-template-rows:52px minmax(0,1fr) auto auto!important;}
+#typing-indicator:not(.hidden) {display:flex!important;align-items:center;min-height:24px;margin:0 12px 2px;padding:2px 9px!important;color:#c5c8fb!important;font-size:11px!important;z-index:1;}
+#typing-indicator .typing-dots i{width:5px!important;height:5px!important;background:#8f95ff!important;}
+/* More compact Discord-like gift: thumbnail, text and claim button in a slim strip. */
+#messages .xifre-gift-card {width:min(365px,100%)!important;padding:7px 9px!important;border-radius:9px!important;background:linear-gradient(120deg,rgba(var(--xi-rgb),.09),#23262f)!important;box-shadow:none!important;border-width:1px!important;margin:3px 0 5px!important;}
+#messages .xi-gift-heading {font-size:8px!important;margin:0!important;line-height:1.3!important;}
+#messages .xi-gift-middle {display:grid!important;grid-template-columns:43px minmax(0,1fr) auto!important;gap:9px!important;margin:5px 0 0!important;min-width:0;align-items:center!important;}
+#messages .xi-gift-art {width:43px!important;height:43px!important;min-width:43px!important;min-height:43px!important;max-width:43px!important;border-radius:7px!important;}
+#messages .xi-gift-art img{max-width:38px!important;max-height:38px!important;}
+#messages .xi-gift-info {gap:1px!important;min-width:0;}
+#messages .xi-gift-info strong{font-size:11px!important;}
+#messages .xi-gift-info small{font-size:9px!important;}
+#messages .xi-gift-info b{font-size:9px!important;font-weight:650;opacity:.8;}
+#messages .xi-gift-action{grid-column:auto!important;min-width:0!important;}
+#messages .xi-gift-button{min-height:29px!important;min-width:67px!important;max-width:92px!important;padding:5px 7px!important;border-radius:6px!important;font-size:9px!important;white-space:normal!important;}
+#messages .xi-gift-result{font-size:9px!important;max-width:105px!important;}
+@media(max-width:440px){#messages .xifre-gift-card{width:100%!important;max-width:340px!important}#messages .xi-gift-middle{grid-template-columns:38px minmax(0,1fr) auto!important;gap:6px!important}#messages .xi-gift-art{width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important}#messages .xi-gift-button{min-width:56px!important;max-width:74px!important;font-size:8px!important;padding:4px!important}}
+/* Source box is an actual miniature collectible in item detail. */
+#item-details-extras .xi-origin-feature{align-items:center;flex-wrap:wrap;}
+#item-details-extras .xi-origin-box{display:flex;align-items:center;gap:9px;min-width:155px;max-width:100%;background:rgba(89,99,132,.12);border:1px solid rgba(156,164,202,.22);border-radius:10px;padding:6px 9px;}
+#item-details-extras .xi-origin-thumb{width:41px;height:41px;flex:0 0 41px;display:grid;place-items:center;border-radius:7px;overflow:hidden;background:rgba(0,0,0,.16);}
+#item-details-extras .xi-origin-thumb .platform-image-frame,#item-details-extras .xi-origin-thumb .platform-image-fallback{width:100%;height:100%;}
+#item-details-extras .xi-origin-thumb img{max-width:100%;max-height:100%;object-fit:contain;}
+#item-details-extras .xi-origin-box>div{min-width:0;display:flex;flex-direction:column;gap:3px;}
+#item-details-extras .xi-origin-box strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;}
+#item-details-extras .xi-origin-box small{font-size:10px;color:var(--text-faint);}
+/* Upgrade copies are visibly separate: total vs unreserved, explicit ratio. */
+#item-details-status{line-height:1.65!important;font-size:11px!important;}
+.xi-upgrade-count{display:flex;gap:9px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 10px;margin:8px 0;border-radius:9px;background:rgba(7,12,22,.25);font-size:11px;}
+.xi-upgrade-count .xi-upgrade-ready{color:#67eebc;font-weight:850;}
+.xi-upgrade-count .xi-upgrade-missing{color:#ffb6b6;font-weight:850;}
+/* Secret loot: one crisp question mark, without floating gradient, silhouettes or shadows. */
+#item-details-modal .box-detail-prize.box-detail-secret .box-detail-image{filter:none!important;}
+#item-details-modal .box-detail-prize.box-detail-secret .box-secret-shadow{width:64px!important;height:64px!important;display:grid!important;place-items:center!important;clip-path:none!important;border:none!important;border-radius:12px!important;background:rgba(10,13,24,.64)!important;color:var(--xi-rarity)!important;font-size:48px!important;font-weight:900!important;line-height:1!important;text-shadow:none!important;box-shadow:inset 0 0 0 1px rgba(var(--xi-rgb),.24)!important;filter:none!important;}
+/* Explicitly isolate editing canvases to the visible trade subsection. */
+#trade-list-view.xi-inline-surface,#trade-workspace.xi-inline-surface{position:relative;isolation:isolate;}
+#trade-list-view.hidden .xi-overlay-image,#trade-workspace.hidden .xi-overlay-image{display:none!important;}
+/* Per-trade lightweight conversation: messages only exist in the current tab. */
+.xi-trade-chat{display:flex;flex-direction:column;gap:9px;margin:12px 0;padding:13px;border:1px solid rgba(137,151,210,.23);border-radius:12px;background:linear-gradient(130deg,rgba(69,80,120,.11),rgba(15,21,32,.13));}
+.xi-trade-chat-title{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.xi-trade-chat-title>div{display:flex;flex-direction:column;gap:2px;}
+.xi-trade-chat-title strong{font-size:12px;color:var(--text);}
+.xi-trade-chat-title small{font-size:9px;color:var(--text-faint);}
+#xi-trade-chat-state{font-size:9px;color:#a9c9ff;white-space:nowrap;}
+.xi-trade-chat-messages{height:130px;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;padding:8px 9px;border:1px solid rgba(140,158,198,.1);border-radius:8px;background:rgba(0,0,0,.14);scrollbar-width:thin;}
+.xi-trade-chat-empty{margin:auto;color:var(--text-faint);font-size:10px;text-align:center;line-height:1.6;}
+.xi-trade-chat-line{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:7px;align-items:baseline;max-width:100%;font-size:11px;line-height:1.5;}
+.xi-trade-chat-line strong{color:#a2b1fd;font-size:10px;}
+.xi-trade-chat-line.mine strong{color:#76dbb5;}
+.xi-trade-chat-line span{overflow-wrap:anywhere;}
+.xi-trade-chat-line time{color:var(--text-faint);font-size:9px;}
+.xi-trade-chat-form{display:flex;align-items:center;gap:8px;min-width:0;}
+.xi-trade-chat-form input{min-width:0;flex:1;min-height:35px;border:1px solid rgba(148,162,202,.18);border-radius:8px;padding:7px 10px;background:rgba(10,16,26,.24);color:var(--text);font-size:11px;outline:0;}
+.xi-trade-chat-form input:focus{border-color:#7c85fc;}
+.xi-trade-chat-form button{min-height:35px;padding:0 13px;border:0;border-radius:8px;background:var(--brand);color:#fff;font-weight:800;font-size:10px;cursor:pointer;}
+.xi-trade-chat-form button:hover{filter:brightness(1.12);}
+.xi-bulk-money-row{display:flex;align-items:end;gap:9px;flex-wrap:wrap;}
+.xi-bulk-money-row label{flex:1;min-width:155px;}
+#shop-money-all{min-height:37px;white-space:nowrap;font-size:11px;}
+#shop-money-all.active{background:rgba(82,208,156,.17);border-color:#52d09c;color:#9cf8cf;}
+
+/* Alpha 1.7 — trade actions must not cover the temporary chat composer. */
+#inventory-app-view .trade-workspace-actions {
+  position: static;
+  bottom: auto;
+  z-index: auto;
+  margin-top: 2px;
+}
+#inventory-app-view .xi-trade-chat { margin: 5px 0; }
+#inventory-app-view .xi-trade-chat-messages { height: 100px; min-height: 72px; }
+@media (max-width: 700px) {
+  #inventory-app-view .trade-workspace { gap: 11px; }
+  #inventory-app-view .trade-offer-panel { min-height: 126px; padding: 13px; }
+  #inventory-app-view .trade-offer-items { min-height: 65px; }
+  #inventory-app-view .trade-offer-empty { min-height: 66px; }
+  #inventory-app-view .trade-offer-columns { gap: 10px; }
+  #inventory-app-view .xi-trade-chat-messages { height: 87px; }
+}
