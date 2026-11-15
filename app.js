@@ -3835,6 +3835,7 @@ function platformGradeName(tier) {return PLATFORM_GRADE_NAMES[Math.max(0,Math.mi
 function platformTypeId(item) {return String(item?.item_id || item?.id || '');}
 function platformHydrateItem(row) {
   const typeId=platformTypeId(row);
+  if(xiBankIsCoin(row)){const cents=Number(xiBankCoinMap.get(platformItemKey(row)) ?? row.cash_cents ?? 0);return {...row,item_id:xiBankCoinTypeId,is_cash_coin:true,name:'Moneda XIFRE',description:'Moneda de dinero virtual que se puede intercambiar o depositar en el Banco.',value:0,cash_cents:cents,upgrade_tier:0,custom_upgrade_id:null,instant_sell_cents:0};}
   const definition=platformItemDefinitions.get(typeId)||{};
   const instance=platformInstanceFeatures.get(platformItemKey(row))||{};
   const isListing=Object.prototype.hasOwnProperty.call(row,'status') && Object.prototype.hasOwnProperty.call(row,'price_cents');
@@ -4508,7 +4509,7 @@ function platformItemKey(item) {
 function platformGroupSignature(item) {
   // The grouping compares the full public item definition, not just its display name.
   return JSON.stringify([String(item.name || ''),String(item.description || ''),String(item.rarity || ''),
-    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item)),String(item.item_id||item.id||''),Number(item.upgrade_tier||0),String(item.custom_upgrade_id||'')]);
+    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item)),String(item.item_id||item.id||''),Number(item.upgrade_tier||0),String(item.custom_upgrade_id||''), xiBankIsCoin(item)?Number(item.cash_cents||0):null]);
 }
 function platformGroupItems(items) {
   const groups = new Map();
@@ -4535,14 +4536,14 @@ function platformItemCardMarkup(item, { mode = 'collection', disabled = false, s
     return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" ${customAttrs} data-trade-tile="${esc(instanceId)}">
       ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${gradeBadge}
       <button class="trade-select-hitarea" type="button" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled?'disabled':''} title="Añadir una copia">
-        <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong><span class="mini-item-selection">+ Ofrecer</span>
+        <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong><span class="mini-item-selection">+ Ofrecer</span>
       </button><button class="mini-item-info" type="button" data-open-item="${esc(instanceId)}" data-item-source="trade" aria-label="Detalles">ⓘ</button>
       <button class="mini-item-minus hidden" type="button" data-trade-remove-group="${esc(instanceId)}" aria-label="Quitar una copia">−</button>
     </div>`;
   }
   return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize} ${valueGlow} ${item.reserved?'is-reserved':''}" ${customAttrs} data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
     ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}
-    <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(platformFormatValue(item.value))}</strong>
+    <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong>
   </button>`;
 }
 
@@ -4570,11 +4571,17 @@ function platformOpenItemDetails(key, source = 'collection') {
   const hero = $('#item-details-hero');
   if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
-  setText('item-details-value',platformFormatValue(item.value));
+  setText('item-details-value-label',xiBankIsCoin(item)?'SALDO EN MONEDA':'VALOR');
+  setText('item-details-value',xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value));
   setText('item-details-rarity',rarity.label);
   setText('item-details-description',item.description || 'Sin descripción.');
   platformDetailsSequence++;
-  platformDrawItemExtras(item,source);
+  if(xiBankIsCoin(item)){
+    const extra=$('#item-details-extras'),upgrade=$('#item-details-upgrades'),sell=$('#item-instant-sell');
+    if(upgrade){upgrade.innerHTML='';upgrade.classList.add('hidden');}
+    if(sell){sell.classList.add('hidden');sell.removeAttribute('data-sell-instance');}
+    if(extra){extra.classList.remove('hidden');extra.innerHTML=`<div class="item-feature-row"><span>Moneda virtual</span><strong>${esc(xiBankEur(item.cash_cents))}</strong></div><p class="xi-bank-hint">Sin valor conceptual ni mejoras. Se puede intercambiar con otros usuarios y depositar una sola vez.</p>${source==='collection'?`<button type="button" class="xi-bank-submit" data-xi-bank-deposit="${esc(platformItemKey(item))}" ${item.reserved?'disabled':''}>${item.reserved?'Moneda reservada':'Depositar en mi Banco'}</button>`:''}`;}
+  } else platformDrawItemExtras(item,source);
   const matching = source === 'collection' ? platformInventoryItems.filter(x => platformGroupSignature(x) === platformGroupSignature(item)) : [];
   if(source==='collection') {
     const typeId=platformTypeId(item);
@@ -4659,7 +4666,7 @@ function platformOpenGiftPicker(){
 }
 function platformDrawGiftPicker(){
  const grid=$('#chat-gift-grid');if(!grid)return;
- const available=platformInventoryItems.filter(item=>!item.reserved);
+ const available=platformInventoryItems.filter(item=>!item.reserved && !xiBankIsCoin(item));
  const groups=platformGroupItems(available);
  grid.innerHTML=groups.length?groups.map(group=>{
    const item=group.item,rarity=platformRarity(item);
@@ -4671,7 +4678,7 @@ function platformDrawGiftPicker(){
 }
 async function platformSendChatGift(instanceId){
  if(platformGiftSending||!currentConversation)return;
- const item=platformInventoryItems.find(i=>platformItemKey(i)===String(instanceId)&&!i.reserved);
+ const item=platformInventoryItems.find(i=>platformItemKey(i)===String(instanceId)&&!i.reserved&&!xiBankIsCoin(i));
  if(!item)return toast('Esta copia ya no está disponible.','error');
  const conversation=String(currentConversation);
  const yes=await askConfirm('Enviar regalo',`¿Regalar ${item.name} (${xiVariantName(item)}) en este chat? La primera persona que lo reclame se lo quedará.`, 'Enviar regalo');
@@ -4924,6 +4931,7 @@ async function platformInitialize() {
 }
 
 function platformStop() {
+  xiPlazaStop();xiBankResetSession();
   xiTradeChatStop();
   platformInlineEndEdit(true);platformInlineData={texts:[],images:[]};platformInlinePrepared=false;
   $$('.xi-inline-pencil,.xi-overlay-image').forEach(node=>node.remove());
@@ -4967,6 +4975,7 @@ function platformStop() {
   $('#app-shop-button')?.classList.add('hidden');
   $('#app-market-button')?.classList.remove('active');
   $('#app-market-button')?.classList.add('hidden');
+  for (const id of ['plaza','bank']) { $('#app-'+id+'-button')?.classList.remove('active'); $('#app-'+id+'-button')?.classList.add('hidden'); $('#'+id+'-app-view')?.classList.remove('active'); $('#'+id+'-app-view')?.classList.add('hidden'); }
   $('#market-app-view')?.classList.remove('active');
   $('#market-app-view')?.classList.add('hidden');
   $('#shop-app-view')?.classList.remove('active');
@@ -5073,6 +5082,7 @@ async function platformLoadSystemApps() {
   inventoryButton?.classList.toggle('hidden', !inventoryAvailable && !isXifreAdmin);
   inventoryButton?.classList.toggle('app-launcher-disabled', !inventoryAvailable);
   inventoryButton?.setAttribute('aria-disabled', String(!inventoryAvailable && !isXifreAdmin));
+  for(const appId of ['plaza','bank']) {const row=platformApps.find(app=>app.app_id===appId); const enabled=Boolean(row?.enabled);$('#app-'+appId+'-button')?.classList.toggle('hidden',!enabled&&!isXifreAdmin);$('#app-'+appId+'-button')?.classList.toggle('app-launcher-disabled',!enabled);}
   $('#app-admin-button')?.classList.toggle('hidden', !isXifreAdmin);
   if (isXifreAdmin) platformRenderSystemAppAdmin();
 }
@@ -5094,7 +5104,9 @@ function platformSetApp(appId, forceAdmin = false) {
     const market=platformApps.find(entry=>entry.app_id==='market');
     if(!market?.enabled && !isXifreAdmin)return toast('El Mercado no está disponible.','info');
   }
-  if (!['chat', 'inventory', 'shop','market'].includes(appId)) return;
+  if(['plaza','bank'].includes(appId)){const row=platformApps.find(a=>a.app_id===appId);if(!row?.enabled&&!isXifreAdmin)return toast('Esta aplicación todavía no está disponible.','info');}
+  if (!['chat', 'inventory', 'shop','market','plaza','bank'].includes(appId)) return;
+  if(platformActiveApp==='plaza' && appId!=='plaza')xiPlazaResetOnExit();
   platformActiveApp = appId;
   $('#chat-app-view')?.classList.toggle('active', appId === 'chat');
   $('#chat-app-view')?.classList.toggle('hidden', appId !== 'chat');
@@ -5108,7 +5120,10 @@ function platformSetApp(appId, forceAdmin = false) {
   $('#market-app-view')?.classList.toggle('active',appId==='market');
   $('#market-app-view')?.classList.toggle('hidden',appId!=='market');
   $('#app-market-button')?.classList.toggle('active',appId==='market');
+  for(const id of ['plaza','bank']) {$('#'+id+'-app-view')?.classList.toggle('active',appId===id);$('#'+id+'-app-view')?.classList.toggle('hidden',appId!==id);$('#app-'+id+'-button')?.classList.toggle('active',appId===id);}
   platformMarkAppSeen(appId);
+  if(appId==='plaza'){xiPlazaOpenIntro();void platformLoadWallet(false);}
+  if(appId==='bank'){xiBankClosePanel();void xiBankLoad();}
   if(appId==='market'){void platformLoadMarket(true);void platformLoadWallet(false);}
   if (appId==='shop') { void platformLoadShop();void platformLoadWallet(false); }
   if (appId === 'inventory') {
@@ -5166,6 +5181,7 @@ async function platformSignImagePaths(paths) {
   return mapped;
 }
 function platformImageMarkup(url, name, className = '') {
+  if (!url && String(name||'').startsWith('Moneda XIFRE')) return `<div class="platform-image-fallback ${esc(className)}">${xiBankCoinArt()}</div>`;
   if (!url) return `<div class="platform-image-fallback ${esc(className)}"><span>✧</span></div>`;
   return `<div class="platform-image-frame ${esc(className)}"><img src="${esc(url)}" alt="${esc(name || 'Objeto') }" loading="lazy" decoding="async"></div>`;
 }
@@ -5192,6 +5208,7 @@ async function platformRefreshInventory() {
     const inventoryChanged=rawItems.length!==platformInstanceFeatures.size || rawItems.some(item=>!platformInstanceFeatures.has(platformItemKey(item)));
     await platformLoadItemFeatures(inventoryChanged);
     await xiLoadCustomCatalog(inventoryChanged || rawItems.some(item=>item.custom_upgrade_id && xiCustomInstanceStyles.get(platformItemKey(item))!==String(item.custom_upgrade_id)));
+    if(rawItems.some(item=>xiBankIsCoin(item)))await xiBankLoadCoins();
     platformInventoryItems = rawItems.map(item => platformHydrateItem({ ...item, is_box: platformItemIsBox(item), reserved:Boolean(item.reserved||marketReserved.has(platformItemKey(item))), image_url: urls.get(item.image_path) || '' }));
     platformRenderInventory();
     // Don't redraw the entire trade workspace: its item selection is interactive.
@@ -5291,7 +5308,7 @@ async function platformLoadAdminData() {
     const urls = await platformSignImagePaths(platformAdminItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || !isXifreAdmin) return;
     await platformLoadItemFeatures();
-    platformAdminItems = platformAdminItems.map(item => platformHydrateItem({ ...item, is_box: platformBoxIds.has(String(item.id)), image_url: urls.get(item.image_path) || '' }));
+    platformAdminItems = platformAdminItems.filter(item=>!xiBankIsCoin(item)).map(item => platformHydrateItem({ ...item, is_box: platformBoxIds.has(String(item.id)), image_url: urls.get(item.image_path) || '' }));
     platformPopulateOriginBoxSelect();
     platformRenderAdminItems();
     platformPopulateGrantItemSelect();
@@ -5810,6 +5827,7 @@ async function platformRefreshTradeDetail(withInventory = false) {
       if (response.error) throw response.error;
       inventory = Array.isArray(response.data) ? response.data : [];
     }
+    if((inventory||[]).some(item=>xiBankIsCoin(item)) || (data.offers||[]).some(item=>xiBankIsCoin(item))) await xiBankLoadCoins(tradeId);
     const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId || revision !== platformTradeOfferRevision || platformTradeOfferMutationBusy) return;
     if (inventory) {
@@ -5887,7 +5905,7 @@ function platformRenderTradeWorkspace() {
   }
   const markup = items => items.length ? items.map(item => {
     const rarity = platformRarity(item);
-    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" ${xiCustomFxAttrs(item)} data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto">${platformGradeTag(item)}<span class="trade-offer-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(platformFormatValue(item.value))}</small></span></button>`;
+    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" ${xiCustomFxAttrs(item)} data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto">${platformGradeTag(item)}<span class="trade-offer-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</small></span></button>`;
   }).join('') : '<div class="trade-offer-empty">Ningún objeto todavía</div>';
   platformApplyMarkup($('#trade-own-offer'), markup(ownOffer));
   platformApplyMarkup($('#trade-other-offer'), markup(otherOffer));
@@ -6342,6 +6360,7 @@ function platformSetWalletUI(cents) {
   platformWalletBalance=Math.max(0,Number(cents||0));
   setText('shop-wallet-balance',platformMoney(platformWalletBalance));
   setText('market-wallet',platformMoney(platformWalletBalance));
+  setText('xi-bank-balance',xiBankEur(platformWalletBalance));
   $$('#shop-products [data-shop-buy],#shop-featured [data-shop-buy]').forEach(button=>{
     const listing=platformShopListings.find(l=>l.id===button.dataset.shopBuy);
     if(!listing)return;
@@ -6852,7 +6871,7 @@ async function platformLoadMarket(withInventory=false) {
     if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
     platformMarketListings=all.map(row=>platformHydrateItem(img(row)));
     platformMarketMyListings=mine.map(row=>platformHydrateItem(img(row)));
-    if(results[2])platformMarketInventory=inv.map(row=>platformHydrateItem(img(row)));
+    if(results[2])platformMarketInventory=inv.map(row=>platformHydrateItem(img(row))).filter(row=>!xiBankIsCoin(row));
     if(platformInventoryItems.length) {
       const reservedIds=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
       for(const item of platformInventoryItems) if(reservedIds.has(platformItemKey(item))) item.reserved=true;
@@ -6896,13 +6915,14 @@ function platformRenderMarket() {
   platformApplyMarkup($('#market-my-listings'),platformMarketMyListings.length?platformMarketMyListings.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(i=>platformMarketListingHTML(i,{mine:true})).join(''):'<div class="market-empty">Todavía no has publicado ofertas.</div>');
   platformRenderMarketInventory();
   setText('market-wallet',platformMoney(platformWalletBalance));
+  setText('xi-bank-balance',xiBankEur(platformWalletBalance));
   $$('[data-market-tab]').forEach(b=>b.classList.toggle('active',b.dataset.marketTab===platformMarketTab));
   $$('.market-panel').forEach(p=>p.classList.toggle('active',p.id===`market-panel-${platformMarketTab}`));
 }
 function platformRenderMarketInventory() {
   const excluded=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
   // Instance grades are loaded for the owner: treat them as separate inventory copies.
-  platformMarketInventory=platformMarketInventory.map(row=>platformHydrateItem(row));
+  platformMarketInventory=platformMarketInventory.map(row=>platformHydrateItem(row)).filter(row=>!xiBankIsCoin(row));
   const items=platformMarketInventory.filter(i=>!i.listed&&!i.reserved&&!excluded.has(String(i.instance_id)));
   const host=$('#market-my-inventory');
   platformApplyMarkup(host,items.length?items.map(item=>`<button type="button" data-market-select="${esc(item.instance_id)}" class="market-inventory-item ${platformRarityMarketClass(item)} ${platformGradeClass(item)} ${platformMarketSelectedInstance===String(item.instance_id)?'active':''}" ${xiCustomFxAttrs(item)}>${platformGradeTag(item)}
@@ -7349,6 +7369,7 @@ function platformAlpha14Bind(){
 
 function platformBindEvents() {
   platformAlpha14Bind();
+  xiBankPlazaBind();
   document.addEventListener('click', event => {
     const appButton = event.target.closest('[data-platform-app]');
     if (appButton) {
@@ -7464,6 +7485,552 @@ function platformBindEvents() {
 }
 
 
+
+/* ========================================================================
+   XIFRE ALPHA 1.12 · BANCO Y LA PLAZA
+   Currency is virtual. Protected operations live in Supabase RPCs.
+   The game is an original block-breaker built with Canvas, not Google's assets.
+   ======================================================================== */
+const xiBankCoinTypeId = '00000000-0000-4000-8000-000000001120';
+const xiBankCoinMap = new Map();
+let xiBankPanel = '';
+let xiBankRecipient = null;
+let xiBankSearchTimer = null;
+let xiBankBusy = false;
+// Retain the same request id on retry after an ambiguous network response.
+let xiBankPendingRequest = null;
+let xiBankLoadRevision = 0;
+let xiBankHistory = [];
+const xiBankIsCoin = item => String(item?.item_id || item?.id || '') === xiBankCoinTypeId || Boolean(item?.is_cash_coin);
+const xiBankCoinArt = (small=false) => `<span class="xi-bank-coin-image${small?' xi-bank-coin-small':''}" aria-hidden="true"><span>€</span></span>`;
+const xiBankUuid = () => window.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,ch=>{const r=Math.random()*16|0;return (ch==='x'?r:(r&3|8)).toString(16);});
+const xiBankEur = cents => (Math.max(0,Number(cents||0))/100).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+
+async function xiBankLoadCoins(tradeId=null) {
+ if(!currentUser || !supabase)return;
+ try {
+  const {data,error}=await supabase.rpc('xifre_bank_coin_details',{p_trade_id:tradeId});
+  if(error)throw error;
+  // Coin amounts are per-instance, never inherited from the shared catalog.
+  for(const coin of Array.isArray(data)?data:[]) if(isValidUuid(coin.instance_id)) xiBankCoinMap.set(String(coin.instance_id),Number(coin.cash_cents||0));
+ } catch(error){console.warn('XIFRE BANK COIN DETAILS',error);}
+}
+function xiBankCoinList() {
+ return platformInventoryItems.filter(x=>xiBankIsCoin(x)).map(x=>({ ...x, cash_cents:Number(x.cash_cents||xiBankCoinMap.get(platformItemKey(x))||0) }));
+}
+function xiBankShowPanel(type){
+ if(!currentUser)return;
+ xiBankPanel=type;
+ xiBankRecipient=null;
+ $$('.xi-bank-actions [data-xi-bank-action]').forEach(x=>x.classList.toggle('active',x.dataset.xiBankAction===type));
+ const host=$('#xi-bank-panel'),body=$('#xi-bank-panel-content');
+ host?.classList.remove('hidden');
+ const titles={bizum:'Enviar un Bizum',withdraw:'Convertir dinero en una moneda',deposit:'Depositar dinero físico'};
+ setText('xi-bank-panel-title',titles[type]||'Banco');setText('xi-bank-feedback','');
+ if(!body)return;
+ if(type==='bizum') body.innerHTML=`<form id="xi-bank-bizum-form" class="xi-bank-form"><p class="xi-bank-hint">Envía dinero virtual a otro usuario de XIFRE. La transferencia es inmediata y no tiene comisiones.</p><label>Buscar usuario por su nombre<input id="xi-bank-username" type="search" maxlength="30" placeholder="Escribe el username" autocomplete="off" required></label><div id="xi-bank-user-results" class="xi-bank-user-results"></div><div id="xi-bank-selected" class="xi-bank-selected hidden"></div><label>Cantidad (€)<input id="xi-bank-send-amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="0.50" required></label><button class="xi-bank-submit" type="submit">Continuar · Enviar Bizum</button></form>`;
+ else if(type==='withdraw')body.innerHTML=`<form id="xi-bank-withdraw-form" class="xi-bank-form"><p class="xi-bank-hint">Elige una cantidad. Se descontará de tu cuenta y aparecerá como una moneda individual en tu inventario. Puedes intercambiar esa moneda con un amigo y él podrá depositarla.</p><label>Cantidad a convertir (€)<input id="xi-bank-withdraw-amount" type="number" min="0.01" step="0.01" max="1000000" placeholder="1.00" required></label><button class="xi-bank-submit" type="submit">Convertir en moneda</button></form>`;
+ else if(type==='deposit')body.innerHTML=`<p class="xi-bank-hint">Elige una moneda de tu inventario. Al depositarla, desaparecerá y su importe volverá a tu saldo. Las monedas incluidas en un intercambio activo no están disponibles.</p><div id="xi-bank-deposit-options"></div>`;
+ if(type==='deposit')xiBankRenderCoins();
+}
+function xiBankClosePanel(){xiBankPanel='';xiBankRecipient=null;$('#xi-bank-panel')?.classList.add('hidden');$$('.xi-bank-actions button').forEach(b=>b.classList.remove('active'));}
+function xiBankRenderCoins(){
+ const list=xiBankCoinList().filter(x=>Number(x.cash_cents)>0);
+ const markup=list.length?list.map(coin=>`<div class="xi-bank-coin-option" data-bank-coin="${esc(platformItemKey(coin))}">${xiBankCoinArt(true)}<span><strong>${esc(xiBankEur(coin.cash_cents))}</strong><small>Moneda XIFRE · una copia individual</small></span><button type="button" data-xi-bank-deposit="${esc(platformItemKey(coin))}" ${coin.reserved?'disabled title="Reservada en un intercambio"':''}>${coin.reserved?'Reservada':'Depositar'}</button></div>`).join(''):'<p class="xi-bank-hint">No tienes monedas físicas. Puedes convertir saldo en monedas desde el Banco.</p>';
+ const listHost=$('#xi-bank-coin-list');if(listHost)listHost.innerHTML=markup;
+ const depositHost=$('#xi-bank-deposit-options');if(depositHost)depositHost.innerHTML=markup;
+}
+function xiBankRenderHistory(){
+ const host=$('#xi-bank-history');if(!host)return;
+ const names={activity:'Actividad en XIFRE',shop:'Compra en Tienda',admin:'Ajuste de saldo',market:'Mercado',instant:'Venta instantánea',bank_transfer:'Bizum',bank_withdraw:'Conversión a moneda',bank_deposit:'Depósito de moneda',plaza:'Premio de La Plaza'};
+ host.innerHTML=xiBankHistory.length?xiBankHistory.map(m=>{const v=Number(m.delta_cents||0),date=new Date(m.created_at);return `<div class="xi-bank-history-row"><span class="xi-bank-history-icon">${v>=0?'↙':'↗'}</span><span><strong>${esc(m.transfer_label||names[m.reason]||'Movimiento')}</strong><small>${esc(Number.isFinite(date.getTime())?date.toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'')}</small></span><b class="${v>=0?'positive':''}">${v>=0?'+':'−'}${esc(xiBankEur(Math.abs(v)))}</b></div>`;}).join(''):'<p>Aún no hay movimientos.</p>';
+}
+async function xiBankLoad(force=false){
+ if(!currentUser || !supabase)return;
+ const owner=String(currentUser.id),rev=++xiBankLoadRevision;
+ if(platformActiveApp==='bank')setText('xi-bank-feedback','');
+ try {
+  const [wallet,history,coins]=await Promise.all([
+   supabase.rpc('xifre_wallet_get'),supabase.rpc('xifre_bank_history'),supabase.rpc('xifre_bank_coin_details',{p_trade_id:null})
+  ]);
+  if(wallet.error)throw wallet.error;
+  if(history.error)throw history.error;
+  if(coins.error)throw coins.error;
+  if(rev!==xiBankLoadRevision || String(currentUser?.id)!==owner)return;
+  platformSetWalletUI(wallet.data?.balance_cents);
+  xiBankHistory=Array.isArray(history.data)?history.data:[];
+  for(const row of (Array.isArray(coins.data)?coins.data:[]))xiBankCoinMap.set(String(row.instance_id),Number(row.cash_cents));
+  xiBankRenderHistory();xiBankRenderCoins();
+  if(force)await platformRefreshInventory();
+ }catch(error){setText('xi-bank-feedback','No se pudo consultar el Banco: '+friendlyError(error));console.warn('BANCO',error);}
+}
+function xiBankParseCents(input){
+ const raw=String(input?.value??'').trim();
+ // Prevent fractional cents even if the native number input allows typing them.
+ if(!/^\d+(?:[.,]\d{1,2})?$/.test(raw))return null;
+ const [whole,decimal='']=raw.replace(',','.').split('.');
+ const cents=Number(whole)*100+Number(decimal.padEnd(2,'0'));
+ return Number.isSafeInteger(cents)&&cents>=1&&cents<=100000000?cents:null;
+}
+async function xiBankSearchUsers(term){
+ const host=$('#xi-bank-user-results');if(!host||!currentUser||xiBankPanel!=='bizum')return;
+ const q=String(term||'').trim().replace(/[%_\\]/g,'').slice(0,25);
+ if(q.length<2){host.innerHTML='<span class="xi-bank-hint">Escribe al menos dos letras.</span>';return;}
+ const owner=String(currentUser.id);
+ try {
+  const {data,error}=await supabase.from('profiles').select('id,username').ilike('username',`%${q}%`).limit(12);
+  if(error)throw error;
+  if(xiBankPanel!=='bizum'||String(currentUser?.id)!==owner||String($('#xi-bank-username')?.value||'').trim().replace(/[%_\\]/g,'').slice(0,25)!==q)return;
+  host.innerHTML=(data||[]).filter(u=>u.id!==owner).map(u=>`<button type="button" data-xi-bank-recipient="${esc(u.id)}" data-xi-bank-username="${esc(u.username||'Usuario')}">@${esc(u.username||'usuario')}</button>`).join('') || '<span class="xi-bank-hint">No se han encontrado usuarios.</span>';
+ }catch(error){host.textContent='No se pudo buscar usuarios: '+friendlyError(error);}
+}
+function xiBankSelectRecipient(id,name){if(!isValidUuid(id)||!currentUser||id===currentUser.id)return;xiBankRecipient={id,name};setText('xi-bank-selected','Enviarás el dinero a @'+name);$('#xi-bank-selected')?.classList.remove('hidden');}
+async function xiBankSubmit(event,type){
+ event.preventDefault();if(xiBankBusy||!currentUser)return;
+ const input=$(type==='bizum'?'#xi-bank-send-amount':'#xi-bank-withdraw-amount'),amount=xiBankParseCents(input);
+ if(!amount)return setText('xi-bank-feedback','Indica un importe válido de entre 0,01 € y 1.000.000,00 €.');
+ if(amount>platformWalletBalance)return setText('xi-bank-feedback','Saldo insuficiente.');
+ if(type==='bizum' && !xiBankRecipient)return setText('xi-bank-feedback','Elige primero al usuario destinatario.');
+ const text=type==='bizum'?`¿Enviar ${xiBankEur(amount)} a @${xiBankRecipient.name}?`:`¿Convertir ${xiBankEur(amount)} en una moneda física?`;
+ if(!window.confirm(text))return;
+ const owner=String(currentUser.id),button=event.target.querySelector('[type="submit"]');xiBankBusy=true;if(button)button.disabled=true;
+ try {
+  const opKey=[owner,type,amount,type==='bizum'?xiBankRecipient.id:''].join(':');
+  const request=xiBankPendingRequest?.key===opKey?xiBankPendingRequest.id:xiBankUuid();
+  xiBankPendingRequest={key:opKey,id:request};
+  const {data,error}=type==='bizum'?await supabase.rpc('xifre_bank_transfer',{p_recipient_id:xiBankRecipient.id,p_amount_cents:amount,p_request_id:request}):
+      await supabase.rpc('xifre_bank_withdraw',{p_amount_cents:amount,p_request_id:request});
+  if(error)throw error;
+  if(String(currentUser?.id)!==owner)return;
+  xiBankPendingRequest=null;
+  platformSetWalletUI(data?.balance_cents);
+  toast(type==='bizum'?'Bizum enviado correctamente.':'Moneda creada y añadida al inventario.','success');
+  xiBankClosePanel();await Promise.all([xiBankLoad(),platformRefreshInventory()]);
+ }catch(error){setText('xi-bank-feedback','No se pudo completar: '+friendlyError(error));}
+ finally{xiBankBusy=false;if(button)button.disabled=false;}
+}
+async function xiBankDeposit(instanceId){
+ const id=String(instanceId||'');const coin=xiBankCoinList().find(c=>platformItemKey(c)===id);
+ if(!coin||!coin.cash_cents)return toast('Esta moneda ya no está disponible.','info');
+ if(xiBankBusy)return;
+ if(coin.reserved)return toast('Esta moneda está reservada.','info');
+ if(!window.confirm(`¿Depositar ${xiBankEur(coin.cash_cents)} en tu saldo? La moneda desaparecerá.`))return;
+ xiBankBusy=true;const owner=String(currentUser?.id||'');
+ try{
+  const {data,error}=await supabase.rpc('xifre_bank_deposit',{p_instance_id:id});
+  if(error)throw error;
+  if(String(currentUser?.id)!==owner)return;
+  xiBankCoinMap.delete(id);platformSetWalletUI(data?.balance_cents);
+  toast('Moneda depositada: '+xiBankEur(data?.amount_cents),'success');
+  closeModal('item-details-modal');
+  await Promise.all([platformRefreshInventory(),xiBankLoad()]);
+ }catch(error){toast('No se pudo depositar: '+friendlyError(error),'error');}
+ finally{xiBankBusy=false;}
+}
+function xiBankResetSession(){xiBankClosePanel();xiBankRecipient=null;xiBankCoinMap.clear();xiBankHistory=[];xiBankPendingRequest=null;xiBankBusy=false;xiBankLoadRevision++;xiBankRenderCoins();xiBankRenderHistory();}
+
+/* ==================== PLAZA: Canvas Block Breaker ===================== */
+const XI_PLAZA_WIDTH=900, XI_PLAZA_HEIGHT=600;
+const xiPlaza={canvas:null,ctx:null,active:false,open:false,playing:false,paused:true,starting:false,finished:false,
+ runId:null,round:1,lives:3,score:0,earned:0,paidRounds:0,pendingRounds:[],rewardBusy:false,rewardTimer:0,
+ paddleX:450,paddleW:112,paddleY:550,paddleSpeed:690,balls:[],bricks:[],drops:[],particles:[],shots:[],
+ keys:{left:false,right:false},lastFrame:0,frame:0,shotTimer:0,laserUntil:0,wideUntil:0,slowUntil:0,
+ sound:false,audio:null,animation:0,stars:[],lastReason:'',pointerX:null,levelBusy:false};
+const xiPlazaColors=['#4ab6ff','#ff6b91','#ffc75f','#6bf3b7','#b29fff','#ff9b52','#66deef'];
+function xiPlazaStatus(text){setText('xi-plaza-game-message',text||'');}
+function xiPlazaStats(){
+ setText('xi-plaza-round',String(xiPlaza.round));
+ setText('xi-plaza-lives','♥'.repeat(Math.min(9,xiPlaza.lives)) || '—');
+ setText('xi-plaza-score',xiPlaza.score.toLocaleString('es-ES'));
+ setText('xi-plaza-earned',xiBankEur(xiPlaza.earned));
+}
+function xiPlazaOverlay(title,copy,action,mode){
+ xiPlaza.lastReason=mode||'';
+ setText('xi-plaza-overlay-title',title);setText('xi-plaza-overlay-copy',copy);
+ setText('xi-plaza-overlay-action',action);
+ $('#xi-plaza-overlay')?.classList.remove('hidden');
+}
+function xiPlazaHideOverlay(){$('#xi-plaza-overlay')?.classList.add('hidden');}
+function xiPlazaBeep(freq=440,duration=.055,type='sine'){
+ if(!xiPlaza.sound)return;
+ try{
+  const context=xiPlaza.audio||(xiPlaza.audio=new (window.AudioContext||window.webkitAudioContext)());
+  if(context.state==='suspended')void context.resume();
+  const oscillator=context.createOscillator(),gain=context.createGain();
+  oscillator.type=type;oscillator.frequency.value=freq;
+  gain.gain.setValueAtTime(.038,context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(.0001,context.currentTime+duration);
+  oscillator.connect(gain);gain.connect(context.destination);oscillator.start();oscillator.stop(context.currentTime+duration);
+ }catch(_){}
+}
+function xiPlazaResize(){
+ const canvas=$('#xi-plaza-canvas');if(!canvas)return;
+ if(xiPlaza.canvas!==canvas){xiPlaza.canvas=canvas;xiPlaza.ctx=canvas.getContext('2d',{alpha:false});}
+ // Constant logical resolution: CSS scales without perturbing physics.
+ if(canvas.width!==XI_PLAZA_WIDTH)canvas.width=XI_PLAZA_WIDTH;
+ if(canvas.height!==XI_PLAZA_HEIGHT)canvas.height=XI_PLAZA_HEIGHT;
+}
+function xiPlazaStarField(){
+ if(xiPlaza.stars.length)return;
+ for(let i=0;i<75;i++)xiPlaza.stars.push({x:Math.random()*900,y:Math.random()*600,r:Math.random()*1.5+.3,o:Math.random()*.3+.08});
+}
+function xiPlazaPaddleWidth(){return xiPlaza.wideUntil>performance.now()?180:xiPlaza.paddleW;}
+function xiPlazaCreateBall(attached=true,x=xiPlaza.paddleX,y=xiPlaza.paddleY-22,vx=0,vy=-460){
+ const speed=460+Math.min(210,(xiPlaza.round-1)*13);
+ const b={x,y,vx:attached?0:vx,vy:attached?0:vy,r:7.5,attached,trail:[],speed};
+ xiPlaza.balls.push(b);return b;
+}
+function xiPlazaStartWave(){
+ const p=xiPlaza;
+ p.round=Math.max(1,p.round);p.levelBusy=false;p.drops=[];p.shots=[];p.balls=[];
+ p.wideUntil=0;p.slowUntil=0;p.laserUntil=0;p.paddleX=450;p.pointerX=null;
+ p.bricks=[];
+ const cols=10,rows=Math.min(8,4+Math.floor((p.round-1)/2));
+ const gap=7,w=72,h=21,startX=(900-(w+gap)*cols+gap)/2;
+ for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
+  const tough=p.round>=2 && Math.random()<Math.min(.42,.08+p.round*.045);
+  const power=Math.random()<(p.round===1?.24:.20)?['wide','life','multi','slow','laser','blast'][Math.floor(Math.random()*6)]:null;
+  p.bricks.push({x:startX+col*(w+gap),y:68+row*31,w,h,hp:tough?2:1,maxHp:tough?2:1,color:xiPlazaColors[(row+p.round-1)%xiPlazaColors.length],power});
+ }
+ xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus(`Ronda ${p.round}: destruye todos los bloques para ganar 0,01 € virtuales.`);
+}
+async function xiPlazaNewRun(){
+ if(xiPlaza.starting)return;
+ if(xiPlaza.rewardBusy || xiPlaza.pendingRounds.length){
+  xiPlazaStatus('Primero se están confirmando los premios de la partida anterior.');
+  return;
+ }
+ const p=xiPlaza;p.starting=true;
+ const btn=$('#xi-plaza-overlay-action');if(btn)btn.disabled=true;
+ xiPlazaStatus('Iniciando partida segura...');
+ try{
+  const {data,error}=await supabase.rpc('xifre_plaza_start');if(error)throw error;
+  p.runId=String(data?.run_id||'');if(!isValidUuid(p.runId))throw new Error('No se pudo crear la sesión de juego.');
+  p.round=1;p.lives=3;p.score=0;p.earned=0;p.paidRounds=0;p.pendingRounds=[];
+  p.finished=false;p.active=true;p.paused=false;p.playing=true;p.keys.left=false;p.keys.right=false;
+  p.stars=[];xiPlazaStarField();xiPlazaStartWave();xiPlazaHideOverlay();xiPlazaLaunch();xiPlazaLoopStart();
+ }catch(error){xiPlazaStatus('No se pudo empezar: '+friendlyError(error));toast('No se pudo iniciar el minijuego: '+friendlyError(error),'error');}
+ finally{p.starting=false;if(btn)btn.disabled=false;}
+}
+function xiPlazaLaunch(){
+ if(!xiPlaza.playing||xiPlaza.paused)return;
+ let launched=false;
+ for(const b of xiPlaza.balls){if(!b.attached)continue;b.attached=false;
+  const speed=460+Math.min(200,(xiPlaza.round-1)*13);
+  b.vx=(Math.random()<.5?-1:1)*Math.min(230,speed*.42);b.vy=-Math.sqrt(speed*speed-b.vx*b.vx);launched=true;
+ }
+ if(launched)xiPlazaBeep(360,.09,'triangle');
+}
+function xiPlazaPause(force=false){
+ if(!xiPlaza.playing||xiPlaza.finished)return;
+ if(force||!xiPlaza.paused){
+  xiPlaza.paused=true;xiPlaza.keys.left=false;xiPlaza.keys.right=false;
+  if(xiPlaza.animation)cancelAnimationFrame(xiPlaza.animation);xiPlaza.animation=0;
+  xiPlazaOverlay('Partida en pausa','Tu partida continúa desde aquí.','Continuar','resume');
+ }else{
+  xiPlaza.paused=false;xiPlazaHideOverlay();xiPlazaLoopStart();
+ }
+}
+function xiPlazaResetOnExit(){
+ xiPlaza.keys.left=false;xiPlaza.keys.right=false;
+ if(xiPlaza.playing && !xiPlaza.finished)xiPlazaPause(true);
+ $('#xi-plaza-game')?.classList.add('hidden');
+ const btn=$('#xi-plaza-open-game');if(btn)btn.textContent=xiPlaza.runId && !xiPlaza.finished?'🎮 Continuar Block Breaker':'🎮 Abrir Block Breaker';
+}
+function xiPlazaOpenIntro(){
+ xiPlazaResize();xiPlazaResetOnExit();
+ const host=$('#plaza-app-view .xi-plaza-scroll');if(host)host.scrollTop=0;
+}
+function xiPlazaOpenGame(){
+ xiPlazaResize();xiPlaza.open=true;
+ const game=$('#xi-plaza-game');game?.classList.remove('hidden');
+ game?.scrollIntoView({block:'start',behavior:window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+ if(xiPlaza.playing && !xiPlaza.finished)xiPlazaOverlay('Partida en pausa','Continúa la partida donde la dejaste.','Continuar','resume');
+ else xiPlazaOverlay('Block Breaker','Usa ← / → o A / D. En móvil, desliza el dedo o usa las flechas. Espacio lanza la bola.','Empezar partida','start');
+ xiPlazaRender();
+}
+function xiPlazaLoopStart(){
+ if(!xiPlaza.playing||xiPlaza.paused||xiPlaza.animation||document.visibilityState!=='visible'||platformActiveApp!=='plaza')return;
+ xiPlaza.lastFrame=performance.now();xiPlaza.animation=requestAnimationFrame(xiPlazaFrame);
+}
+function xiPlazaFrame(t){
+ xiPlaza.animation=0;
+ if(!xiPlaza.playing || xiPlaza.paused || document.visibilityState!=='visible'||platformActiveApp!=='plaza')return;
+ const dt=Math.min(.032,Math.max(0,(t-xiPlaza.lastFrame)/1000));xiPlaza.lastFrame=t;
+ xiPlazaUpdate(dt);xiPlazaRender();xiPlaza.animation=requestAnimationFrame(xiPlazaFrame);
+}
+function xiPlazaParticle(x,y,color,n=9){
+ for(let i=0;i<n;i++){
+  const angle=Math.random()*Math.PI*2,speed=55+Math.random()*190;
+  xiPlaza.particles.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,r:2+Math.random()*3,life:.35+Math.random()*.4,max:.75,color});
+ }
+ if(xiPlaza.particles.length>380)xiPlaza.particles.splice(0,xiPlaza.particles.length-380);
+}
+function xiPlazaDestroyBrick(brick){
+ if(brick.hp<=0)return;
+ brick.hp=0;xiPlaza.score+=brick.maxHp===2?25:15;
+ xiPlazaParticle(brick.x+brick.w/2,brick.y+brick.h/2,brick.color,12);
+ xiPlazaBeep(520+Math.random()*190,.042,'triangle');
+ if(brick.power)xiPlaza.drops.push({x:brick.x+brick.w/2,y:brick.y+brick.h/2,vy:125,type:brick.power});
+}
+function xiPlazaBrickHit(brick){
+ if(brick.hp<=0)return;
+ brick.hp--;xiPlaza.score+=8;xiPlazaBeep(490,.035);
+ if(brick.hp<=0){brick.hp=1;xiPlazaDestroyBrick(brick);}
+ else xiPlazaParticle(brick.x+brick.w/2,brick.y+brick.h/2,brick.color,4);
+}
+function xiPlazaApplyPower(drop){
+ const p=xiPlaza;xiPlazaParticle(drop.x,p.paddleY,drop.color||'#fff4ae',24);xiPlazaBeep(880,.19,'sine');
+ if(drop.type==='wide'){p.wideUntil=performance.now()+17000;xiPlazaStatus('¡Barra expandida durante 17 segundos!');}
+ else if(drop.type==='life'){p.lives=Math.min(8,p.lives+1);xiPlazaStatus('¡Vida extra!');}
+ else if(drop.type==='multi'){
+  const originals=p.balls.slice();
+  for(const b of originals){if(p.balls.length>=9)break;const speed=Math.hypot(b.vx,b.vy)||460;
+   for(const sign of [-1,1]){if(p.balls.length>=9)break;
+    const v=Math.atan2(b.vy||-speed,b.vx||10)+sign*.37;
+    xiPlazaCreateBall(false,b.x,b.y,Math.cos(v)*speed,Math.sin(v)*speed);
+   }}
+  xiPlazaStatus('¡Multibola!');
+ }
+ else if(drop.type==='slow'){p.slowUntil=performance.now()+12000;for(const b of p.balls){b.vx*=.78;b.vy*=.78;}xiPlazaStatus('¡Bolas ralentizadas!');}
+ else if(drop.type==='laser'){p.laserUntil=performance.now()+14000;p.shotTimer=0;xiPlazaStatus('¡Láser doble activado!');}
+ else if(drop.type==='blast'){
+  const live=p.bricks.filter(b=>b.hp>0);
+  for(const b of live.slice(0,6+Math.floor(Math.random()*5)))xiPlazaDestroyBrick(b);
+  xiPlazaStatus('¡Explosión de bloques!');
+ }
+ xiPlazaStats();
+}
+function xiPlazaUpdate(dt){
+ const p=xiPlaza;const now=performance.now();p.frame+=dt;
+ if(p.levelBusy)return;
+ const w=xiPlazaPaddleWidth();
+ const moving=(p.keys.right?1:0)-(p.keys.left?1:0);
+ if(moving)p.paddleX+=moving*p.paddleSpeed*dt;
+ if(p.pointerX!==null)p.paddleX+=(p.pointerX-p.paddleX)*Math.min(1,dt*24);
+ p.paddleX=Math.max(w/2+8,Math.min(900-w/2-8,p.paddleX));
+ for(const b of p.balls.slice()){
+  if(b.attached){b.x=p.paddleX;b.y=p.paddleY-21;continue;}
+  const prevX=b.x,prevY=b.y;
+  b.x+=b.vx*dt;b.y+=b.vy*dt;
+  b.trail.push({x:b.x,y:b.y});if(b.trail.length>8)b.trail.shift();
+  if(b.x<b.r){b.x=b.r;b.vx=Math.abs(b.vx);xiPlazaBeep(250,.035);}
+  if(b.x>900-b.r){b.x=900-b.r;b.vx=-Math.abs(b.vx);xiPlazaBeep(250,.035);}
+  if(b.y<b.r){b.y=b.r;b.vy=Math.abs(b.vy);}
+  if(b.vy>0 && prevY+b.r<=p.paddleY+5 && b.y+b.r>=p.paddleY && Math.abs(b.x-p.paddleX)<=w/2+b.r){
+   const offset=Math.max(-1,Math.min(1,(b.x-p.paddleX)/(w/2)));
+   let speed=Math.min(760,Math.max(450,Math.hypot(b.vx,b.vy)*1.007));
+   if(now<p.slowUntil)speed=Math.max(360,speed*.93);
+   const angle=offset*1.1;
+   b.vx=speed*Math.sin(angle);b.vy=-Math.max(230,speed*Math.cos(angle));b.y=p.paddleY-b.r-2;
+   xiPlazaParticle(b.x,p.paddleY,'#71ecff',4);xiPlazaBeep(340,.05,'triangle');
+  }
+  if(b.y>600+b.r){p.balls.splice(p.balls.indexOf(b),1);continue;}
+  // Circle/rectangle collision, with previous position to choose the axis.
+  for(const brick of p.bricks){
+   if(brick.hp<=0)continue;
+   const cx=Math.max(brick.x,Math.min(b.x,brick.x+brick.w));
+   const cy=Math.max(brick.y,Math.min(b.y,brick.y+brick.h));
+   const dx=b.x-cx,dy=b.y-cy;
+   if(dx*dx+dy*dy<=b.r*b.r){
+    xiPlazaBrickHit(brick);
+    if(prevY+b.r<=brick.y || prevY-b.r>=brick.y+brick.h)b.vy=-b.vy;
+    else if(prevX+b.r<=brick.x || prevX-b.r>=brick.x+brick.w)b.vx=-b.vx;
+    else b.vy=-b.vy;
+    b.x=prevX;b.y=prevY;break;
+   }
+  }
+ }
+ for(const drop of p.drops.slice()){
+  drop.y+=drop.vy*dt;drop.vy+=15*dt;
+  if(drop.y>=p.paddleY-14 && drop.y<=p.paddleY+22 && Math.abs(drop.x-p.paddleX)<w/2+10){p.drops.splice(p.drops.indexOf(drop),1);xiPlazaApplyPower(drop);}
+  else if(drop.y>600)p.drops.splice(p.drops.indexOf(drop),1);
+ }
+ if(p.laserUntil>now){
+  p.shotTimer-=dt;
+  if(p.shotTimer<=0){p.shotTimer=.27;for(const side of [-1,1])p.shots.push({x:p.paddleX+side*(w/2-9),y:p.paddleY-15,vy:-890});xiPlazaBeep(650,.025,'square');}
+ }
+ for(const shot of p.shots.slice()){
+  shot.y+=shot.vy*dt;
+  for(const brick of p.bricks)if(brick.hp>0 && shot.x>=brick.x&&shot.x<=brick.x+brick.w&&shot.y<=brick.y+brick.h&&shot.y>=brick.y-12){
+   xiPlazaBrickHit(brick);shot.y=-30;break;
+  }
+  if(shot.y<0)p.shots.splice(p.shots.indexOf(shot),1);
+ }
+ for(const particle of p.particles.slice()){
+  particle.x+=particle.vx*dt;particle.y+=particle.vy*dt;particle.vy+=110*dt;particle.life-=dt;
+  if(particle.life<=0)p.particles.splice(p.particles.indexOf(particle),1);
+ }
+ if(!p.balls.length){
+  p.lives--;
+  if(p.lives<=0){xiPlazaGameOver();return;}
+  xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus('¡Has perdido una bola! Pulsa Espacio o toca el campo para continuar.');
+  xiPlazaBeep(180,.25,'sawtooth');
+ }
+ if(p.bricks.length && p.bricks.every(b=>b.hp<=0))xiPlazaCompleteWave();
+ xiPlazaStats();
+}
+function xiPlazaRoundSymbol(type){return {wide:'⇧',life:'✚',multi:'◉',slow:'◈',laser:'✦',blast:'✹'}[type]||'★';}
+function xiPlazaRender(){
+ xiPlazaResize();const p=xiPlaza,c=p.ctx;if(!c)return;
+ const W=900,H=600;
+ const bg=c.createLinearGradient(0,0,900,600);bg.addColorStop(0,'#061124');bg.addColorStop(.57,'#0d1831');bg.addColorStop(1,'#152c46');
+ c.fillStyle=bg;c.fillRect(0,0,W,H);
+ c.save();c.strokeStyle='#ffffff0a';c.lineWidth=1;
+ for(let x=0;x<=900;x+=45){c.beginPath();c.moveTo(x,0);c.lineTo(x,600);c.stroke();}
+ for(let y=0;y<=600;y+=45){c.beginPath();c.moveTo(0,y);c.lineTo(900,y);c.stroke();}
+ c.restore();xiPlazaStarField();
+ for(const star of p.stars){c.globalAlpha=star.o+Math.sin(p.frame*.7+star.x)*.05;c.fillStyle='#bdefff';c.beginPath();c.arc(star.x,star.y,star.r,0,Math.PI*2);c.fill();}c.globalAlpha=1;
+ c.textAlign='center';c.textBaseline='middle';
+ for(const b of p.bricks){if(b.hp<=0)continue;
+  c.shadowBlur=14;c.shadowColor=b.color+'85';c.fillStyle=b.color;c.beginPath();c.roundRect(b.x,b.y,b.w,b.h,5);c.fill();c.shadowBlur=0;
+  const shine=c.createLinearGradient(0,b.y,0,b.y+b.h);shine.addColorStop(0,'#ffffff7a');shine.addColorStop(1,'#ffffff00');c.fillStyle=shine;c.beginPath();c.roundRect(b.x+1,b.y+1,b.w-2,7,4);c.fill();
+  if(b.hp>1){c.strokeStyle='#ffffffdd';c.lineWidth=1.6;c.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);}
+  if(b.power){c.fillStyle='#09243bcc';c.beginPath();c.roundRect(b.x+b.w/2-10,b.y+2,20,b.h-4,5);c.fill();c.fillStyle='#fff';c.font='bold 15px Arial';c.fillText(xiPlazaRoundSymbol(b.power),b.x+b.w/2,b.y+b.h/2+1);}
+ }
+ const width=xiPlazaPaddleWidth(),px=p.paddleX-width/2;
+ c.shadowBlur=22;c.shadowColor='#52ffe7a0';const paddle=c.createLinearGradient(px,p.paddleY,px+width,p.paddleY);paddle.addColorStop(0,'#45bfff');paddle.addColorStop(.5,'#b5fff2');paddle.addColorStop(1,'#4ddacc');c.fillStyle=paddle;c.beginPath();c.roundRect(px,p.paddleY,width,16,8);c.fill();c.shadowBlur=0;
+ c.fillStyle='#ffffff8c';c.beginPath();c.roundRect(px+6,p.paddleY+2,width-12,3,2);c.fill();
+ if(performance.now()<p.laserUntil){c.fillStyle='#f2abff';c.fillRect(px+4,p.paddleY-10,8,14);c.fillRect(px+width-12,p.paddleY-10,8,14);}
+ for(const b of p.balls){
+  for(let i=0;i<b.trail.length;i++){const q=b.trail[i];c.globalAlpha=(i+1)/b.trail.length*.28;c.fillStyle='#78fff1';c.beginPath();c.arc(q.x,q.y,b.r*.7,0,Math.PI*2);c.fill();}
+  c.globalAlpha=1;c.shadowBlur=22;c.shadowColor='#82eaff';c.fillStyle='#fff';c.beginPath();c.arc(b.x,b.y,b.r,0,Math.PI*2);c.fill();c.shadowBlur=0;
+ }
+ for(const drop of p.drops){
+  const colors={wide:'#64dfff',life:'#ff839a',multi:'#f7cd70',slow:'#d2a8ff',laser:'#92fbe6',blast:'#ffad5c'};
+  c.shadowBlur=14;c.shadowColor=colors[drop.type]||'#fff';c.fillStyle=colors[drop.type]||'#fff';c.beginPath();c.roundRect(drop.x-13,drop.y-13,26,26,7);c.fill();c.shadowBlur=0;c.fillStyle='#12263b';c.font='bold 20px Arial';c.fillText(xiPlazaRoundSymbol(drop.type),drop.x,drop.y+1);
+ }
+ c.shadowBlur=12;c.shadowColor='#e1aeff';c.fillStyle='#f0bbff';for(const shot of p.shots)c.fillRect(shot.x-2,shot.y-14,4,18);c.shadowBlur=0;
+ for(const particle of p.particles){c.globalAlpha=Math.min(1,particle.life/.5);c.fillStyle=particle.color;c.beginPath();c.arc(particle.x,particle.y,particle.r*Math.min(1,particle.life*3),0,Math.PI*2);c.fill();}c.globalAlpha=1;
+ if(p.balls.some(b=>b.attached)&&p.playing&&!p.paused){c.fillStyle='#a5e8f0';c.font='12px Arial';c.fillText('ESPACIO / TOCAR PARA LANZAR',p.paddleX,p.paddleY+34);}
+ c.fillStyle='#5d88a444';c.fillRect(0,590,900,2);
+}
+async function xiPlazaPayQueue(){
+ const p=xiPlaza;if(p.rewardBusy||!p.runId||!p.pendingRounds.length||!currentUser)return;
+ p.rewardBusy=true;
+ try{
+  while(p.pendingRounds.length){
+   const wave=p.pendingRounds[0];
+   const {data,error}=await supabase.rpc('xifre_plaza_claim',{p_run_id:p.runId,p_round:wave});
+   if(error){
+    const msg=friendlyError(error);
+    if(/demasiado pronto/i.test(msg)){
+     xiPlazaStatus('Ronda '+wave+' superada. Esperando validación del servidor para el premio...');
+     clearTimeout(p.rewardTimer);p.rewardTimer=setTimeout(()=>void xiPlazaPayQueue(),5000);
+    }else{
+     xiPlazaStatus('No se pudo abonar la ronda '+wave+': '+msg);
+     // Do not loop on permanent errors such as the daily cap.
+     if(/máximo diario|caducada|finalizada|inicia sesión/i.test(msg))p.pendingRounds.length=0;
+     else{clearTimeout(p.rewardTimer);p.rewardTimer=setTimeout(()=>void xiPlazaPayQueue(),8500);}
+    }
+    return;
+   }
+   p.pendingRounds.shift();p.paidRounds=Math.max(p.paidRounds,Number(data?.paid_rounds||wave));
+   if(!data?.already_paid)p.earned+=Number(data?.earned_cents||1);
+   if(data?.balance_cents!=null)platformSetWalletUI(data.balance_cents);
+   xiPlazaStats();xiPlazaStatus('¡Premio acreditado! +0,01 € por la ronda '+wave+'.');
+  }
+ }finally{p.rewardBusy=false;if(p.finished && !p.pendingRounds.length)void xiPlazaFinishRun();}
+}
+function xiPlazaCompleteWave(){
+ const p=xiPlaza;if(p.levelBusy)return;p.levelBusy=true;
+ p.pendingRounds.push(p.round);void xiPlazaPayQueue();
+ p.playing=false;p.paused=true;
+ if(p.animation){cancelAnimationFrame(p.animation);p.animation=0;}
+ xiPlazaStats();xiPlazaOverlay('¡Ronda '+p.round+' superada!','Has completado el nivel. Premio: +0,01 € virtuales. Los siguientes bloques serán más difíciles.','Siguiente ronda','next');
+ xiPlazaParticle(450,270,'#66ffee',60);xiPlazaBeep(1050,.24,'triangle');xiPlazaRender();
+}
+async function xiPlazaFinishRun(){
+ if(!xiPlaza.runId||xiPlaza.pendingRounds.length||xiPlaza.rewardBusy)return;
+ const runId=xiPlaza.runId;xiPlaza.runId=null;
+ try{await supabase.rpc('xifre_plaza_finish',{p_run_id:runId});}catch(error){console.warn('PLAZA FINISH',error);}
+}
+function xiPlazaGameOver(){
+ const p=xiPlaza;p.finished=true;p.playing=false;p.paused=true;
+ if(p.animation){cancelAnimationFrame(p.animation);p.animation=0;}
+ xiPlazaStats();xiPlazaOverlay('Fin de partida',`Has completado ${p.round-1} ${p.round-1===1?'ronda':'rondas'}. Ganancia acreditada: ${xiBankEur(p.earned)}. ¡Vuelve a intentarlo!`,'Jugar otra vez','restart');
+ xiPlazaStatus('Fin de partida. Los premios pendientes se validan en Supabase.');
+ if(!p.pendingRounds.length)void xiPlazaFinishRun();
+}
+function xiPlazaOverlayAction(){
+ const p=xiPlaza,mode=p.lastReason;
+ if(mode==='start'||mode==='restart'){void xiPlazaNewRun();return;}
+ if(mode==='resume'){p.paused=false;p.playing=true;xiPlazaHideOverlay();xiPlazaLoopStart();return;}
+ if(mode==='next'){
+  p.round++;p.levelBusy=false;p.playing=true;p.paused=false;
+  xiPlazaStartWave();xiPlazaHideOverlay();xiPlazaLoopStart();return;
+ }
+ xiPlazaLaunch();
+}
+function xiPlazaSetPointer(event){
+ if(!xiPlaza.canvas || !xiPlaza.playing||xiPlaza.paused)return;
+ const rect=xiPlaza.canvas.getBoundingClientRect();
+ if(rect.width<1)return;
+ xiPlaza.pointerX=Math.max(20,Math.min(880,(event.clientX-rect.left)/rect.width*900));
+}
+function xiPlazaStop(){
+ clearTimeout(xiPlaza.rewardTimer);xiPlaza.rewardTimer=0;
+ if(xiPlaza.animation)cancelAnimationFrame(xiPlaza.animation);xiPlaza.animation=0;
+ const activeRun=xiPlaza.runId;
+ xiPlaza.runId=null;xiPlaza.playing=false;xiPlaza.finished=true;xiPlaza.paused=true;xiPlaza.open=false;
+ xiPlaza.pendingRounds=[];xiPlaza.keys.left=false;xiPlaza.keys.right=false;
+ if(activeRun && supabase)void supabase.rpc('xifre_plaza_finish',{p_run_id:activeRun}).catch(()=>{});
+ $('#xi-plaza-game')?.classList.add('hidden');
+}
+function xiBankPlazaBind(){
+ $('#xi-bank-refresh')?.addEventListener('click',()=>{void xiBankLoad(true);void platformLoadWallet(false);});
+ $('#xi-bank-panel-close')?.addEventListener('click',xiBankClosePanel);
+ document.addEventListener('click',event=>{
+  const op=event.target.closest('[data-xi-bank-action]');if(op){xiBankShowPanel(op.dataset.xiBankAction);return;}
+  const target=event.target.closest('[data-xi-bank-recipient]');if(target){xiBankSelectRecipient(target.dataset.xiBankRecipient,target.dataset.xiBankUsername);return;}
+  const deposit=event.target.closest('[data-xi-bank-deposit]');if(deposit){void xiBankDeposit(deposit.dataset.xiBankDeposit);return;}
+ });
+ $('#xi-bank-panel')?.addEventListener('submit',event=>{
+  if(event.target.id==='xi-bank-bizum-form')void xiBankSubmit(event,'bizum');
+  else if(event.target.id==='xi-bank-withdraw-form')void xiBankSubmit(event,'withdraw');
+ });
+ $('#xi-bank-panel')?.addEventListener('input',event=>{
+  if(event.target.id!=='xi-bank-username')return;
+  xiBankRecipient=null;$('#xi-bank-selected')?.classList.add('hidden');
+  clearTimeout(xiBankSearchTimer);xiBankSearchTimer=setTimeout(()=>void xiBankSearchUsers(event.target.value),240);
+ });
+ $('#xi-plaza-open-game')?.addEventListener('click',xiPlazaOpenGame);
+ $('#xi-plaza-overlay-action')?.addEventListener('click',xiPlazaOverlayAction);
+ $('#xi-plaza-pause')?.addEventListener('click',()=>xiPlazaPause());
+ $('#xi-plaza-fullscreen')?.addEventListener('click',()=>{
+  const stage=$('#xi-plaza-stage');if(!stage)return;
+  if(document.fullscreenElement)void document.exitFullscreen?.();
+  else void stage.requestFullscreen?.().catch(()=>toast('Pantalla completa no disponible.','info'));
+ });
+ $('#xi-plaza-sound')?.addEventListener('click',()=>{
+  xiPlaza.sound=!xiPlaza.sound;setText('xi-plaza-sound',xiPlaza.sound?'♫':'♪');
+  if(xiPlaza.sound)xiPlazaBeep(620,.13);
+ });
+ const canvas=$('#xi-plaza-canvas');
+ canvas?.addEventListener('pointermove',event=>{xiPlazaSetPointer(event);});
+ canvas?.addEventListener('pointerdown',event=>{xiPlazaSetPointer(event);xiPlazaLaunch();});
+ canvas?.addEventListener('pointerleave',()=>{xiPlaza.pointerX=null;});
+ for(const [id,dir] of [['xi-plaza-left','left'],['xi-plaza-right','right']]){
+  const btn=$('#'+id);if(!btn)continue;
+  btn.addEventListener('pointerdown',e=>{e.preventDefault();btn.setPointerCapture?.(e.pointerId);xiPlaza.keys[dir]=true;xiPlaza.pointerX=null;});
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])btn.addEventListener(type,()=>{xiPlaza.keys[dir]=false;});
+ }
+ document.addEventListener('keydown',event=>{
+  if(platformActiveApp!=='plaza'||$('#xi-plaza-game')?.classList.contains('hidden')||event.target.closest('input,textarea,[contenteditable]'))return;
+  if(['ArrowLeft','ArrowRight','a','A','d','D',' ','p','P'].includes(event.key))event.preventDefault();
+  if(['ArrowLeft','a','A'].includes(event.key)){xiPlaza.keys.left=true;xiPlaza.pointerX=null;}
+  if(['ArrowRight','d','D'].includes(event.key)){xiPlaza.keys.right=true;xiPlaza.pointerX=null;}
+  if(event.code==='Space' && !event.repeat){if(xiPlaza.paused && xiPlaza.playing && xiPlaza.lastReason==='resume')xiPlazaOverlayAction();else xiPlazaLaunch();}
+  if(['p','P'].includes(event.key) && !event.repeat)xiPlazaPause();
+ });
+ document.addEventListener('keyup',event=>{
+  if(['ArrowLeft','a','A'].includes(event.key))xiPlaza.keys.left=false;
+  if(['ArrowRight','d','D'].includes(event.key))xiPlaza.keys.right=false;
+ });
+ window.addEventListener('blur',()=>{if(platformActiveApp==='plaza'&&xiPlaza.playing)xiPlazaPause(true);});
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible'&&xiPlaza.playing)xiPlazaPause(true);});
+ xiPlazaResize();xiPlazaRender();
+}
 
 async function init() {
 bind();
