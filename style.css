@@ -3247,3 +3247,162 @@ html[data-theme="light"] #item-details-modal.xi-item-details-custom #item-detail
 @keyframes xiNeonArrival{0%{opacity:0;transform:scale(.15) rotate(-180deg);filter:brightness(2)}47%{opacity:1;transform:scale(1.18) rotate(16deg);filter:brightness(1.6)}100%{transform:scale(1) rotate(0);filter:brightness(1)}}
 @keyframes xiNeonRing{5%{opacity:0;transform:scale(.3) rotate(20deg)}42%{opacity:.95;transform:scale(1) rotate(-10deg)}100%{opacity:0;transform:scale(1.65) rotate(-75deg)}}
 @media(prefers-reduced-motion:reduce){#xi-custom-reveal[data-preset] .xi-reveal-inner::after,#xi-custom-reveal[data-preset] .xi-reveal-inner i{animation:none!important}}
+
+/* ============================================================
+   XIFRE ALPHA 1.12 · PLAZA + BANCO (sin tocar el diseño de CHAT)
+   ============================================================ */
+.app-launcher-plaza { color:#9effd1;background:linear-gradient(145deg,#326d70,#264253);border-color:#74cfc56d; }
+.app-launcher-plaza.active { color:#fff;background:linear-gradient(145deg,#20bca1,#285f8a);box-shadow:0 0 0 3px #17cca21f,0 0 22px #3defc43b; }
+.app-launcher-bank { color:#f7dda0;background:linear-gradient(145deg,#73613b,#464360);border-color:#f2ca6a53; }
+.app-launcher-bank.active { color:#fff;background:linear-gradient(145deg,#dfb45b,#7461bc);box-shadow:0 0 0 3px #e3b65b25,0 0 22px #ffd78d3b; }
+#plaza-app-view,#bank-app-view { width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;display:none; }
+#plaza-app-view.active,#bank-app-view.active {display:flex!important;flex-direction:column;}
+.xi-plaza-scroll,.xi-bank-scroll {overflow-y:auto;overscroll-behavior:contain;min-height:0;width:100%;height:100%;scrollbar-color:#7d86b366 transparent;scrollbar-width:thin;}
+.plaza-app {background:radial-gradient(ellipse at 45% -25%,#26677575,transparent 62%),linear-gradient(155deg,#151e30,#202742 68%,#161e31);color:#f6f9ff;}
+.xi-plaza-scroll {padding:clamp(16px,3vw,42px);}
+.xi-plaza-hero {max-width:900px;text-align:center;margin:0 auto 26px;padding:clamp(22px,3vw,45px) clamp(18px,4vw,60px);border:1px solid #ffffff1b;border-radius:26px;background:linear-gradient(146deg,#ffffff0d,#ffffff05);box-shadow:0 22px 70px #030a2080;position:relative;overflow:hidden;isolation:isolate;}
+.xi-plaza-hero::before {content:"";pointer-events:none;position:absolute;inset:-30% -25%;background:radial-gradient(circle at 50% 20%,#3bd7c32b,transparent 45%);z-index:-1;}
+.xi-plaza-eyebrow,.xi-bank-eyebrow {display:block;font-size:10px;letter-spacing:2.4px;font-weight:850;color:#8fead9;text-transform:uppercase;}
+.xi-plaza-logo {position:relative;margin:13px auto 18px;display:grid;place-items:center;height:93px;width:93px;border-radius:26px;background:linear-gradient(140deg,#8bffee,#16a8a0 54%,#5269ea);box-shadow:0 12px 40px #1fc5b666,inset 0 2px 1px #ffffff72;transform:rotate(-6deg);}
+.xi-plaza-logo span:first-child {font-size:63px;line-height:1;color:#fff8c2;filter:drop-shadow(0 0 9px #ffffff80);}
+.xi-plaza-logo span:last-child {position:absolute;bottom:11px;right:10px;font-size:17px;font-weight:950;letter-spacing:-1px;color:#063a43;background:#fff;border-radius:6px;padding:1px 5px;}
+.xi-plaza-hero h1 {font-size:clamp(30px,5vw,57px);line-height:1.1;letter-spacing:-2.2px;font-weight:900;color:white;margin:0 0 14px;}
+.xi-plaza-hero h1 em {font-style:normal;color:#79f2d5;}
+.xi-plaza-hero h2 {font-size:clamp(18px,2.2vw,23px);font-weight:800;letter-spacing:-.5px;margin:0 0 16px;color:#d8f4f1;}
+.xi-plaza-hero p {max-width:730px;color:#acbbce;font-size:clamp(12px,1.5vw,15px);line-height:1.75;margin:0 auto 17px;}
+.xi-plaza-hero .xi-plaza-invitation {color:#edf9ff;font-weight:750;margin-top:16px;}
+.xi-plaza-primary {display:inline-flex;justify-content:center;align-items:center;gap:8px;border:1px solid #d5fff65c;border-radius:13px;background:linear-gradient(125deg,#30dfc8,#14a4b6);color:#072a38;font-size:13px;font-weight:900;padding:13px 24px;cursor:pointer;box-shadow:0 10px 28px #16d5bc31;transition:transform .2s ease,box-shadow .2s ease;}
+.xi-plaza-primary:hover:not(:disabled) {transform:translateY(-2px);box-shadow:0 16px 35px #21e9ca55;}
+.xi-plaza-primary:disabled {opacity:.5;cursor:wait;}
+.xi-plaza-small-note {display:block;margin-top:15px;color:#9baabc;font-size:11px;}
+.xi-plaza-game {max-width:1120px;margin:26px auto 8px;background:#101929;border:1px solid #65b7da38;border-radius:22px;box-shadow:0 22px 65px #070d2188;overflow:hidden;}
+.xi-plaza-game-top {display:flex;justify-content:space-between;align-items:center;gap:14px;padding:18px 22px;background:linear-gradient(145deg,#1a2b42,#1d2940);}
+.xi-plaza-game-top h2 {font-size:23px;color:#fff;margin:3px 0;}
+.xi-plaza-game-top p {font-size:11px;color:#b4c4d5;margin:0;}
+.xi-plaza-game-tools {display:flex;gap:6px;}
+.xi-plaza-game-tools button {width:36px;height:36px;background:#ffffff0e;border:1px solid #ffffff22;border-radius:9px;color:#d9edf5;cursor:pointer;font-size:19px;}
+.xi-plaza-game-tools button:hover {background:#ffffff28;}
+.xi-plaza-stats {display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:11px 18px;background:#0d1b2c;border-top:1px solid #ffffff0a;}
+.xi-plaza-stats span {display:flex;gap:6px;align-items:baseline;justify-content:center;font-size:11px;color:#94acc5;}
+.xi-plaza-stats strong {font-size:18px;color:#f2fdff;font-variant-numeric:tabular-nums;}
+#xi-plaza-lives {color:#ff809f;letter-spacing:3px;}
+#xi-plaza-earned {color:#7af3ce;}
+.xi-plaza-canvas-wrap {width:100%;max-width:100%;position:relative;aspect-ratio:900/600;background:#0b1526;touch-action:pan-y;outline:none;}
+.xi-plaza-canvas-wrap canvas {display:block;width:100%;height:100%;object-fit:contain;user-select:none;touch-action:none;}
+.xi-plaza-canvas-wrap:focus-visible {outline:2px solid #7dffff;outline-offset:-2px;}
+.xi-plaza-overlay {position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:#061125c9;backdrop-filter:blur(7px);padding:14px;}
+.xi-plaza-overlay.hidden {display:none!important;}
+.xi-plaza-overlay-card {text-align:center;max-width:390px;padding:30px 24px;background:#18243be8;border:1px solid #8ed4e245;border-radius:19px;box-shadow:0 20px 70px #040a196e;}
+.xi-plaza-overlay-card strong {display:block;color:#fff;font-size:27px;font-weight:900;margin-bottom:10px;letter-spacing:-.8px;}
+.xi-plaza-overlay-card p {font-size:13px;color:#b0cadd;line-height:1.6;margin:0 0 20px;}
+.xi-plaza-touch {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 20px;border-top:1px solid #ffffff15;background:#172438;}
+.xi-plaza-touch button {display:none;flex:0 0 64px;height:45px;border:1px solid #b0ffff36;border-radius:11px;background:#ffffff12;color:#a3f7ec;font-size:21px;touch-action:none;user-select:none;cursor:pointer;}
+.xi-plaza-touch span {flex:1;text-align:center;font-size:11px;color:#a7bbcb;}
+.xi-plaza-footer {display:flex;justify-content:space-between;gap:13px;padding:12px 20px;background:#142038;color:#93b4c9;font-size:10px;line-height:1.5;}
+.xi-plaza-footer span:last-child {text-align:right;max-width:65%;}
+.xi-plaza-canvas-wrap:fullscreen {background:#071224;display:grid;place-items:center;}
+.xi-plaza-canvas-wrap:fullscreen canvas {width:min(100vw,calc(100vh * 1.5));height:auto;}
+
+/* Banco: área elegante con saldo y operaciones contextualizadas. */
+.xi-bank-app {background:radial-gradient(ellipse at 95% 0%,#a77be622,transparent 42%),linear-gradient(135deg,#181c2c,#1f2638 68%,#27243c);color:#eaf0ff;}
+.xi-bank-scroll {padding:clamp(14px,3vw,42px);}
+.xi-bank-head {display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:22px;}
+.xi-bank-head h1 {font-size:clamp(26px,3vw,40px);letter-spacing:-1.5px;color:#fff;margin:5px 0 4px;}
+.xi-bank-head p {font-size:13px;color:#aeb7d0;}
+.xi-bank-eyebrow {color:#e8c88d;}
+.xi-bank-refresh {background:#ffffff0b;border:1px solid #ffffff25;color:#e7ebff;border-radius:10px;padding:10px 14px;white-space:nowrap;cursor:pointer;}
+.xi-bank-refresh:hover {background:#ffffff20;}
+.xi-bank-balance-card {position:relative;isolation:isolate;overflow:hidden;max-width:800px;min-height:240px;margin:4px auto 28px;border-radius:24px;padding:36px clamp(24px,5vw,55px);background:linear-gradient(115deg,#362b64 0%,#585095 55%,#5e66a7 100%);border:1px solid #e1ddff5c;box-shadow:0 25px 65px #080a2899,inset 0 1px 1px #fff5;display:flex;flex-direction:column;justify-content:center;gap:10px;}
+.xi-bank-balance-card::before {content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(130deg,transparent 0 40px,#ffffff07 41px 42px);z-index:-1;}
+.xi-bank-card-orb {position:absolute;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,#a0feff4d,transparent 68%);top:-190px;right:-120px;pointer-events:none;}
+.xi-bank-balance-card > span {font-size:11px;font-weight:800;letter-spacing:1.8px;color:#dcdbef;}
+.xi-bank-balance-card > strong {font-size:clamp(40px,6.5vw,72px);font-weight:880;line-height:1.13;letter-spacing:-2px;color:white;font-variant-numeric:tabular-nums;text-shadow:0 5px 30px #ffffff25;}
+.xi-bank-balance-card > p {font-size:12px;color:#dcd7f9;}
+.xi-bank-card-bottom {display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #ffffff33;padding-top:20px;margin-top:17px;color:#eee8ff;font-size:10px;font-weight:750;letter-spacing:1.2px;}
+.xi-bank-card-bottom b {font-size:13px;letter-spacing:.4px;color:#fff4bf;}
+.xi-bank-actions {max-width:900px;margin:0 auto 28px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
+.xi-bank-actions button {border:1px solid #d3d8ff20;border-radius:17px;padding:24px 12px 20px;background:linear-gradient(150deg,#ffffff11,#ffffff04);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#e9eeff;cursor:pointer;transition:transform .18s,background .18s,border .18s;}
+.xi-bank-actions button:hover,.xi-bank-actions button.active {transform:translateY(-3px);background:#ffffff1c;border-color:#eac57a70;}
+.xi-bank-action-icon {display:grid;place-items:center;width:56px;height:56px;border:1px solid #ffd79045;border-radius:17px;font-size:27px;color:#ffe5ae;background:#e5c17a15;margin-bottom:3px;}
+.xi-bank-actions strong {font-size:15px;}
+.xi-bank-actions small {font-size:11px;color:#a8b3cc;}
+.xi-bank-panel {max-width:900px;margin:0 auto 28px;padding:26px;position:relative;background:#232b41;border:1px solid #f3d18743;border-radius:18px;box-shadow:0 15px 42px #06081859;}
+#xi-bank-panel-close {position:absolute;right:13px;top:12px;border:0;background:transparent;color:#b7bed6;font-size:23px;cursor:pointer;}
+.xi-bank-panel h2 {font-size:19px;color:#fff;margin-bottom:17px;}
+.xi-bank-form {max-width:480px;display:grid;gap:13px;}
+.xi-bank-form label {display:grid;gap:7px;font-size:12px;font-weight:750;color:#d5dcef;}
+.xi-bank-form input {width:100%;min-height:43px;border-radius:10px;border:1px solid #ffffff26;background:#151d30;color:#fff;padding:0 13px;font-size:14px;outline:0;}
+.xi-bank-form input:focus {border-color:#ecd28d;box-shadow:0 0 0 3px #f9d47a24;}
+.xi-bank-submit {padding:12px 18px;background:linear-gradient(125deg,#ebcf94,#d9ae5c);border:0;border-radius:11px;font-weight:850;color:#2a2340;cursor:pointer;min-height:43px;}
+.xi-bank-submit:hover:not(:disabled) {filter:brightness(1.08);}
+.xi-bank-submit:disabled {opacity:.5;cursor:wait;}
+.xi-bank-selected {background:#153b3c;color:#95f1ce;border:1px solid #66cea65d;border-radius:9px;padding:10px 12px;font-size:12px;}
+.xi-bank-user-results {display:flex;flex-wrap:wrap;gap:7px;max-height:160px;overflow-y:auto;}
+.xi-bank-user-results button {background:#ffffff12;border:1px solid #ffffff20;border-radius:9px;color:#fff;padding:9px 13px;cursor:pointer;font-weight:700;font-size:12px;}
+.xi-bank-user-results button:hover {background:#ffffff25;}
+.xi-bank-hint {font-size:12px;color:#b5bfd8;line-height:1.6;max-width:640px;}
+.xi-bank-coin-option {display:flex;align-items:center;gap:14px;border:1px solid #ffffff1a;background:#ffffff09;border-radius:11px;padding:11px;margin:7px 0;}
+.xi-bank-coin-option strong {font-size:15px;color:#ffe3a6;}
+.xi-bank-coin-option small {font-size:10px;color:#9fa9c2;display:block;margin-top:4px;}
+.xi-bank-coin-option button {margin-left:auto;border-radius:9px;background:#e9c87c;color:#2d2738;padding:8px 12px;font-weight:850;cursor:pointer;}
+.xi-bank-bottom-grid {display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1130px;margin:0 auto;}
+.xi-bank-bottom-card {background:#ffffff08;border:1px solid #ffffff19;border-radius:18px;padding:20px;min-height:230px;min-width:0;}
+.xi-bank-section-title {display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-bottom:1px solid #ffffff12;padding-bottom:13px;margin-bottom:12px;}
+.xi-bank-section-title h2 {font-size:17px;color:#fff;margin:0;}
+.xi-bank-section-title span {font-size:9px;color:#a6aec3;letter-spacing:1px;font-weight:800;}
+.xi-bank-coins>p,.xi-bank-history>p {font-size:12px;color:#929fb6;padding:15px 0;}
+.xi-bank-history {max-height:360px;overflow:auto;scrollbar-width:thin;}
+.xi-bank-history-row {display:flex;align-items:center;gap:10px;border-bottom:1px solid #ffffff10;padding:10px 2px;}
+.xi-bank-history-icon {flex:0 0 32px;width:32px;height:32px;border-radius:10px;background:#ffffff12;color:#dce7ff;display:grid;place-items:center;font-size:15px;}
+.xi-bank-history-row span:nth-child(2) {flex:1;min-width:0;}
+.xi-bank-history-row strong {display:block;color:#e6ecfc;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.xi-bank-history-row small {display:block;color:#8e9cb5;font-size:10px;margin-top:3px;}
+.xi-bank-history-row b {font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:#ffabae;}
+.xi-bank-history-row b.positive {color:#8ceebf;}
+#xi-bank-feedback {font-size:12px;color:#e5d19a;min-height:15px;margin-top:10px;}
+.xi-bank-disclaimer {max-width:1080px;margin:27px auto 6px;text-align:center;color:#9ca9c1;font-size:11px;line-height:1.6;}
+.xi-bank-coin-image {width:100%;height:100%;display:grid;place-items:center;overflow:hidden;border-radius:inherit;background:radial-gradient(circle at 32% 23%,#fff5bc,#d8a544 60%,#7b591f);border:3px double #fff0a6;box-shadow:inset 0 0 16px #fff7a477,0 0 19px #ecc75c5c;}
+.xi-bank-coin-image span {font-size:clamp(19px,4vw,44px);font-weight:950;line-height:1;color:#664017;text-shadow:0 1px #fff2b3;}
+.xi-bank-coin-image.xi-bank-coin-small {height:40px;width:40px;border-radius:50%;flex-shrink:0;}
+.xi-bank-coin-image.xi-bank-coin-small span {font-size:23px;}
+.xi-bank-app .xi-bank-coin-option {min-width:0;}
+@media(max-width:720px) {
+ .xi-plaza-scroll,.xi-bank-scroll {padding:14px;}
+ .xi-plaza-hero {padding:26px 17px;}
+ .xi-plaza-logo {height:68px;width:68px;border-radius:19px;}
+ .xi-plaza-logo span:first-child {font-size:43px;}
+ .xi-plaza-logo span:last-child {font-size:12px;}
+ .xi-plaza-game-top {padding:14px;}
+ .xi-plaza-game-top h2 {font-size:19px;}
+ .xi-plaza-stats {padding:9px 7px;}
+ .xi-plaza-stats span {flex-direction:column;align-items:center;gap:2px;font-size:9px;}
+ .xi-plaza-stats strong {font-size:14px;}
+ .xi-plaza-touch button {display:block;}
+ .xi-plaza-touch {padding:10px;gap:5px;}
+ .xi-plaza-touch span {font-size:9px;}
+ .xi-plaza-footer {flex-direction:column;gap:8px;}
+ .xi-plaza-footer span:last-child {max-width:none;text-align:left;}
+ .xi-bank-actions {gap:7px;}
+ .xi-bank-actions button {padding:17px 5px;}
+ .xi-bank-action-icon {width:43px;height:43px;font-size:22px;border-radius:12px;}
+ .xi-bank-actions strong {font-size:11px;text-align:center;}
+ .xi-bank-actions small {font-size:9px;text-align:center;}
+ .xi-bank-bottom-grid {grid-template-columns:1fr;}
+ .xi-bank-balance-card {min-height:205px;padding:25px;}
+ .xi-bank-head {align-items:flex-start;}
+ .xi-bank-refresh {font-size:11px;padding:9px;}
+}
+@media(prefers-reduced-motion:reduce) { .xi-plaza-primary,.xi-bank-actions button {transition:none!important;} }
+
+/* Alpha 1.12: six launcher icons on compact screens, never overlay the tools. */
+@media(max-width:760px){
+ .xifre-appbar{grid-template-columns:auto minmax(0,1fr) auto!important;}
+ .appbar-launchers{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;}
+ .appbar-launchers::-webkit-scrollbar{display:none;}
+ .appbar-tools{flex:0 0 auto;}
+}
+@media(max-width:480px){
+ .appbar-clock{display:none;}
+ .appbar-launchers{gap:4px;}
+ .app-launcher{width:34px;height:34px;flex:0 0 34px;}
+}
