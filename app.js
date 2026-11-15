@@ -4527,13 +4527,14 @@ function platformItemIsBox(item) {
 function platformItemCardMarkup(item, { mode = 'collection', disabled = false, selected = false, count = 1 } = {}) {
   const rarity = platformRarity(item);
   const instanceId = platformItemKey(item);
-  const image = platformImageMarkup(item.image_url,item.name);
+  const image = xiBankIsCoin(item) ? xiBankCoinArt(false) : platformImageMarkup(item.image_url,item.name);
+  const coinClass=xiBankIsCoin(item)?' xi-coin-card':'';
   const boxIcon = platformItemIsBox(item) ? '<span class="mini-item-box" title="Caja consumible">✦ CAJA</span>' : '';
   const numericValue = Number(item?.value) || 0;
   const valueGlow = numericValue >= 5000 ? 'value-precious' : numericValue >= 1000 ? 'value-high' : '';
   const gradeClass=platformGradeClass(item),gradeBadge=platformGradeTag(item),customAttrs=xiCustomFxAttrs(item),customSize=xiCustomCardClass(item);
   if (mode === 'trade') {
-    return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" ${customAttrs} data-trade-tile="${esc(instanceId)}">
+    return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize}${coinClass} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" ${customAttrs} data-trade-tile="${esc(instanceId)}">
       ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${gradeBadge}
       <button class="trade-select-hitarea" type="button" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled?'disabled':''} title="Añadir una copia">
         <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong><span class="mini-item-selection">+ Ofrecer</span>
@@ -4541,7 +4542,7 @@ function platformItemCardMarkup(item, { mode = 'collection', disabled = false, s
       <button class="mini-item-minus hidden" type="button" data-trade-remove-group="${esc(instanceId)}" aria-label="Quitar una copia">−</button>
     </div>`;
   }
-  return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize} ${valueGlow} ${item.reserved?'is-reserved':''}" ${customAttrs} data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
+  return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize}${coinClass} ${valueGlow} ${item.reserved?'is-reserved':''}" ${customAttrs} data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
     ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}
     <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong>
   </button>`;
@@ -4569,7 +4570,7 @@ function platformOpenItemDetails(key, source = 'collection') {
   if(customStyle)for(const attr of ['data-xi-fx','data-xi-motion','data-xi-shape','data-xi-border','data-xi-border-gradient','data-xi-plate'])if(customStyle.hasAttribute(attr))modal.setAttribute(attr,customStyle.getAttribute(attr));
   for(const prop of ['--xi-fx-a','--xi-fx-b','--xi-fx-glow','--xi-fx-angle','--xi-fx-gradient','--xi-fx-duration','--xi-fx-easing','--xi-fx-direction','--xi-fx-drift-x','--xi-fx-drift-y','--xi-fx-rotation','--xi-fx-scale','--xi-fx-spread','--xi-fx-glow-radius','--xi-fx-border-gradient','--xi-fx-border-angle','--xi-fx-border-stops','--xi-fx-border-stops-linear','--xi-fx-border-duration','--xi-fx-border-play','--xi-border-width','--xi-fx-value-gradient']){const val=customStyle?.style.getPropertyValue(prop);if(val)modal.style.setProperty(prop,val);else modal.style.removeProperty(prop);}
   const hero = $('#item-details-hero');
-  if (hero) hero.innerHTML = platformImageMarkup(item.image_url,item.name);
+  if (hero) hero.innerHTML = xiBankIsCoin(item)?xiBankCoinArt(false):platformImageMarkup(item.image_url,item.name);
   setText('item-details-name', item.name || 'Objeto');
   setText('item-details-value-label',xiBankIsCoin(item)?'SALDO EN MONEDA':'VALOR');
   setText('item-details-value',xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value));
@@ -4616,14 +4617,17 @@ function platformGiftCardMarkup(id){
  const rarity=platformRarity(gift),status=gift.status||'open',mine=String(gift.sender_id)===String(currentUser?.id);
  const claimant=(currentMembers||[]).find(m=>getMemberId(m)===String(gift.claimed_by));
  const who=claimant?.username||'otra persona';
- const stamp=[gift.status,gift.claimed_by,gift.item_id,gift.upgrade_tier,gift.custom_upgrade_id].join(':');
+ const stamp=[gift.status,gift.claimed_by,gift.item_id,gift.upgrade_tier,gift.custom_upgrade_id,gift.cash_cents].join(':');
  const state=status==='open'?'Disponible':status==='claimed'?'Reclamado':'Cancelado';
- const label=xiVariantName(gift);
+ const isCash=xiBankIsCoin(gift);
+ const label=isCash?'Moneda virtual':xiVariantName(gift);
+ const giftValue=isCash?xiBankEur(gift.cash_cents):platformFormatValue(gift.value);
+ const art=isCash?xiBankCoinArt(true):platformImageMarkup(gift.image_url,gift.name);
  const disabled=!!platformGiftSending;
  return `<div class="xifre-gift-card rarity-${esc(rarity.className)} ${platformGradeClass(gift)}" ${xiCustomFxAttrs(gift)} data-xifre-gift="${esc(id)}" data-gift-stamp="${esc(stamp)}">
    <span class="xi-gift-mark" aria-hidden="true">🎁</span>
-   <span class="xi-gift-art">${platformImageMarkup(gift.image_url,gift.name)}</span>
-   <span class="xi-gift-info"><strong title="${esc(gift.name)}">${esc(gift.name)}</strong><small>${esc(label)} · ${esc(platformFormatValue(gift.value))}</small></span>
+   <span class="xi-gift-art">${art}</span>
+   <span class="xi-gift-info"><strong title="${esc(gift.name)}">${esc(gift.name)}</strong><small>${esc(label)} · ${esc(giftValue)}</small></span>
    <span class="xi-gift-state">${esc(state)}</span>
    <span class="xi-gift-action">${status==='open'?(mine?`<button type="button" class="xi-gift-button secondary" data-gift-cancel="${esc(id)}" ${disabled?'disabled':''}>Cancelar</button>`:`<button type="button" class="xi-gift-button" data-gift-claim="${esc(id)}" ${disabled?'disabled':''}>Reclamar</button>`)
    :`<small class="xi-gift-result" title="${status==='claimed'?'Reclamado por '+esc(who):'Cancelado'}">${status==='claimed'?'Ya reclamado':'Finalizado'}</small>`}</span>
@@ -4647,7 +4651,7 @@ async function platformLoadChatGifts(force=false){
   $$('#messages [data-xifre-gift]').forEach(node=>{
    const id=node.dataset.xifreGift;
    const gift=platformChatGifts.get(id);
-   const stamp=gift?[gift.status,gift.claimed_by,gift.item_id,gift.upgrade_tier,gift.custom_upgrade_id].join(':'):'';
+   const stamp=gift?[gift.status,gift.claimed_by,gift.item_id,gift.upgrade_tier,gift.custom_upgrade_id,gift.cash_cents].join(':'):'';
    if(node.dataset.giftStamp!==stamp)node.outerHTML=platformGiftCardMarkup(id);
   });
   // The initial skeleton does not always have data-xifre-gift until content is loaded.
@@ -4666,22 +4670,24 @@ function platformOpenGiftPicker(){
 }
 function platformDrawGiftPicker(){
  const grid=$('#chat-gift-grid');if(!grid)return;
- const available=platformInventoryItems.filter(item=>!item.reserved && !xiBankIsCoin(item));
+ const available=platformInventoryItems.filter(item=>!item.reserved);
  const groups=platformGroupItems(available);
  grid.innerHTML=groups.length?groups.map(group=>{
    const item=group.item,rarity=platformRarity(item);
+   const coin=xiBankIsCoin(item),art=coin?xiBankCoinArt(false):platformImageMarkup(item.image_url,item.name);
    return `<button type="button" class="xi-gift-picker-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" ${xiCustomFxAttrs(item)} data-gift-pick="${esc(platformItemKey(item))}">
-    ${group.count>1?`<span class="mini-item-quantity">×${group.count}</span>`:''}<span class="xi-gift-picker-art">${platformImageMarkup(item.image_url,item.name)}</span><strong>${esc(item.name)}</strong><small>${esc(rarity.label)} · ${esc(xiVariantName(item))}</small><b>${esc(platformFormatValue(item.value))}</b>
+    ${group.count>1?`<span class="mini-item-quantity">×${group.count}</span>`:''}<span class="xi-gift-picker-art">${art}</span><strong>${esc(item.name)}</strong><small>${esc(coin?'Moneda bancaria':rarity.label+' · '+xiVariantName(item))}</small><b>${esc(coin?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</b>
    </button>`;
  }).join(''):'<p class="inventory-inline-empty">No tienes objetos libres para regalar. Los publicados o reservados no pueden enviarse.</p>';
  setText('chat-gift-status','');
 }
 async function platformSendChatGift(instanceId){
  if(platformGiftSending||!currentConversation)return;
- const item=platformInventoryItems.find(i=>platformItemKey(i)===String(instanceId)&&!i.reserved&&!xiBankIsCoin(i));
+ const item=platformInventoryItems.find(i=>platformItemKey(i)===String(instanceId)&&!i.reserved);
  if(!item)return toast('Esta copia ya no está disponible.','error');
+ if(xiBankIsCoin(item) && !Number(item.cash_cents))return toast('No se pudo comprobar el importe de la moneda. Actualiza tu inventario.','error');
  const conversation=String(currentConversation);
- const yes=await askConfirm('Enviar regalo',`¿Regalar ${item.name} (${xiVariantName(item)}) en este chat? La primera persona que lo reclame se lo quedará.`, 'Enviar regalo');
+ const yes=await askConfirm('Enviar regalo',`¿Regalar ${xiBankIsCoin(item)?'una moneda de '+xiBankEur(item.cash_cents):item.name+' ('+xiVariantName(item)+')'} en este chat? La primera persona que lo reclame se lo quedará.`, 'Enviar regalo');
  if(!yes)return;
  platformGiftSending=true;
  const request=platformGiftSendRequest?.instanceId===instanceId && platformGiftSendRequest?.conversation===conversation
@@ -5905,7 +5911,7 @@ function platformRenderTradeWorkspace() {
   }
   const markup = items => items.length ? items.map(item => {
     const rarity = platformRarity(item);
-    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" ${xiCustomFxAttrs(item)} data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto">${platformGradeTag(item)}<span class="trade-offer-thumb">${platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</small></span></button>`;
+    return `<button type="button" class="trade-offer-item rarity-${esc(rarity.className)} ${platformGradeClass(item)}" ${xiCustomFxAttrs(item)} data-open-item="${esc(platformItemKey(item))}" data-item-source="trade" title="Detalles del objeto">${platformGradeTag(item)}<span class="trade-offer-thumb">${xiBankIsCoin(item)?xiBankCoinArt(true):platformImageMarkup(item.image_url, item.name)}</span><span class="trade-offer-copy"><strong>${esc(item.name)}</strong><small>${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</small></span></button>`;
   }).join('') : '<div class="trade-offer-empty">Ningún objeto todavía</div>';
   platformApplyMarkup($('#trade-own-offer'), markup(ownOffer));
   platformApplyMarkup($('#trade-other-offer'), markup(otherOffer));
@@ -7502,7 +7508,7 @@ let xiBankPendingRequest = null;
 let xiBankLoadRevision = 0;
 let xiBankHistory = [];
 const xiBankIsCoin = item => String(item?.item_id || item?.id || '') === xiBankCoinTypeId || Boolean(item?.is_cash_coin);
-const xiBankCoinArt = (small=false) => `<span class="xi-bank-coin-image${small?' xi-bank-coin-small':''}" aria-hidden="true"><span>€</span></span>`;
+const xiBankCoinArt = (small=false) => `<span class="xi-bank-coin-image${small?' xi-bank-coin-small':''}" aria-label="Moneda XIFRE"><span>€</span></span>`;
 const xiBankUuid = () => window.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,ch=>{const r=Math.random()*16|0;return (ch==='x'?r:(r&3|8)).toString(16);});
 const xiBankEur = cents => (Math.max(0,Number(cents||0))/100).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 
@@ -7528,7 +7534,7 @@ function xiBankShowPanel(type){
  const titles={bizum:'Enviar un Bizum',withdraw:'Convertir dinero en una moneda',deposit:'Depositar dinero físico'};
  setText('xi-bank-panel-title',titles[type]||'Banco');setText('xi-bank-feedback','');
  if(!body)return;
- if(type==='bizum') body.innerHTML=`<form id="xi-bank-bizum-form" class="xi-bank-form"><p class="xi-bank-hint">Envía dinero virtual a otro usuario de XIFRE. La transferencia es inmediata y no tiene comisiones.</p><label>Buscar usuario por su nombre<input id="xi-bank-username" type="search" maxlength="30" placeholder="Escribe el username" autocomplete="off" required></label><div id="xi-bank-user-results" class="xi-bank-user-results"></div><div id="xi-bank-selected" class="xi-bank-selected hidden"></div><label>Cantidad (€)<input id="xi-bank-send-amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="0.50" required></label><button class="xi-bank-submit" type="submit">Continuar · Enviar Bizum</button></form>`;
+ if(type==='bizum') body.innerHTML=`<form id="xi-bank-bizum-form" class="xi-bank-form"><p class="xi-bank-hint">Envía dinero virtual a otro usuario de XIFRE. La transferencia es inmediata y no tiene comisiones.</p><label>Buscar por usuario o @<input id="xi-bank-username" type="search" maxlength="30" placeholder="Username o @usuario" autocomplete="off" required></label><div id="xi-bank-user-results" class="xi-bank-user-results"></div><div id="xi-bank-selected" class="xi-bank-selected hidden"></div><label>Cantidad (€)<input id="xi-bank-send-amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="0.50" required></label><button class="xi-bank-submit" type="submit">Continuar · Enviar Bizum</button></form>`;
  else if(type==='withdraw')body.innerHTML=`<form id="xi-bank-withdraw-form" class="xi-bank-form"><p class="xi-bank-hint">Elige una cantidad. Se descontará de tu cuenta y aparecerá como una moneda individual en tu inventario. Puedes intercambiar esa moneda con un amigo y él podrá depositarla.</p><label>Cantidad a convertir (€)<input id="xi-bank-withdraw-amount" type="number" min="0.01" step="0.01" max="1000000" placeholder="1.00" required></label><button class="xi-bank-submit" type="submit">Convertir en moneda</button></form>`;
  else if(type==='deposit')body.innerHTML=`<p class="xi-bank-hint">Elige una moneda de tu inventario. Al depositarla, desaparecerá y su importe volverá a tu saldo. Las monedas incluidas en un intercambio activo no están disponibles.</p><div id="xi-bank-deposit-options"></div>`;
  if(type==='deposit')xiBankRenderCoins();
@@ -7574,14 +7580,21 @@ function xiBankParseCents(input){
 }
 async function xiBankSearchUsers(term){
  const host=$('#xi-bank-user-results');if(!host||!currentUser||xiBankPanel!=='bizum')return;
- const q=String(term||'').trim().replace(/[%_\\]/g,'').slice(0,25);
- if(q.length<2){host.innerHTML='<span class="xi-bank-hint">Escribe al menos dos letras.</span>';return;}
- const owner=String(currentUser.id);
+ const q=String(term||'').trim().replace(/^@+/, '').replace(/[%_\\,().]/g,'').slice(0,25);
+ if(q.length<2){host.innerHTML='<span class="xi-bank-hint">Escribe al menos dos caracteres, con o sin @.</span>';return;}
+ const owner=String(currentUser.id),input=$('#xi-bank-username');
  try {
-  const {data,error}=await supabase.from('profiles').select('id,username').ilike('username',`%${q}%`).limit(12);
+  const escaped=q.replace(/[\\%_]/g,'');
+  const {data,error}=await supabase.from('profiles').select('id,username,email_handle,display_name')
+    .or(`username.ilike.%${escaped}%,email_handle.ilike.%${escaped}%`).limit(15);
   if(error)throw error;
-  if(xiBankPanel!=='bizum'||String(currentUser?.id)!==owner||String($('#xi-bank-username')?.value||'').trim().replace(/[%_\\]/g,'').slice(0,25)!==q)return;
-  host.innerHTML=(data||[]).filter(u=>u.id!==owner).map(u=>`<button type="button" data-xi-bank-recipient="${esc(u.id)}" data-xi-bank-username="${esc(u.username||'Usuario')}">@${esc(u.username||'usuario')}</button>`).join('') || '<span class="xi-bank-hint">No se han encontrado usuarios.</span>';
+  const current=String(input?.value||'').trim().replace(/^@+/, '').replace(/[%_\\,().]/g,'').slice(0,25);
+  if(xiBankPanel!=='bizum'||String(currentUser?.id)!==owner||current!==q)return;
+  host.innerHTML=(data||[]).filter(u=>u.id!==owner).map(u=>{
+   const label=u.username||u.display_name||'Usuario';
+   const handle=u.email_handle||u.username||'usuario';
+   return `<button type="button" data-xi-bank-recipient="${esc(u.id)}" data-xi-bank-username="${esc(handle)}"><strong>${esc(label)}</strong><small>@${esc(handle)}</small></button>`;
+  }).join('') || '<span class="xi-bank-hint">No se han encontrado usuarios.</span>';
  }catch(error){host.textContent='No se pudo buscar usuarios: '+friendlyError(error);}
 }
 function xiBankSelectRecipient(id,name){if(!isValidUuid(id)||!currentUser||id===currentUser.id)return;xiBankRecipient={id,name};setText('xi-bank-selected','Enviarás el dinero a @'+name);$('#xi-bank-selected')?.classList.remove('hidden');}
@@ -7633,14 +7646,15 @@ function xiBankResetSession(){xiBankClosePanel();xiBankRecipient=null;xiBankCoin
 const XI_PLAZA_WIDTH=900, XI_PLAZA_HEIGHT=600;
 const xiPlaza={canvas:null,ctx:null,active:false,open:false,playing:false,paused:true,starting:false,finished:false,
  runId:null,round:1,lives:3,score:0,earned:0,paidRounds:0,pendingRounds:[],rewardBusy:false,rewardTimer:0,
- paddleX:450,paddleW:112,paddleY:550,paddleSpeed:690,balls:[],bricks:[],drops:[],particles:[],shots:[],
+ paddleX:450,paddleW:99,paddleY:550,paddleSpeed:615,balls:[],bricks:[],drops:[],particles:[],shots:[],
  keys:{left:false,right:false},lastFrame:0,frame:0,shotTimer:0,laserUntil:0,wideUntil:0,slowUntil:0,
+ shrinkUntil:0,sluggishUntil:0,reverseUntil:0,
  sound:false,audio:null,animation:0,stars:[],lastReason:'',pointerX:null,levelBusy:false};
 const xiPlazaColors=['#4ab6ff','#ff6b91','#ffc75f','#6bf3b7','#b29fff','#ff9b52','#66deef'];
 function xiPlazaStatus(text){setText('xi-plaza-game-message',text||'');}
 function xiPlazaStats(){
  setText('xi-plaza-round',String(xiPlaza.round));
- setText('xi-plaza-lives','♥'.repeat(Math.min(9,xiPlaza.lives)) || '—');
+ setText('xi-plaza-lives','♥'.repeat(Math.max(0,Math.min(3,xiPlaza.lives))) || '—');
  setText('xi-plaza-score',xiPlaza.score.toLocaleString('es-ES'));
  setText('xi-plaza-earned',xiBankEur(xiPlaza.earned));
 }
@@ -7674,25 +7688,27 @@ function xiPlazaStarField(){
  if(xiPlaza.stars.length)return;
  for(let i=0;i<75;i++)xiPlaza.stars.push({x:Math.random()*900,y:Math.random()*600,r:Math.random()*1.5+.3,o:Math.random()*.3+.08});
 }
-function xiPlazaPaddleWidth(){return xiPlaza.wideUntil>performance.now()?180:xiPlaza.paddleW;}
-function xiPlazaCreateBall(attached=true,x=xiPlaza.paddleX,y=xiPlaza.paddleY-22,vx=0,vy=-460){
- const speed=460+Math.min(210,(xiPlaza.round-1)*13);
+function xiPlazaPaddleWidth(){const now=performance.now();return xiPlaza.shrinkUntil>now?68:xiPlaza.wideUntil>now?155:xiPlaza.paddleW;}
+function xiPlazaCreateBall(attached=true,x=xiPlaza.paddleX,y=xiPlaza.paddleY-22,vx=0,vy=-375){
+ const speed=375+Math.min(185,(xiPlaza.round-1)*11);
  const b={x,y,vx:attached?0:vx,vy:attached?0:vy,r:7.5,attached,trail:[],speed};
  xiPlaza.balls.push(b);return b;
 }
 function xiPlazaStartWave(){
  const p=xiPlaza;
  p.round=Math.max(1,p.round);p.levelBusy=false;p.drops=[];p.shots=[];p.balls=[];
- p.wideUntil=0;p.slowUntil=0;p.laserUntil=0;p.paddleX=450;p.pointerX=null;
+ p.wideUntil=0;p.slowUntil=0;p.laserUntil=0;p.shrinkUntil=0;p.sluggishUntil=0;p.reverseUntil=0;p.paddleX=450;p.pointerX=null;
  p.bricks=[];
- const cols=10,rows=Math.min(8,4+Math.floor((p.round-1)/2));
+ const cols=10,rows=Math.min(8,5+Math.floor((p.round-1)/2));
  const gap=7,w=72,h=21,startX=(900-(w+gap)*cols+gap)/2;
  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
-  const tough=p.round>=2 && Math.random()<Math.min(.42,.08+p.round*.045);
-  const power=Math.random()<(p.round===1?.24:.20)?['wide','life','multi','slow','laser','blast'][Math.floor(Math.random()*6)]:null;
+  const tough=Math.random()<Math.min(.72,.25+p.round*.055);
+  const power=Math.random()<(p.round===1?.13:.16)?
+    (Math.random()<.42?['shrink','sluggish','reverse'][Math.floor(Math.random()*3)]:
+     ['wide','life','multi','slow','laser','blast'][Math.floor(Math.random()*6)]):null;
   p.bricks.push({x:startX+col*(w+gap),y:68+row*31,w,h,hp:tough?2:1,maxHp:tough?2:1,color:xiPlazaColors[(row+p.round-1)%xiPlazaColors.length],power});
  }
- xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus(`Ronda ${p.round}: destruye todos los bloques para ganar 0,01 € virtuales.`);
+ xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus(`Ronda ${p.round}: destruye todos los bloques para ganar 0,03 € virtuales. ¡Cuidado con los potenciadores rojos!`);
 }
 async function xiPlazaNewRun(){
  if(xiPlaza.starting)return;
@@ -7716,7 +7732,7 @@ function xiPlazaLaunch(){
  if(!xiPlaza.playing||xiPlaza.paused)return;
  let launched=false;
  for(const b of xiPlaza.balls){if(!b.attached)continue;b.attached=false;
-  const speed=460+Math.min(200,(xiPlaza.round-1)*13);
+  const speed=375+Math.min(170,(xiPlaza.round-1)*11);
   b.vx=(Math.random()<.5?-1:1)*Math.min(230,speed*.42);b.vy=-Math.sqrt(speed*speed-b.vx*b.vx);launched=true;
  }
  if(launched)xiPlazaBeep(360,.09,'triangle');
@@ -7781,33 +7797,38 @@ function xiPlazaBrickHit(brick){
 }
 function xiPlazaApplyPower(drop){
  const p=xiPlaza;xiPlazaParticle(drop.x,p.paddleY,drop.color||'#fff4ae',24);xiPlazaBeep(880,.19,'sine');
- if(drop.type==='wide'){p.wideUntil=performance.now()+17000;xiPlazaStatus('¡Barra expandida durante 17 segundos!');}
- else if(drop.type==='life'){p.lives=Math.min(8,p.lives+1);xiPlazaStatus('¡Vida extra!');}
+ if(drop.type==='wide'){p.wideUntil=performance.now()+13500;xiPlazaStatus('¡Barra expandida durante 13 segundos!');}
+ else if(drop.type==='life'){const before=p.lives;p.lives=Math.min(3,p.lives+1);xiPlazaStatus(before===3?'Ya tienes las 3 vidas máximas.':'¡Has recuperado una vida!');}
  else if(drop.type==='multi'){
   const originals=p.balls.slice();
-  for(const b of originals){if(p.balls.length>=9)break;const speed=Math.hypot(b.vx,b.vy)||460;
-   for(const sign of [-1,1]){if(p.balls.length>=9)break;
+  for(const b of originals){if(p.balls.length>=5)break;const speed=Math.hypot(b.vx,b.vy)||375;
+   for(const sign of [-1,1]){if(p.balls.length>=5)break;
     const v=Math.atan2(b.vy||-speed,b.vx||10)+sign*.37;
     xiPlazaCreateBall(false,b.x,b.y,Math.cos(v)*speed,Math.sin(v)*speed);
    }}
   xiPlazaStatus('¡Multibola!');
  }
  else if(drop.type==='slow'){p.slowUntil=performance.now()+12000;for(const b of p.balls){b.vx*=.78;b.vy*=.78;}xiPlazaStatus('¡Bolas ralentizadas!');}
- else if(drop.type==='laser'){p.laserUntil=performance.now()+14000;p.shotTimer=0;xiPlazaStatus('¡Láser doble activado!');}
+ else if(drop.type==='laser'){p.laserUntil=performance.now()+9000;p.shotTimer=0;xiPlazaStatus('¡Láser doble durante 9 segundos!');}
  else if(drop.type==='blast'){
   const live=p.bricks.filter(b=>b.hp>0);
-  for(const b of live.slice(0,6+Math.floor(Math.random()*5)))xiPlazaDestroyBrick(b);
+  for(const b of live.slice(0,3+Math.floor(Math.random()*3)))xiPlazaDestroyBrick(b);
   xiPlazaStatus('¡Explosión de bloques!');
  }
+ else if(drop.type==='shrink'){p.shrinkUntil=performance.now()+10000;xiPlazaStatus('¡MALA SUERTE! Barra reducida durante 10 segundos.');}
+ else if(drop.type==='sluggish'){p.sluggishUntil=performance.now()+11000;xiPlazaStatus('¡MALA SUERTE! Barra lenta durante 11 segundos.');}
+ else if(drop.type==='reverse'){p.reverseUntil=performance.now()+6500;p.pointerX=null;xiPlazaStatus('¡MALA SUERTE! Controles invertidos durante 6 segundos.');}
  xiPlazaStats();
 }
 function xiPlazaUpdate(dt){
  const p=xiPlaza;const now=performance.now();p.frame+=dt;
  if(p.levelBusy)return;
  const w=xiPlazaPaddleWidth();
- const moving=(p.keys.right?1:0)-(p.keys.left?1:0);
- if(moving)p.paddleX+=moving*p.paddleSpeed*dt;
- if(p.pointerX!==null)p.paddleX+=(p.pointerX-p.paddleX)*Math.min(1,dt*24);
+ const inverted=now<p.reverseUntil?-1:1;
+ const slowFactor=now<p.sluggishUntil?.40:1;
+ const moving=((p.keys.right?1:0)-(p.keys.left?1:0))*inverted;
+ if(moving)p.paddleX+=moving*p.paddleSpeed*slowFactor*dt;
+ if(p.pointerX!==null){const target=now<p.reverseUntil?900-p.pointerX:p.pointerX;p.paddleX+=(target-p.paddleX)*Math.min(1,dt*12*slowFactor);}
  p.paddleX=Math.max(w/2+8,Math.min(900-w/2-8,p.paddleX));
  for(const b of p.balls.slice()){
   if(b.attached){b.x=p.paddleX;b.y=p.paddleY-21;continue;}
@@ -7819,10 +7840,10 @@ function xiPlazaUpdate(dt){
   if(b.y<b.r){b.y=b.r;b.vy=Math.abs(b.vy);}
   if(b.vy>0 && prevY+b.r<=p.paddleY+5 && b.y+b.r>=p.paddleY && Math.abs(b.x-p.paddleX)<=w/2+b.r){
    const offset=Math.max(-1,Math.min(1,(b.x-p.paddleX)/(w/2)));
-   let speed=Math.min(760,Math.max(450,Math.hypot(b.vx,b.vy)*1.007));
-   if(now<p.slowUntil)speed=Math.max(360,speed*.93);
+   let speed=Math.min(600,Math.max(355,Math.hypot(b.vx,b.vy)*1.005));
+   if(now<p.slowUntil)speed=Math.max(315,speed*.96);
    const angle=offset*1.1;
-   b.vx=speed*Math.sin(angle);b.vy=-Math.max(230,speed*Math.cos(angle));b.y=p.paddleY-b.r-2;
+   b.vx=speed*Math.sin(angle);b.vy=-Math.max(215,speed*Math.cos(angle));b.y=p.paddleY-b.r-2;
    xiPlazaParticle(b.x,p.paddleY,'#71ecff',4);xiPlazaBeep(340,.05,'triangle');
   }
   if(b.y>600+b.r){p.balls.splice(p.balls.indexOf(b),1);continue;}
@@ -7870,7 +7891,7 @@ function xiPlazaUpdate(dt){
  if(p.bricks.length && p.bricks.every(b=>b.hp<=0))xiPlazaCompleteWave();
  xiPlazaStats();
 }
-function xiPlazaRoundSymbol(type){return {wide:'⇧',life:'✚',multi:'◉',slow:'◈',laser:'✦',blast:'✹'}[type]||'★';}
+function xiPlazaRoundSymbol(type){return {wide:'⇧',life:'✚',multi:'◉',slow:'◈',laser:'✦',blast:'✹',shrink:'↧',sluggish:'⌛',reverse:'⇄'}[type]||'★';}
 function xiPlazaRender(){
  xiPlazaResize();const p=xiPlaza,c=p.ctx;if(!c)return;
  const W=900,H=600;
@@ -7897,7 +7918,7 @@ function xiPlazaRender(){
   c.globalAlpha=1;c.shadowBlur=22;c.shadowColor='#82eaff';c.fillStyle='#fff';c.beginPath();c.arc(b.x,b.y,b.r,0,Math.PI*2);c.fill();c.shadowBlur=0;
  }
  for(const drop of p.drops){
-  const colors={wide:'#64dfff',life:'#ff839a',multi:'#f7cd70',slow:'#d2a8ff',laser:'#92fbe6',blast:'#ffad5c'};
+  const colors={wide:'#64dfff',life:'#7bf3ab',multi:'#f7cd70',slow:'#d2a8ff',laser:'#92fbe6',blast:'#ffad5c',shrink:'#ff5f72',sluggish:'#ff6a5d',reverse:'#ff526d'};
   c.shadowBlur=14;c.shadowColor=colors[drop.type]||'#fff';c.fillStyle=colors[drop.type]||'#fff';c.beginPath();c.roundRect(drop.x-13,drop.y-13,26,26,7);c.fill();c.shadowBlur=0;c.fillStyle='#12263b';c.font='bold 20px Arial';c.fillText(xiPlazaRoundSymbol(drop.type),drop.x,drop.y+1);
  }
  c.shadowBlur=12;c.shadowColor='#e1aeff';c.fillStyle='#f0bbff';for(const shot of p.shots)c.fillRect(shot.x-2,shot.y-14,4,18);c.shadowBlur=0;
@@ -7919,16 +7940,17 @@ async function xiPlazaPayQueue(){
      clearTimeout(p.rewardTimer);p.rewardTimer=setTimeout(()=>void xiPlazaPayQueue(),5000);
     }else{
      xiPlazaStatus('No se pudo abonar la ronda '+wave+': '+msg);
-     // Do not loop on permanent errors such as the daily cap.
-     if(/máximo diario|caducada|finalizada|inicia sesión/i.test(msg))p.pendingRounds.length=0;
+     // Do not loop on permanently rejected or expired runs.
+     if(/caducada|finalizada|inicia sesión/i.test(msg))p.pendingRounds.length=0;
      else{clearTimeout(p.rewardTimer);p.rewardTimer=setTimeout(()=>void xiPlazaPayQueue(),8500);}
     }
     return;
    }
    p.pendingRounds.shift();p.paidRounds=Math.max(p.paidRounds,Number(data?.paid_rounds||wave));
-   if(!data?.already_paid)p.earned+=Number(data?.earned_cents||1);
+   // Even if the server already processed a retried request, this run earned the reward.
+   p.earned+=data?.already_paid?3:Number(data?.earned_cents||3);
    if(data?.balance_cents!=null)platformSetWalletUI(data.balance_cents);
-   xiPlazaStats();xiPlazaStatus('¡Premio acreditado! +0,01 € por la ronda '+wave+'.');
+   xiPlazaStats();xiPlazaStatus('¡Premio acreditado! +0,03 € por la ronda '+wave+'.');
   }
  }finally{p.rewardBusy=false;if(p.finished && !p.pendingRounds.length)void xiPlazaFinishRun();}
 }
@@ -7937,7 +7959,7 @@ function xiPlazaCompleteWave(){
  p.pendingRounds.push(p.round);void xiPlazaPayQueue();
  p.playing=false;p.paused=true;
  if(p.animation){cancelAnimationFrame(p.animation);p.animation=0;}
- xiPlazaStats();xiPlazaOverlay('¡Ronda '+p.round+' superada!','Has completado el nivel. Premio: +0,01 € virtuales. Los siguientes bloques serán más difíciles.','Siguiente ronda','next');
+ xiPlazaStats();xiPlazaOverlay('¡Ronda '+p.round+' superada!','Has completado el nivel. Premio: +0,03 € virtuales. Los siguientes bloques serán más difíciles.','Siguiente ronda','next');
  xiPlazaParticle(450,270,'#66ffee',60);xiPlazaBeep(1050,.24,'triangle');xiPlazaRender();
 }
 async function xiPlazaFinishRun(){
