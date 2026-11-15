@@ -367,6 +367,7 @@ function updatePresenceDot(dot) {
 
 function renderPresenceIndicators() {
   $$('[data-presence-user]').forEach(updatePresenceDot);
+  xiDecorRenderAll();
 }
 
 function rebuildPresencePayloads() {
@@ -3154,6 +3155,7 @@ target.dataset.objectUrl = url;
 }
 
 function openSettings() {
+if(currentUser){void xiDecorLoad(false);if(!platformInventoryItems.length)void platformRefreshInventory();xiDecorDrawWardrobe();}
 syncProfileUI();
 applyTheme(currentTheme());
 $('#settings-modal')?.classList.remove('hidden');
@@ -3602,6 +3604,7 @@ const value = tab.dataset.settingsTab;
 $$('.settings-tab-button').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === value));
 $('#settings-profile-tab')?.classList.toggle('active', value === 'profile');
 $('#settings-appearance-tab')?.classList.toggle('active', value === 'appearance');
+if(value==='appearance'&&currentUser){void xiDecorLoad(false);if(!platformInventoryItems.length)void platformRefreshInventory();xiDecorDrawWardrobe();}
 }
 
 const theme = event.target.closest('[data-theme-choice]');
@@ -4543,7 +4546,7 @@ function platformItemCardMarkup(item, { mode = 'collection', disabled = false, s
     </div>`;
   }
   return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize}${coinClass} ${valueGlow} ${item.reserved?'is-reserved':''}" ${customAttrs} data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
-    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}
+    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}${xiDecorStyles.get(platformTypeId(item))?.enabled?'<span class="xi-decor-equip-label">ITEM EQUIPABLE</span>':''}
     <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong>
   </button>`;
 }
@@ -4597,6 +4600,7 @@ function platformOpenItemDetails(key, source = 'collection') {
   button?.classList.add('hidden');
   button?.removeAttribute('data-box-instance');
   if (platformItemIsBox(item)) void platformRenderBoxPreview(item,source);
+  xiDecorShowItemAction(item,source);
   openModal('item-details-modal');
 }
 
@@ -4884,6 +4888,7 @@ async function platformInitialize() {
   await platformLoadBoxMeta();
   await platformLoadItemFeatures();
   await xiLoadCustomCatalog(true);
+  void xiDecorLoad(true);
   await platformLoadSystemApps();
   if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
   void platformLoadReleases();
@@ -4897,6 +4902,7 @@ async function platformInitialize() {
   platformMarketRefreshTimer=setInterval(()=>{
     if(currentUser && String(currentUser.id)===owner && document.visibilityState==='visible'){
       void platformLoadMarket(platformActiveApp==='market');
+      void xiDecorLoad(false);
       if(platformActiveApp==='shop')void platformLoadShop();
       platformUpdateChatBadges();
     }
@@ -4937,7 +4943,7 @@ async function platformInitialize() {
 }
 
 function platformStop() {
-  xiPlazaStop();xiBankResetSession();
+  xiPlazaStop();xiBankResetSession();xiDecorStop();xiSeriesReset();
   xiTradeChatStop();
   platformInlineEndEdit(true);platformInlineData={texts:[],images:[]};platformInlinePrepared=false;
   $$('.xi-inline-pencil,.xi-overlay-image').forEach(node=>node.remove());
@@ -5241,6 +5247,7 @@ function platformRenderInventory() {
   setText('inventory-collection-count',`${rows.length} ${rows.length===1?'COPIA':'COPIAS'} · ${groups.length} TIPOS`);
   const markup=groups.length ? groups.map(group=>platformItemCardMarkup(group.item,{count:group.count})).join('') : '<div class="inventory-empty"><span>▦</span><strong>Tu inventario está vacío</strong><p>Cuando recibas objetos, aparecerán aquí.</p></div>';
   platformApplyMarkup($('#inventory-grid'),markup);
+  xiDecorDrawWardrobe();
 }
 
 async function platformUploadImage(file, folder) {
@@ -5389,6 +5396,7 @@ function platformResetItemForm() {
   platformSetPreview('admin-item-image-preview', null, '');
   platformToggleBoxFields();
   platformPopulateItemFeatureEditor(null);
+  xiDecorPopulateEditor(null);xiSeriesReset();
   xiFillItemRoutes(null);
   $('#admin-box-drops')?.replaceChildren();
   platformUpdateBoxPercent();
@@ -5409,6 +5417,7 @@ function platformEditItem(itemId) {
   $('#admin-item-image').value = '';
   $('#admin-item-is-box').checked = Boolean(item.is_box);
   platformPopulateItemFeatureEditor(item);
+  xiDecorPopulateEditor(item);xiSeriesReset();
   xiFillItemRoutes(item.id);
   platformToggleBoxFields();
   $('#admin-box-drops')?.replaceChildren();
@@ -5431,6 +5440,10 @@ async function platformSaveItem(event) {
   setLoading(button, true);
   platformSetMessage('admin-item-message', 'Guardando objeto...', 'info');
   try {
+    if(xiSeriesRows.length){
+      await xiSeriesSave();
+      return;
+    }
     const name = String($('#admin-item-name')?.value || '').trim();
     const description = String($('#admin-item-description')?.value || '').trim();
     const rarity = String($('#admin-item-rarity')?.value || 'comun');
@@ -5484,6 +5497,7 @@ async function platformSaveItem(event) {
     if (configured.error) throw new Error(`Objeto guardado, pero no se configuró la caja: ${friendlyError(configured.error)}. Edita el objeto e inténtalo otra vez.`);
     await platformAdminSaveInstantPrice(savedId,platformMoneyToCents($('#admin-item-instant-price')?.value||'0.01'));
     await platformAdminSaveItemFeatures(savedId);
+    await xiDecorSaveStyle(savedId,isBox);
     if(!isBox)await xiSaveItemPaths(savedId);
     await platformLoadItemFeatures(true);
     await platformLoadBoxMeta();
@@ -7376,6 +7390,7 @@ function platformAlpha14Bind(){
 function platformBindEvents() {
   platformAlpha14Bind();
   xiBankPlazaBind();
+  xiDecorSeriesBind();
   document.addEventListener('click', event => {
     const appButton = event.target.closest('[data-platform-app]');
     if (appButton) {
@@ -7646,7 +7661,7 @@ function xiBankResetSession(){xiBankClosePanel();xiBankRecipient=null;xiBankCoin
 const XI_PLAZA_WIDTH=900, XI_PLAZA_HEIGHT=600;
 const xiPlaza={canvas:null,ctx:null,active:false,open:false,playing:false,paused:true,starting:false,finished:false,
  runId:null,round:1,lives:3,score:0,earned:0,paidRounds:0,pendingRounds:[],rewardBusy:false,rewardTimer:0,
- paddleX:450,paddleW:99,paddleY:550,paddleSpeed:615,balls:[],bricks:[],drops:[],particles:[],shots:[],
+ paddleX:450,paddleW:115,paddleY:550,paddleSpeed:635,balls:[],bricks:[],drops:[],particles:[],shots:[],
  keys:{left:false,right:false},lastFrame:0,frame:0,shotTimer:0,laserUntil:0,wideUntil:0,slowUntil:0,
  shrinkUntil:0,sluggishUntil:0,reverseUntil:0,
  sound:false,audio:null,animation:0,stars:[],lastReason:'',pointerX:null,levelBusy:false};
@@ -7686,11 +7701,11 @@ function xiPlazaResize(){
 }
 function xiPlazaStarField(){
  if(xiPlaza.stars.length)return;
- for(let i=0;i<75;i++)xiPlaza.stars.push({x:Math.random()*900,y:Math.random()*600,r:Math.random()*1.5+.3,o:Math.random()*.3+.08});
+ for(let i=0;i<19;i++)xiPlaza.stars.push({x:Math.random()*900,y:Math.random()*600,r:Math.random()*1.5+.3,o:Math.random()*.3+.08});
 }
 function xiPlazaPaddleWidth(){const now=performance.now();return xiPlaza.shrinkUntil>now?68:xiPlaza.wideUntil>now?155:xiPlaza.paddleW;}
 function xiPlazaCreateBall(attached=true,x=xiPlaza.paddleX,y=xiPlaza.paddleY-22,vx=0,vy=-375){
- const speed=375+Math.min(185,(xiPlaza.round-1)*11);
+ const speed=385+Math.min(185,(xiPlaza.round-1)*14);
  const b={x,y,vx:attached?0:vx,vy:attached?0:vy,r:7.5,attached,trail:[],speed};
  xiPlaza.balls.push(b);return b;
 }
@@ -7699,14 +7714,13 @@ function xiPlazaStartWave(){
  p.round=Math.max(1,p.round);p.levelBusy=false;p.drops=[];p.shots=[];p.balls=[];
  p.wideUntil=0;p.slowUntil=0;p.laserUntil=0;p.shrinkUntil=0;p.sluggishUntil=0;p.reverseUntil=0;p.paddleX=450;p.pointerX=null;
  p.bricks=[];
- const cols=10,rows=Math.min(8,5+Math.floor((p.round-1)/2));
- const gap=7,w=72,h=21,startX=(900-(w+gap)*cols+gap)/2;
+ const cols=7,rows=Math.min(6,3+Math.floor((p.round-1)/3));
+ const gap=9,w=102,h=28,startX=(900-(w+gap)*cols+gap)/2;
  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
-  const tough=Math.random()<Math.min(.72,.25+p.round*.055);
-  const power=Math.random()<(p.round===1?.13:.16)?
-    (Math.random()<.42?['shrink','sluggish','reverse'][Math.floor(Math.random()*3)]:
-     ['wide','life','multi','slow','laser','blast'][Math.floor(Math.random()*6)]):null;
-  p.bricks.push({x:startX+col*(w+gap),y:68+row*31,w,h,hp:tough?2:1,maxHp:tough?2:1,color:xiPlazaColors[(row+p.round-1)%xiPlazaColors.length],power});
+  const tough=Math.random()<Math.min(.24,.045+Math.max(0,p.round-2)*.022);
+  // Como máximo 3 tipos de ayuda y 2 obstáculos: menos caos visual.
+  const power=Math.random()<.075?(Math.random()<.35?['shrink','sluggish'][Math.floor(Math.random()*2)]:['wide','life','blast'][Math.floor(Math.random()*3)]):null;
+  p.bricks.push({x:startX+col*(w+gap),y:80+row*40,w,h,hp:tough?2:1,maxHp:tough?2:1,color:xiPlazaColors[(row+p.round-1)%xiPlazaColors.length],power});
  }
  xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus(`Ronda ${p.round}: destruye todos los bloques para ganar 0,03 € virtuales. ¡Cuidado con los potenciadores rojos!`);
 }
@@ -7732,7 +7746,7 @@ function xiPlazaLaunch(){
  if(!xiPlaza.playing||xiPlaza.paused)return;
  let launched=false;
  for(const b of xiPlaza.balls){if(!b.attached)continue;b.attached=false;
-  const speed=375+Math.min(170,(xiPlaza.round-1)*11);
+  const speed=385+Math.min(185,(xiPlaza.round-1)*14);
   b.vx=(Math.random()<.5?-1:1)*Math.min(230,speed*.42);b.vy=-Math.sqrt(speed*speed-b.vx*b.vx);launched=true;
  }
  if(launched)xiPlazaBeep(360,.09,'triangle');
@@ -7762,7 +7776,7 @@ function xiPlazaOpenGame(){
  const game=$('#xi-plaza-game');game?.classList.remove('hidden');
  game?.scrollIntoView({block:'start',behavior:window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
  if(xiPlaza.playing && !xiPlaza.finished)xiPlazaOverlay('Partida en pausa','Continúa la partida donde la dejaste.','Continuar','resume');
- else xiPlazaOverlay('Block Breaker','Usa ← / → o A / D. En móvil, desliza el dedo o usa las flechas. Espacio lanza la bola.','Empezar partida','start');
+ else xiPlazaOverlay('Block Breaker','Usa ← / → o A / D. En móvil, usa los botones. Espacio lanza la bola.','Empezar partida','start');
  xiPlazaRender();
 }
 function xiPlazaLoopStart(){
@@ -7780,12 +7794,12 @@ function xiPlazaParticle(x,y,color,n=9){
   const angle=Math.random()*Math.PI*2,speed=55+Math.random()*190;
   xiPlaza.particles.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,r:2+Math.random()*3,life:.35+Math.random()*.4,max:.75,color});
  }
- if(xiPlaza.particles.length>380)xiPlaza.particles.splice(0,xiPlaza.particles.length-380);
+ if(xiPlaza.particles.length>110)xiPlaza.particles.splice(0,xiPlaza.particles.length-110);
 }
 function xiPlazaDestroyBrick(brick){
  if(brick.hp<=0)return;
  brick.hp=0;xiPlaza.score+=brick.maxHp===2?25:15;
- xiPlazaParticle(brick.x+brick.w/2,brick.y+brick.h/2,brick.color,12);
+ xiPlazaParticle(brick.x+brick.w/2,brick.y+brick.h/2,brick.color,5);
  xiPlazaBeep(520+Math.random()*190,.042,'triangle');
  if(brick.power)xiPlaza.drops.push({x:brick.x+brick.w/2,y:brick.y+brick.h/2,vy:125,type:brick.power});
 }
@@ -7828,7 +7842,7 @@ function xiPlazaUpdate(dt){
  const slowFactor=now<p.sluggishUntil?.40:1;
  const moving=((p.keys.right?1:0)-(p.keys.left?1:0))*inverted;
  if(moving)p.paddleX+=moving*p.paddleSpeed*slowFactor*dt;
- if(p.pointerX!==null){const target=now<p.reverseUntil?900-p.pointerX:p.pointerX;p.paddleX+=(target-p.paddleX)*Math.min(1,dt*12*slowFactor);}
+ // Solo teclado o botones táctiles: ningún movimiento del ratón controla la barra.
  p.paddleX=Math.max(w/2+8,Math.min(900-w/2-8,p.paddleX));
  for(const b of p.balls.slice()){
   if(b.attached){b.x=p.paddleX;b.y=p.paddleY-21;continue;}
@@ -7842,7 +7856,7 @@ function xiPlazaUpdate(dt){
    const offset=Math.max(-1,Math.min(1,(b.x-p.paddleX)/(w/2)));
    let speed=Math.min(600,Math.max(355,Math.hypot(b.vx,b.vy)*1.005));
    if(now<p.slowUntil)speed=Math.max(315,speed*.96);
-   const angle=offset*1.1;
+   const angle=Math.abs(offset)<.12?(b.vx>=0?.18:-.18):offset*1.1;
    b.vx=speed*Math.sin(angle);b.vy=-Math.max(215,speed*Math.cos(angle));b.y=p.paddleY-b.r-2;
    xiPlazaParticle(b.x,p.paddleY,'#71ecff',4);xiPlazaBeep(340,.05,'triangle');
   }
@@ -7885,7 +7899,7 @@ function xiPlazaUpdate(dt){
  if(!p.balls.length){
   p.lives--;
   if(p.lives<=0){xiPlazaGameOver();return;}
-  xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus('¡Has perdido una bola! Pulsa Espacio o toca el campo para continuar.');
+  xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus('Has perdido una vida. Pulsa Espacio para continuar.');
   xiPlazaBeep(180,.25,'sawtooth');
  }
  if(p.bricks.length && p.bricks.every(b=>b.hp<=0))xiPlazaCompleteWave();
@@ -7923,7 +7937,7 @@ function xiPlazaRender(){
  }
  c.shadowBlur=12;c.shadowColor='#e1aeff';c.fillStyle='#f0bbff';for(const shot of p.shots)c.fillRect(shot.x-2,shot.y-14,4,18);c.shadowBlur=0;
  for(const particle of p.particles){c.globalAlpha=Math.min(1,particle.life/.5);c.fillStyle=particle.color;c.beginPath();c.arc(particle.x,particle.y,particle.r*Math.min(1,particle.life*3),0,Math.PI*2);c.fill();}c.globalAlpha=1;
- if(p.balls.some(b=>b.attached)&&p.playing&&!p.paused){c.fillStyle='#a5e8f0';c.font='12px Arial';c.fillText('ESPACIO / TOCAR PARA LANZAR',p.paddleX,p.paddleY+34);}
+ if(p.balls.some(b=>b.attached)&&p.playing&&!p.paused){c.fillStyle='#a5e8f0';c.font='12px Arial';c.fillText('ESPACIO PARA LANZAR',p.paddleX,p.paddleY+34);}
  c.fillStyle='#5d88a444';c.fillRect(0,590,900,2);
 }
 async function xiPlazaPayQueue(){
@@ -8029,9 +8043,8 @@ function xiBankPlazaBind(){
   if(xiPlaza.sound)xiPlazaBeep(620,.13);
  });
  const canvas=$('#xi-plaza-canvas');
- canvas?.addEventListener('pointermove',event=>{xiPlazaSetPointer(event);});
- canvas?.addEventListener('pointerdown',event=>{xiPlazaSetPointer(event);xiPlazaLaunch();});
- canvas?.addEventListener('pointerleave',()=>{xiPlaza.pointerX=null;});
+ // El lienzo no captura el ratón. Solo A/D, flechas y los botones táctiles.
+ canvas?.addEventListener('pointerdown',event=>{if(event.pointerType==='touch')xiPlazaLaunch();});
  for(const [id,dir] of [['xi-plaza-left','left'],['xi-plaza-right','right']]){
   const btn=$('#'+id);if(!btn)continue;
   btn.addEventListener('pointerdown',e=>{e.preventDefault();btn.setPointerCapture?.(e.pointerId);xiPlaza.keys[dir]=true;xiPlaza.pointerX=null;});
@@ -8052,6 +8065,332 @@ function xiBankPlazaBind(){
  window.addEventListener('blur',()=>{if(platformActiveApp==='plaza'&&xiPlaza.playing)xiPlazaPause(true);});
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible'&&xiPlaza.playing)xiPlazaPause(true);});
  xiPlazaResize();xiPlazaRender();
+}
+
+/* =================== ALPHA 1.14 · PERFIL EQUIPABLE =================== */
+const xiDecorStyles = new Map();
+const xiDecorEquipped = new Map();
+let xiDecorFetchedAt = 0, xiDecorBusy = null, xiDecorSavedImageUrl = '', xiDecorObjectUrl = '', xiDecorEditingItemId = '';
+const XI_DECOR_ANIMATIONS = ['none','float','pulse','spin','shimmer'];
+function xiDecorConfigFromForm(){
+ return {
+   enabled:!!$('#xi-decor-enabled')?.checked,
+   pos_x:Number($('#xi-decor-x')?.value||0),pos_y:Number($('#xi-decor-y')?.value||0),
+   scale:Number($('#xi-decor-scale')?.value||135)/100,
+   rotation:Number($('#xi-decor-rotation')?.value||0),glow:Number($('#xi-decor-glow')?.value||0),
+   animation:$('#xi-decor-animation')?.value||'none'
+ };
+}
+function xiDecorApplyStyle(image,config){
+ if(!image||!config)return;
+ image.style.setProperty('--xi-decor-x',Number(config.pos_x||0)+'%');
+ image.style.setProperty('--xi-decor-y',Number(config.pos_y||0)+'%');
+ image.style.setProperty('--xi-decor-scale',String(Number(config.scale||1.35)));
+ image.style.setProperty('--xi-decor-rotate',Number(config.rotation||0)+'deg');
+ image.style.setProperty('--xi-decor-glow',Number(config.glow||0)+'px');
+ image.dataset.animation=XI_DECOR_ANIMATIONS.includes(config.animation)?config.animation:'none';
+}
+function xiDecorUpdatePreview(){
+ const cfg=xiDecorConfigFromForm();
+ $('#xi-decor-editor')?.classList.toggle('hidden',!cfg.enabled);
+ const out={x:cfg.pos_x,y:cfg.pos_y,scale:Math.round(cfg.scale*100)+'%',rotation:cfg.rotation+'°',glow:cfg.glow+' px'};
+ for(const [key,value] of Object.entries(out))setText('xi-decor-'+key+'-value',String(value));
+ const avatar=$('#xi-decor-preview .xi-decor-preview-avatar');
+ if(avatar){const name=currentProfile?.username||'X';avatar.textContent=name[0].toUpperCase();}
+ const img=$('#xi-decor-preview-image');if(img){
+  const file=$('#admin-item-image')?.files?.[0];
+  if(file && file!==xiDecorUpdatePreview.lastFile){
+   if(xiDecorObjectUrl)URL.revokeObjectURL(xiDecorObjectUrl);
+   xiDecorObjectUrl=URL.createObjectURL(file);xiDecorUpdatePreview.lastFile=file;
+  }else if(!file && xiDecorUpdatePreview.lastFile){
+   if(xiDecorObjectUrl)URL.revokeObjectURL(xiDecorObjectUrl);
+   xiDecorObjectUrl='';xiDecorUpdatePreview.lastFile=null;
+  }
+  img.src=xiDecorObjectUrl||xiDecorSavedImageUrl||'';
+  img.hidden=!img.src;
+  img.classList.add('xi-decor-overlay');
+  xiDecorApplyStyle(img,cfg);
+ }
+}
+function xiDecorPopulateEditor(item){
+ const style=xiDecorStyles.get(String(item?.id||''));xiDecorEditingItemId=String(item?.id||'');
+ const cfg=style||{enabled:false,pos_x:0,pos_y:0,scale:1.35,rotation:0,glow:10,animation:'none'};
+ const ids={x:cfg.pos_x,y:cfg.pos_y,scale:Math.round(Number(cfg.scale)*100),rotation:cfg.rotation,glow:cfg.glow,animation:cfg.animation};
+ for(const [k,v] of Object.entries(ids)){const el=$('#xi-decor-'+k);if(el)el.value=String(v);}
+ if($('#xi-decor-enabled'))$('#xi-decor-enabled').checked=Boolean(style?.enabled);
+ xiDecorSavedImageUrl=item?.image_url||'';
+ if(xiDecorObjectUrl){URL.revokeObjectURL(xiDecorObjectUrl);xiDecorObjectUrl='';}
+ xiDecorUpdatePreview.lastFile=null;xiDecorUpdatePreview();
+}
+async function xiDecorSaveStyle(itemId,isBox){
+ const cfg=xiDecorConfigFromForm();
+ const existed=xiDecorStyles.has(String(itemId));
+ if(isBox && cfg.enabled)throw new Error('Una caja no se puede equipar como decoración de perfil.');
+ if(!cfg.enabled&&!existed)return;
+ const {error}=await supabase.rpc('xifre_avatar_set_style',{
+  p_item_id:itemId,p_enabled:!isBox&&cfg.enabled,
+  p_x:cfg.pos_x,p_y:cfg.pos_y,p_scale:cfg.scale,p_rotation:cfg.rotation,p_glow:cfg.glow,p_animation:cfg.animation
+ });
+ if(error)throw new Error('El objeto se guardó, pero falló la decoración: '+friendlyError(error));
+ await xiDecorLoad(true);
+}
+async function xiDecorLoad(force=false){
+ if(!supabase||!currentUser)return;
+ if(!force && xiDecorFetchedAt && Date.now()-xiDecorFetchedAt<45000)return;
+ if(xiDecorBusy)return xiDecorBusy;
+ const owner=String(currentUser.id),revision=platformSessionGeneration;
+ xiDecorBusy=(async()=>{
+  const {data,error}=await supabase.rpc('xifre_avatar_catalog');
+  if(error)throw error;
+  const rows=data?.decorations||[];const paths=await platformSignImagePaths(rows.map(row=>row.image_path));
+  if(!currentUser||String(currentUser.id)!==owner||revision!==platformSessionGeneration)return;
+  xiDecorStyles.clear();xiDecorEquipped.clear();
+  for(const row of rows)xiDecorStyles.set(String(row.item_id),{...row,image_url:paths.get(row.image_path)||''});
+  for(const row of data?.equipped||[])xiDecorEquipped.set(String(row.user_id),row);
+  xiDecorFetchedAt=Date.now();xiDecorRenderAll();xiDecorDrawWardrobe();
+ })().catch(error=>{console.warn('XIFRE AVATAR DECORATIONS',error);}).finally(()=>{xiDecorBusy=null;});
+ return xiDecorBusy;
+}
+function xiDecorMount(host,userId){
+ if(!host||!userId)return;
+ const equip=xiDecorEquipped.get(String(userId));
+ const style=equip?xiDecorStyles.get(String(equip.item_id)):null;
+ const signature=style?.enabled&&style.image_url?`${equip.instance_id}|${style.image_url}|${style.pos_x}|${style.pos_y}|${style.scale}|${style.rotation}|${style.glow}|${style.animation}`:'';
+ if(host.dataset.xiDecorSig===signature && (!signature || host.querySelector(':scope > .xi-decor-overlay')))return;
+ host.dataset.xiDecorSig=signature;
+ host.querySelectorAll(':scope > .xi-decor-overlay').forEach(node=>node.remove());
+ host.classList.toggle('xi-decor-host',!!signature);
+ if(!signature)return;
+ const image=document.createElement('img');image.className='xi-decor-overlay';image.alt='';image.loading='lazy';image.decoding='async';
+ image.src=style.image_url;image.addEventListener('error',()=>image.remove(),{once:true});
+ xiDecorApplyStyle(image,style);host.appendChild(image);
+}
+function xiDecorRenderAll(){
+ if(!currentUser)return;
+ $$('[data-presence-user]').forEach(dot=>{
+  const host=dot.parentElement;if(!host || host.closest('#xi-decor-preview'))return;
+  xiDecorMount(host,dot.dataset.presenceUser);
+ });
+ const own=currentUser.id;
+ for(const id of ['#settings-avatar-preview','#profile-avatar','#bottom-profile-avatar','#settings-nav-avatar']){
+  const node=$(id);if(node)xiDecorMount(node,own);
+ }
+ const peer=selectedMember?.id||selectedMember?.user_id;
+ if(peer)xiDecorMount($('#member-profile-avatar'),String(peer));
+ if(currentConversationData && currentConversationData.type!=='group')xiDecorMount($('#chat-avatar'),conversationPeerId(currentConversationData));
+}
+function xiDecorDrawWardrobe(){
+ const host=$('#xi-decor-wardrobe');if(!host||!currentUser)return;
+ const seen=new Set(),items=[];
+ for(const item of platformInventoryItems){
+  const id=platformTypeId(item),style=xiDecorStyles.get(id);
+  if(!style?.enabled ||seen.has(id))continue;
+  seen.add(id);items.push({item,style});
+ }
+ const equipped=xiDecorEquipped.get(String(currentUser.id));
+ const rows=items.map(({item,style})=>{
+  const id=platformItemKey(item);
+  return `<button class="xi-decor-choice ${String(equipped?.item_id)===platformTypeId(item)?'selected':''}" type="button" data-xi-decor-equip="${esc(id)}"><img src="${esc(style.image_url)}" alt=""><span>${esc(item.name)}${String(equipped?.item_id)===platformTypeId(item)?' · Equipado':''}</span></button>`;
+ });
+ host.innerHTML=(equipped?'<button class="xi-decor-choice" type="button" data-xi-decor-equip="">✕ Quitar decoración</button>':'')+(rows.join('')||'<span class="admin-feature-hint">Todavía no tienes objetos decorativos.</span>');
+}
+function xiDecorShowItemAction(item,source){
+ const host=$('#xi-decor-detail-action');if(!host)return;
+ const style=xiDecorStyles.get(platformTypeId(item));
+ const canEquip=source==='collection'&&style?.enabled;
+ host.classList.toggle('hidden',!canEquip);host.innerHTML='';
+ if(!canEquip)return;
+ const instance=platformInventoryItems.find(v=>platformGroupSignature(v)===platformGroupSignature(item) && !v.reserved);
+ const equipped=xiDecorEquipped.get(String(currentUser?.id));
+ host.innerHTML=`<span class="xi-decor-equip-label">✧ ITEM EQUIPABLE</span><p>Úsalo alrededor de tu foto de perfil.</p>${instance?`<button class="xi-decor-equip-button" type="button" data-xi-decor-equip="${esc(platformItemKey(instance))}">${String(equipped?.item_id)===platformTypeId(item)?'Equipar esta copia':'Equipar decoración'}</button>`:'<small>No tienes copias disponibles.</small>'}`;
+}
+async function xiDecorEquip(instance){
+ if(!currentUser || !supabase)return;
+ try{
+  const {error}=await supabase.rpc('xifre_avatar_equip',{p_instance_id:instance||null});if(error)throw error;
+  await xiDecorLoad(true);toast(instance?'Decoración equipada.':'Decoración quitada.','success');
+ }catch(error){toast('No se pudo equipar: '+friendlyError(error),'error');}
+}
+function xiDecorStop(){
+ xiDecorStyles.clear();xiDecorEquipped.clear();xiDecorFetchedAt=0;xiDecorEditingItemId='';xiDecorSavedImageUrl='';
+ if(xiDecorObjectUrl)URL.revokeObjectURL(xiDecorObjectUrl);xiDecorObjectUrl='';xiDecorUpdatePreview.lastFile=null;
+ $$('.xi-decor-overlay').forEach(n=>n.remove());$$('.xi-decor-host').forEach(n=>{n.classList.remove('xi-decor-host');delete n.dataset.xiDecorSig;});
+}
+/* ================== ALPHA 1.14 · IMPORTACIÓN DE SERIES ================== */
+let xiSeriesRows=[],xiSeriesSaving=false,xiSeriesRequestId='';
+const XI_SERIES_RARITIES=['comun','poco_comun','raro','epico','legendario','mitico','divino'];
+function xiSeriesCleanName(filename){return String(filename).replace(/\.[^.]+$/,'').trim().slice(0,80);}
+function xiSeriesReset(clearInput=true){
+ for(const row of xiSeriesRows)if(row.url)URL.revokeObjectURL(row.url);
+ xiSeriesRows=[];xiSeriesRequestId='';
+ if(clearInput && $('#xi-series-folder'))$('#xi-series-folder').value='';
+ $('#xi-series-list')?.replaceChildren();setText('xi-series-summary','Sin carpeta seleccionada');
+ $('#admin-box-drops')?.classList.remove('hidden');$('#admin-box-add-drop')?.classList.remove('hidden');
+}
+function xiSeriesSelectFolder(files){
+ if(xiSeriesSaving)return;
+ const images=Array.from(files||[]).filter(file=>file && XIFRE_SYSTEM_MEDIA_TYPES.has(file.type));
+ if(images.length>80){toast('Selecciona como máximo 80 imágenes por caja.','error');return;}
+ if(!images.length){xiSeriesReset();return;}
+ if(images.some(f=>!f.size||f.size>XIFRE_SYSTEM_MEDIA_MAX_BYTES)||images.reduce((s,f)=>s+f.size,0)>160*1024*1024){toast('Cada imagen debe pesar menos de 8 MB y la carpeta menos de 160 MB.','error');return;}
+ const names=images.map(f=>xiSeriesCleanName(f.name));
+ if(names.some(n=>!n)||new Set(names.map(n=>n.toLowerCase())).size!==names.length){toast('Hay nombres de archivos vacíos o repetidos. Renómbralos antes de importar.','error');return;}
+ xiSeriesReset(false);$('#admin-item-is-box').checked=true;platformToggleBoxFields();
+ const sorted=images.sort((a,b)=>a.name.localeCompare(b.name,'es'));
+ xiSeriesRows=sorted.map((file,i)=>({file,url:URL.createObjectURL(file),name:xiSeriesCleanName(file.name),chance:0,hidden:false,overrides:{}}));
+ const total=1000000,base=Math.floor(total/xiSeriesRows.length),remainder=total-base*xiSeriesRows.length;
+ xiSeriesRows.forEach((row,i)=>{row.chance=((base+(i<remainder?1:0))/10000).toFixed(4);});
+ xiSeriesRequestId=(window.crypto?.randomUUID?.()||`${Date.now()}`);
+ $('#admin-box-drops')?.classList.add('hidden');$('#admin-box-add-drop')?.classList.add('hidden');
+ xiSeriesRender();
+}
+function xiSeriesRender(){
+ const host=$('#xi-series-list');if(!host)return;
+ const options='<option value="">Común a toda la serie</option>'+XI_SERIES_RARITIES.map(v=>`<option value="${v}">${platformRarity({rarity:v}).label}</option>`).join('');
+ host.innerHTML=xiSeriesRows.map((r,i)=>`<article class="xi-series-entry" data-xi-series-index="${i}">
+ <img src="${esc(r.url)}" alt="${esc(r.name)}">
+ <div class="xi-series-entry-main">
+ <div class="xi-series-compact">
+ <label>Nombre<input data-xi-series-field="name" maxlength="80" value="${esc(r.name)}"></label>
+ <label>Rareza<select data-xi-series-field="rarity">${options}</select></label>
+ <label>Valor propio<input type="number" data-xi-series-field="value" min="0" step="1" placeholder="Heredar" value="${esc(r.overrides.value||'')}"></label>
+ <label>Probabilidad %<input type="number" data-xi-series-field="chance" min="0.0001" max="100" step="0.0001" value="${esc(r.chance)}"></label>
+ </div>
+ <label class="xifre-check-row"><input data-xi-series-field="hidden" type="checkbox" ${r.hidden?'checked':''}> Premio oculto</label>
+ <details><summary>✎ Editar individualmente</summary><div class="xi-series-entry-advanced">
+ <label>Descripción propia<textarea data-xi-series-field="description" maxlength="1000" rows="2" placeholder="Usar descripción común">${esc(r.overrides.description||'')}</textarea></label>
+ <label>Venta instantánea (€)<input data-xi-series-field="instant" type="number" step="0.01" min="0" placeholder="Heredar"></label>
+ <label>Upgrades<select data-xi-series-field="upgradable"><option value="">Heredar configuración</option><option value="yes">Permitir</option><option value="no">No permitir</option></select></label>
+ <label>Copias para Dorado<input data-xi-series-field="gold_required" type="number" min="2" max="100" placeholder="Heredar"></label>
+ <label>Valor Dorado<input data-xi-series-field="gold_value" type="number" min="0" step="1" placeholder="Heredar"></label>
+ <label>Copias para Neón<input data-xi-series-field="neon_required" type="number" min="2" max="100" placeholder="Heredar"></label>
+ <label>Valor Neón<input data-xi-series-field="neon_value" type="number" min="0" step="1" placeholder="Heredar"></label>
+ <label>Emoji personalizado<select data-xi-series-field="emoji"><option value="">Heredar configuración</option><option value="yes">Sí (código desde nombre)</option><option value="no">No</option></select></label>
+ <label>Decoración de perfil<select data-xi-series-field="equipable"><option value="">Heredar configuración</option><option value="yes">Sí</option><option value="no">No</option></select></label>
+ </div><small>Las rutas avanzadas se heredan del formulario principal. Podrás modificarlas después desde «Editar objeto».</small></details>
+ </div></article>`).join('');
+ for(const [i,row] of xiSeriesRows.entries()){
+  const block=host.children[i];if(!block)continue;
+  for(const key of ['rarity','instant','upgradable','gold_required','gold_value','neon_required','neon_value','emoji','equipable']){
+   const field=block.querySelector(`[data-xi-series-field="${key}"]`);if(field)field.value=row.overrides[key]||'';
+  }
+ }
+ setText('xi-series-summary',`${xiSeriesRows.length} archivos · ${xiSeriesRows.reduce((sum,row)=>sum+Number(row.chance),0).toFixed(4)}% de probabilidad`);
+}
+function xiSeriesChange(event){
+ const control=event.target.closest('[data-xi-series-field]');if(!control)return;
+ const index=Number(control.closest('[data-xi-series-index]')?.dataset.xiSeriesIndex);
+ const row=xiSeriesRows[index];if(!row)return;
+ const key=control.dataset.xiSeriesField;
+ const value=control.type==='checkbox'?control.checked:control.value;
+ if(['name','chance','hidden'].includes(key))row[key]=value;
+ else row.overrides[key]=value;
+ if(key==='chance')setText('xi-series-summary',`${xiSeriesRows.length} archivos · ${xiSeriesRows.reduce((sum,entry)=>sum+Number(entry.chance),0).toFixed(4)}% de probabilidad`);
+}
+function xiSeriesToSafeInteger(value,label){
+ if(!/^\d+$/.test(String(value))||!Number.isSafeInteger(Number(value))||Number(value)>9000000000000000)throw new Error('Revisa '+label+'.');
+ return Number(value);
+}
+function xiSeriesSlug(name,index){
+ let code=String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9_]/g,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'').slice(0,23);
+ if(!/^[a-z]/.test(code))code='xi_'+code;
+ if(code.length<2)code='xi_'+index;
+ return code.slice(0,26);
+}
+async function xiSeriesSave(){
+ if(!isXifreAdmin||!currentUser||xiSeriesSaving)return;
+ if(platformAdminEditingItemId)throw new Error('La importación desde carpeta solo está disponible al crear una caja nueva.');
+ if(!$('#admin-item-is-box')?.checked || !xiSeriesRows.length)throw new Error('Selecciona una caja y una carpeta.');
+ const boxFile=$('#admin-item-image')?.files?.[0];if(!boxFile)throw new Error('Selecciona también la imagen de la caja.');
+ const common={
+  name:String($('#admin-item-name')?.value||'').trim(),description:String($('#admin-item-description')?.value||'').trim(),
+  rarity:$('#admin-item-rarity')?.value||'comun',value:xiSeriesToSafeInteger($('#admin-item-value')?.value,'valor común'),
+  instant_sell_cents:platformMoneyToCents($('#admin-item-instant-price')?.value||'0.01'),
+  series_name:String($('#admin-item-series')?.value||'').trim(),show_series:!!$('#admin-item-show-series')?.checked,
+  show_source_box:!!$('#admin-item-show-origin')?.checked,
+  upgrade_enabled:!!$('#admin-item-upgradable')?.checked,
+  emoji_enabled:!!$('#admin-item-emoji-enabled')?.checked,decoration:xiDecorConfigFromForm(),
+  gold_required:Number($('#admin-item-gold-count')?.value||3), gold_value:xiSeriesToSafeInteger($('#admin-item-gold-value')?.value||'0','valor Dorado'),
+  neon_required:Number($('#admin-item-neon-count')?.value||3),neon_value:xiSeriesToSafeInteger($('#admin-item-neon-value')?.value||'0','valor Neón')
+ };
+ if(!common.name||common.name.length>80 || !common.series_name)throw new Error('Escribe el nombre de la caja y el nombre de la serie.');
+ const routes=xiReadRouteRows();
+ let total=0;
+ const usedShortcodes=new Set();
+ const draft=xiSeriesRows.map((r,i)=>{
+  const o=r.overrides;
+  const n=String(r.name||'').trim();if(!n||n.length>80)throw new Error('Nombre inválido en la imagen '+(i+1));
+  const chance=Number(r.chance);if(!Number.isFinite(chance)||chance<=0||!/^\d+(?:\.\d{1,4})?$/.test(String(r.chance)))throw new Error('Probabilidad inválida de '+n);
+  total+=chance;
+  const integer=(key,fallback)=>o[key]!==undefined&&String(o[key])!==''?xiSeriesToSafeInteger(o[key],key+' de '+n):fallback;
+  const emoji=o.emoji==='yes' || (o.emoji!=='no' && common.emoji_enabled);
+  let shortcode=emoji?xiSeriesSlug(n,i+1):'';
+  if(emoji){let count=2;const root=shortcode;while(usedShortcodes.has(shortcode)){shortcode=`${root.slice(0,22)}_${count++}`;}usedShortcodes.add(shortcode);}
+  return {
+   name:n,description:String(o.description||common.description),rarity:o.rarity||common.rarity,
+   value:integer('value',common.value),instant_sell_cents:o.instant!==undefined&&String(o.instant)!==''?platformMoneyToCents(o.instant):common.instant_sell_cents,
+   chance:Number(chance.toFixed(4)),hidden:!!r.hidden,
+   upgrade_enabled:o.upgradable==='yes'?true:o.upgradable==='no'?false:common.upgrade_enabled,
+   gold_required:integer('gold_required',common.gold_required), gold_value:integer('gold_value',common.gold_value),
+   neon_required:integer('neon_required',common.neon_required),neon_value:integer('neon_value',common.neon_value),
+   emoji_enabled:emoji,emoji_shortcode:shortcode,
+   show_series:common.show_series,show_source_box:common.show_source_box,routes,
+   decoration:{...common.decoration,enabled:o.equipable==='yes'?true:o.equipable==='no'?false:common.decoration.enabled}
+  };
+ });
+ if(Math.abs(total-100)>0.00001)throw new Error('Las probabilidades deben sumar 100%. Total: '+total.toFixed(4)+'%.');
+ if(new Set(draft.map(r=>r.name.toLowerCase())).size!==draft.length)throw new Error('Hay objetos con nombres repetidos.');
+ if(draft.some(row=>row.gold_required<2||row.gold_required>100||row.neon_required<2||row.neon_required>100))throw new Error('Las mejoras necesitan entre 2 y 100 copias.');
+ if(draft.some(row=>row.instant_sell_cents<0))throw new Error('El precio debe ser positivo o cero.');
+ const uploaded=[];let committed=false;xiSeriesSaving=true;
+ const generation=platformSessionGeneration,uid=String(currentUser.id);
+ try{
+  platformSetMessage('admin-item-message','Subiendo imagen de la caja…','info');
+  const boxPath=await platformUploadImage(boxFile,'items');uploaded.push(boxPath);
+  const out=[];
+  // Lotes limitados: evitamos sobrecargar Supabase Storage.
+  for(let start=0;start<xiSeriesRows.length;start+=3){
+   if(generation!==platformSessionGeneration || String(currentUser?.id)!==uid)throw new Error('La sesión ha cambiado. Importación cancelada.');
+   platformSetMessage('admin-item-message',`Subiendo imágenes ${start+1}–${Math.min(start+3,xiSeriesRows.length)} de ${xiSeriesRows.length}…`,'info');
+   const chunk=xiSeriesRows.slice(start,start+3);
+   const paths=await Promise.all(chunk.map(async row=>{
+    const path=await platformUploadImage(row.file,'items');uploaded.push(path);return path;
+   }));
+   out.push(...paths);
+  }
+  const payload=draft.map((row,i)=>({...row,image_path:out[i]}));
+  const {data,error}=await supabase.rpc('xifre_admin_create_box_series',{
+   p_box:{...common,image_path:boxPath},p_items:payload,p_request_id:xiSeriesRequestId
+  });
+  if(error)throw error;
+  committed=true;
+  if(data?.duplicate){for(const path of uploaded)await platformDeleteImage(path);}
+  platformSetMessage('admin-item-message',`Caja creada: ${data?.created?.length||draft.length} premios nuevos.`,'success');
+  xiSeriesReset();platformResetItemForm();
+  await Promise.all([platformLoadItemFeatures(true),platformLoadBoxMeta(),xiLoadCustomCatalog(true)]);
+  await platformLoadAdminData();toast('Caja y serie creadas correctamente.','success');
+ }catch(error){
+  // Un error de red después del commit puede ser ambiguo. Nunca borrar imágenes
+  // si el resultado del RPC es desconocido; el request_id permite reintentar.
+  if(!committed && !(error?.message||'').includes('fetch') && !(error?.message||'').includes('network')){
+   for(const path of uploaded)await platformDeleteImage(path);
+  }
+  throw error;
+ }finally{xiSeriesSaving=false;}
+}
+function xiDecorSeriesBind(){
+ $('#xi-decor-enabled')?.addEventListener('change',xiDecorUpdatePreview);
+ $('#xi-decor-editor')?.addEventListener('input',xiDecorUpdatePreview);
+ $('#xi-decor-editor')?.addEventListener('change',xiDecorUpdatePreview);
+ $('#admin-item-image')?.addEventListener('change',xiDecorUpdatePreview);
+ $('#xi-series-folder')?.addEventListener('change',event=>xiSeriesSelectFolder(event.target.files));
+ $('#xi-series-reset')?.addEventListener('click',xiSeriesReset);
+ $('#xi-series-list')?.addEventListener('input',xiSeriesChange);
+ $('#xi-series-list')?.addEventListener('change',xiSeriesChange);
+ document.addEventListener('click',event=>{
+  const button=event.target.closest('[data-xi-decor-equip]');
+  if(button){event.preventDefault();void xiDecorEquip(button.dataset.xiDecorEquip);}
+ });
 }
 
 async function init() {
