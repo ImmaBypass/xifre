@@ -78,6 +78,50 @@ let presenceOwnerId = null;
 const presenceTabId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const PRESENCE_IDLE_MS = 60 * 1000; // visible tab + recent interaction => online
 const PRESENCE_STALE_MS = 80 * 1000;
+let xifrePresenceFallback = new Map();
+let xifrePresenceStatusTimer=null;
+let xifrePresenceSyncBusy=false;
+let xifrePresenceRealtimeConnected=false;
+const XIFRE_PRESENCE_FALLBACK_TTL=65*1000;
+async function xifrePresenceSync(force=false){
+ if(!currentUser||!supabase||xifrePresenceSyncBusy)return;
+ // A background tab must keep its presence heartbeat alive, so it stays yellow.
+ // Browsers may throttle this timer; realtime Presence remains the primary signal.
+ const owner=String(currentUser.id);
+ xifrePresenceSyncBusy=true;
+ try{
+  const active=document.visibilityState==='visible' && document.hasFocus() && Date.now()-presenceActivityAt<PRESENCE_IDLE_MS;
+  const result=await supabase.rpc('xifre_presence_heartbeat',{p_tab_id:presenceTabId,p_visible:document.visibilityState==='visible',p_active:active});
+  if(result.error)throw result.error;
+  if(document.visibilityState!=='visible')return; // No need to read other users in background.
+  const snapshot=await supabase.rpc('xifre_presence_snapshot');
+  if(snapshot.error)throw snapshot.error;
+  if(String(currentUser?.id)!==owner)return;
+  const next=new Map();
+  for(const row of (Array.isArray(snapshot.data)?snapshot.data:[])){
+   const id=String(row.user_id||'');if(!isValidUuid(id))continue;
+   const seen=parsePresenceTimestamp(row.last_seen_at);
+   if(!seen||Date.now()-seen>XIFRE_PRESENCE_FALLBACK_TTL)continue;
+   if(!next.has(id))next.set(id,[]);
+   next.get(id).push({visible:row.visible===true,status:row.active===true?'online':'away',last_active_at:seen,reported_at:seen,tab_id:row.tab_id});
+  }
+  xifrePresenceFallback=next;
+  renderPresenceIndicators();
+ }catch(error){
+  // Existing installations without the new migration keep working via Realtime.
+  if(!xifrePresenceSync.warned){console.info('XIFRE PRESENCE FALLBACK',error?.message||error);xifrePresenceSync.warned=true;}
+ }finally{xifrePresenceSyncBusy=false;}
+}
+function xifrePresenceStart(){
+ if(xifrePresenceStatusTimer)clearInterval(xifrePresenceStatusTimer);
+ xifrePresenceStatusTimer=setInterval(()=>void xifrePresenceSync(),17000);
+ void xifrePresenceSync(true);
+}
+function xifrePresenceStop(){
+ if(xifrePresenceStatusTimer)clearInterval(xifrePresenceStatusTimer);
+ xifrePresenceStatusTimer=null;xifrePresenceFallback.clear();xifrePresenceSyncBusy=false;xifrePresenceRealtimeConnected=false;
+}
+
 let pendingExternalUrl = '';
 let pendingChatAttachment = null;
 let pendingChatAttachmentObjectUrl = null;
@@ -87,6 +131,39 @@ let keyboardShift = false;
 let keyboardSymbols = false;
 let remoteTypingUsers = new Map();
 let remoteTypingTimers = new Map();
+let xifreTypingFallbackUsers=new Map();
+let xifreTypingPollTimer=null;
+let xifreTypingBackendLastAt=0;
+let xifreTypingBackendPending=false;
+let xifreTypingSubscribed=false;
+let xifreTypingSession=0;
+async function xifreTypingWrite(isTyping){
+ if(!supabase||!currentUser||!currentConversation)return;
+ const id=String(currentConversation),now=Date.now();
+ if(isTyping&&now-xifreTypingBackendLastAt<2400)return;
+ xifreTypingBackendLastAt=now;
+ try{
+  const {error}=await supabase.rpc('xifre_typing_set',{p_conversation_id:id,p_tab_id:presenceTabId,p_typing:!!isTyping});
+  if(error&&!xifreTypingWrite.warned){console.info('XIFRE TYPING BACKUP',error.message);xifreTypingWrite.warned=true;}
+ }catch(error){console.debug('XIFRE TYPING BACKUP',error);}
+}
+async function xifreTypingPoll(conversationId){
+ if(!supabase||!currentUser||!currentConversation||xifreTypingBackendPending||document.visibilityState!=='visible'||String(currentConversation)!==String(conversationId))return;
+ xifreTypingBackendPending=true;
+ try{
+  const {data,error}=await supabase.rpc('xifre_typing_snapshot',{p_conversation_id:String(conversationId)});
+  if(error)throw error;
+  if(String(currentConversation)!==String(conversationId))return;
+  xifreTypingFallbackUsers=new Map((Array.isArray(data)?data:[]).filter(row=>String(row.user_id)!==String(currentUser?.id)).map(row=>[String(row.user_id),{username:String(row.username||'Alguien').slice(0,40)}]));
+  refreshTypingIndicator();
+ }catch(error){if(!xifreTypingPoll.warned){console.info('XIFRE TYPING FALLBACK',error.message);xifreTypingPoll.warned=true;}}
+ finally{xifreTypingBackendPending=false;}
+}
+function xifreTypingStopPoll(){
+ if(xifreTypingPollTimer)clearInterval(xifreTypingPollTimer);
+ xifreTypingPollTimer=null;xifreTypingFallbackUsers.clear();xifreTypingBackendLastAt=0;
+}
+
 const signedChatMediaCache = new Map();
 let keyboardWordUsageCache = null;
 let keyboardWordUsageOwner = null;
@@ -103,6 +180,7 @@ let xifreServerFailureCount = 0;
 let xifreServerFirstFailureAt = 0;
 let xifreServerUnavailableAt = 0;
 let xifreServerOffline = false;
+let xifreServerPreviewAt = 0;
 function xifreDurationText(ms) {
  const seconds=Math.max(0,Math.floor(ms/1000));
  const minutes=Math.floor(seconds/60);
@@ -111,13 +189,14 @@ function xifreDurationText(ms) {
 function xifreUpdateServerBanner() {
  const banner=$('#xifre-server-alert');
  if(!banner)return;
- const down=Boolean(xifreServerUnavailableAt);
+ const down=Boolean(xifreServerPreviewAt || xifreServerUnavailableAt);
  banner.classList.toggle('hidden',!down);
  if(!down)return;
- const offline=xifreServerOffline || navigator.onLine===false;
- setText('xifre-server-alert-title',offline?'Sin conexión a Internet':'Servidor de XIFRE no disponible');
- setText('xifre-server-alert-detail',offline?'Comprueba tu conexión. XIFRE intentará reconectar.':'No se puede contactar con Supabase. Estamos intentando reconectar.');
- setText('xifre-server-alert-time',xifreDurationText(Date.now()-xifreServerUnavailableAt));
+ const preview=Boolean(xifreServerPreviewAt);
+ const offline=!preview && (xifreServerOffline || navigator.onLine===false);
+ setText('xifre-server-alert-title',preview?'SIMULACIÓN · Servidor de XIFRE no disponible':offline?'Sin conexión a Internet':'Servidor de XIFRE no disponible');
+ setText('xifre-server-alert-detail',preview?'Vista previa de diseño. Supabase no se ha desconectado.':offline?'Comprueba tu conexión. XIFRE intentará reconectar.':'No se puede contactar con Supabase. Estamos intentando reconectar.');
+ setText('xifre-server-alert-time',xifreDurationText(Date.now()-(xifreServerPreviewAt||xifreServerUnavailableAt))); 
 }
 async function xifreCheckServerHealth(){
  if(xifreServerPollBusy)return;
@@ -263,7 +342,8 @@ function parsePresenceTimestamp(value) {
 }
 
 function getPresenceStatus(userId) {
-  const records = presencePayloads.get(String(userId || '')) || [];
+  const key=String(userId||'');
+  const records = [...(presencePayloads.get(key)||[]),...(xifrePresenceFallback.get(key)||[])];
   const now = Date.now();
   const live = records.filter(record => {
     const observed = parsePresenceTimestamp(record.reported_at || record.last_seen_at || record.last_active_at);
@@ -425,6 +505,7 @@ async function setupPresenceTracking() {
       .subscribe((status, error) => {
         if (channel !== presenceChannel) return;
         if (status === 'SUBSCRIBED') {
+          xifrePresenceRealtimeConnected=true;
           console.info('PRESENCE CHANNEL SUBSCRIBED', topic);
           presenceLastTrackAt = 0;
           void trackPresence(true);
@@ -432,6 +513,7 @@ async function setupPresenceTracking() {
           // Reconcile again after the initial server sync has settled.
           setTimeout(() => { if (channel === presenceChannel) rebuildPresencePayloads(); }, 500);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          xifrePresenceRealtimeConnected=false;
           console.warn('PRESENCE CHANNEL', status, error || '');
         }
       });
@@ -443,6 +525,7 @@ async function setupPresenceTracking() {
       if (currentUser && String(currentUser.id) === requestedOwner) void trackPresence(true);
     }, 20000);
     presenceRenderTimer = setInterval(renderPresenceIndicators, 15000);
+    xifrePresenceStart();
   })();
 
   try {
@@ -451,6 +534,7 @@ async function setupPresenceTracking() {
     console.warn('PRESENCE SETUP', error);
   } finally {
     presenceSetupPromise = null;
+    if(currentUser && String(currentUser.id)===requestedOwner && !xifrePresenceStatusTimer)xifrePresenceStart();
   }
 }
 
@@ -464,6 +548,7 @@ function stopPresenceTracking() {
   presenceOwnerId = null;
   presenceLastTrackAt = 0;
   presencePayloads = new Map();
+  xifrePresenceStop();
   if (channel && supabase) void supabase.removeChannel(channel).catch(error => console.warn('PRESENCE CLEANUP', error));
   renderPresenceIndicators();
 }
@@ -873,6 +958,8 @@ async function logout() {
   if (!confirmed) return;
   logoutInFlight = true;
   try {
+    // Sign-out is explicit: remove this tab from the server presence snapshot first.
+    try{await supabase.rpc('xifre_presence_leave',{p_tab_id:presenceTabId});}catch(error){console.debug('PRESENCE LEAVE',error);}
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   } catch (error) {
@@ -2499,6 +2586,7 @@ messagePoll = null;
 if (typingStopTimer) clearTimeout(typingStopTimer);
 typingStopTimer = null;
 clearRemoteTypingUsers();
+xifreTypingStopPoll();
 }
 
 function setupMessageChannel(conversationId) {
@@ -2546,11 +2634,13 @@ function clearRemoteTypingUsers() {
   for (const timer of remoteTypingTimers.values()) clearTimeout(timer);
   remoteTypingTimers.clear();
   remoteTypingUsers.clear();
+  xifreTypingFallbackUsers.clear();
   setTypingVisible(false);
 }
 
 function refreshTypingIndicator() {
-  const names = [...remoteTypingUsers.values()].map(item => item.username).filter(Boolean);
+  const merged=new Map([...xifreTypingFallbackUsers,...remoteTypingUsers]);
+  const names = [...merged.values()].map(item => item.username).filter(Boolean);
   const count = names.length;
   const el = $('#typing-indicator');
   if (!el) return;
@@ -2567,8 +2657,13 @@ function refreshTypingIndicator() {
 
 function setupTypingChannel(conversationId) {
   if (typingChannel) supabase.removeChannel(typingChannel);
-  clearRemoteTypingUsers();
+  xifreTypingStopPoll();clearRemoteTypingUsers();
+  xifreTypingSubscribed=false;
   const channelConversationId = String(conversationId);
+  const seq=++xifreTypingSession;
+  void xifreTypingPoll(channelConversationId);
+  xifreTypingPollTimer=setInterval(()=>void xifreTypingPoll(channelConversationId),3600);
+  // Realtime auth must be installed before joining private channels.
   typingChannel = supabase.channel(`xifre:typing:${channelConversationId}`, { config: { private: true, broadcast: { self: false } } })
     .on('broadcast', { event: 'typing' }, event => {
       if (String(currentConversation || '') !== channelConversationId) return;
@@ -2596,13 +2691,20 @@ function setupTypingChannel(conversationId) {
       refreshTypingIndicator();
     })
     .subscribe(status => {
-      if (status === 'SUBSCRIBED') stopTypingBroadcast();
-      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') clearRemoteTypingUsers();
+      if(seq!==xifreTypingSession)return;
+      xifreTypingSubscribed=status==='SUBSCRIBED';
+      if(status==='SUBSCRIBED'){
+        if(String($('#message-input')?.value||'').trim())scheduleTyping();
+      }else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+        console.warn('XIFRE TYPING REALTIME',status);
+      }
     });
 }
 
 async function broadcastTyping(isTyping) {
 if (!typingChannel || !currentUser || !currentConversation) return;
+void xifreTypingWrite(isTyping);
+if(!xifreTypingSubscribed)return;
 try {
 await typingChannel.send({ type: 'broadcast', event: 'typing', payload: { user_id: currentUser.id, username: currentProfile?.username || 'Usuario', typing: !!isTyping } });
 } catch (error) {
@@ -3618,13 +3720,14 @@ $$('.modal:not(.hidden)').forEach(m => m.classList.add('hidden'));
 }
 });
 
-window.addEventListener('blur',()=>{if(!currentUser)return; void trackPresence(true);});
-window.addEventListener('focus',()=>{if(!currentUser)return;presenceActivityAt=Date.now();void trackPresence(true);});
+window.addEventListener('blur',()=>{if(!currentUser)return; void trackPresence(true);void xifrePresenceSync(true);});
+window.addEventListener('focus',()=>{if(!currentUser)return;presenceActivityAt=Date.now();void trackPresence(true);void xifrePresenceSync(true);});
 window.addEventListener('pagehide',()=>{try{if(presenceChannel)void presenceChannel.untrack();}catch(_){} });
 document.addEventListener('visibilitychange', () => {
 if (!currentUser) return;
 if (document.visibilityState === 'visible') presenceActivityAt = Date.now();
 void trackPresence(true);
+void xifrePresenceSync(true);
 renderPresenceIndicators();
 if (document.visibilityState !== 'visible') return;
 void loadConversations().then(async () => {
@@ -3680,7 +3783,7 @@ function platformHydrateItem(row) {
   const typeId=platformTypeId(row);
   const definition=platformItemDefinitions.get(typeId)||{};
   const instance=platformInstanceFeatures.get(platformItemKey(row))||{};
-  const tier=Number(row.upgrade_tier ?? instance.upgrade_tier ?? 0);
+  const tier=Number(instance.upgrade_tier ?? row.upgrade_tier ?? 0);
   const value=Number(tier===1 ? (definition.gold_value ?? row.value ?? 0) : tier===2 ? (definition.neon_value ?? row.value ?? 0) : (definition.value ?? row.value ?? 0));
   // La definición del tipo puede no tener URL (las imágenes solo se firman
   // previamente para los objetos configurados como emoji). No permitir que
@@ -3776,6 +3879,75 @@ let platformTradeMutationTicket = 0;
 let platformTradeDetailQueued = false;
 let platformTradeDetailRenderKey = '';
 let platformTradeOpenSequence = 0;
+/* Ephemeral trade conversation: private Realtime Broadcast; nothing goes in Postgres.
+   Messages exist in RAM only and disappear on leaving or finishing a trade. */
+let xiTradeChatChannel=null;
+let xiTradeChatTradeId='';
+let xiTradeChatReady=false;
+let xiTradeChatMessages=[];
+let xiTradeChatSubscription=0;
+let xiTradeChatSending=false;
+function xiTradeChatStop(){
+  ++xiTradeChatSubscription;
+  const channel=xiTradeChatChannel;xiTradeChatChannel=null;xiTradeChatTradeId='';xiTradeChatReady=false;
+  xiTradeChatMessages=[];xiTradeChatSending=false;
+  if(channel&&supabase)void supabase.removeChannel(channel).catch(()=>{});
+  xiTradeChatRender();
+}
+function xiTradeChatRender(){
+ const host=$('#xi-trade-chat-messages');if(!host)return;
+ const nearBottom=host.scrollHeight-host.clientHeight-host.scrollTop<45;
+ const markup=xiTradeChatMessages.length?xiTradeChatMessages.map(msg=>`<div class="xi-trade-chat-line ${msg.mine?'mine':''}"><strong>${esc(msg.sender)}</strong><span>${esc(msg.content)}</span><time>${esc(msg.time)}</time></div>`).join(''):'<div class="xi-trade-chat-empty">Los mensajes solo se muestran mientras este intercambio esté abierto. No se guardan.</div>';
+ platformApplyMarkup(host,markup);
+ if(nearBottom)host.scrollTop=host.scrollHeight;
+}
+function xiTradeChatStart(tradeId){
+ const id=String(tradeId||'');
+ if(!isValidUuid(id)||!supabase||!currentUser)return;
+ if(xiTradeChatTradeId===id&&xiTradeChatChannel)return;
+ xiTradeChatStop();xiTradeChatTradeId=id;
+ const session=xiTradeChatSubscription;
+ const channel=supabase.channel(`xifre:trade-chat:${id}`,{config:{private:true,broadcast:{self:false,ack:true}}});
+ xiTradeChatChannel=channel;
+ channel.on('broadcast',{event:'message'},event=>{
+   if(xiTradeChatSubscription!==session||xiTradeChatTradeId!==id||String(platformActiveTradeId)!==id)return;
+   const payload=event.payload||{};
+   const senderId=String(payload.user_id||'');
+   if(!isValidUuid(senderId)||senderId===String(currentUser?.id)||typeof payload.content!=='string')return;
+   // Server checks trade membership, sender ID is untrusted client input; display as partner.
+   const detail=platformActiveTradeDetail;
+   if(!detail?.trade)return;
+   const peer=String(detail.trade.sender_id)===String(currentUser?.id)?String(detail.trade.recipient_id):String(detail.trade.sender_id);
+   if(senderId!==peer)return;
+   const name=String(detail.trade.sender_id)===senderId?detail.sender?.username:detail.recipient?.username;
+   xiTradeChatMessages.push({mine:false,sender:String(name||'Amigo').slice(0,40),content:payload.content.slice(0,400),time:new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})});
+   if(xiTradeChatMessages.length>60)xiTradeChatMessages.shift();
+   xiTradeChatRender();
+ }).subscribe(status=>{
+   if(session!==xiTradeChatSubscription)return;
+   xiTradeChatReady=status==='SUBSCRIBED';
+   setText('xi-trade-chat-state',xiTradeChatReady?'Chat conectado':'Intentando conectar…');
+ });
+ xiTradeChatRender();
+}
+async function xiTradeChatSubmit(event){
+ event.preventDefault();
+ const input=$('#xi-trade-chat-input');if(!input||xiTradeChatSending||!xiTradeChatReady||!xiTradeChatChannel||!platformActiveTradeId)return;
+ const content=input.value.trim().slice(0,400);
+ if(!content)return;
+ const detail=platformActiveTradeDetail;
+ if(detail?.trade?.status!=='active')return;
+ xiTradeChatSending=true;
+ try{
+  const response=await xiTradeChatChannel.send({type:'broadcast',event:'message',payload:{user_id:currentUser.id,content}});
+  if(response!=='ok')throw new Error('No se pudo enviar el mensaje.');
+  xiTradeChatMessages.push({mine:true,sender:'Tú',content,time:new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})});
+  if(xiTradeChatMessages.length>60)xiTradeChatMessages.shift();
+  input.value='';xiTradeChatRender();
+ }catch(error){toast('No se pudo enviar el mensaje del intercambio: '+friendlyError(error),'error');}
+ finally{xiTradeChatSending=false;}
+}
+
 let platformBoxIds = new Set();
 let platformBoxInstances = new Set();
 let platformShopListings = [];
@@ -3927,11 +4099,16 @@ function platformOpenItemDetails(key, source = 'collection') {
   setText('item-details-value',platformFormatValue(item.value));
   setText('item-details-rarity',rarity.label);
   setText('item-details-description',item.description || 'Sin descripción.');
+  platformDetailsSequence++;
   platformDrawItemExtras(item,source);
   const matching = source === 'collection' ? platformInventoryItems.filter(x => platformGroupSignature(x) === platformGroupSignature(item)) : [];
-  setText('item-details-status',source==='collection' ? `En tu colección: ${matching.length} ${matching.length===1?'copia':'copias'}.` : source==='admin' ? 'Objeto del catálogo XIFRE.' : 'Objeto mostrado en intercambio.');
+  if(source==='collection') {
+    const typeId=platformTypeId(item);
+    const byTier=[0,1,2].map(t=>platformInventoryItems.filter(x=>platformTypeId(x)===typeId && Number(x.upgrade_tier||0)===t).length);
+    const locked=matching.filter(x=>x.reserved).length;
+    setText('item-details-status',`Esta versión: ${matching.length} copias (${Math.max(0,matching.length-locked)} disponibles) · Normales: ${byTier[0]} · Doradas: ${byTier[1]} · Neón: ${byTier[2]}.`);
+  } else setText('item-details-status',source==='admin'?'Objeto del catálogo XIFRE.':'Objeto mostrado en intercambio.');
   const preview = $('#item-box-preview');
-  platformDetailsSequence++;
   preview?.classList.add('hidden');
   const button = $('#item-open-box-button');
   button?.classList.add('hidden');
@@ -4065,10 +4242,41 @@ function platformDrawItemExtras(item,source){
  if(feature.show_series && feature.series_name)bits.push(`<div class="item-feature-row"><span>Serie / saga</span><strong>${esc(feature.series_name)}</strong></div>`);
  if(feature.show_source_box && feature.source_box_id){
   const origin=platformItemDefinitions.get(String(feature.source_box_id));
-  if(origin)bits.push(`<div class="item-feature-row"><span>Procedencia</span><strong>✦ Caja ${esc(origin.name)}</strong></div>`);
+  if(origin){
+    const sourceId=String(origin.id||feature.source_box_id);
+    bits.push(`<div class="item-feature-row xi-origin-feature"><span>Procedencia</span><div class="xi-origin-box" data-xi-source-box="${esc(sourceId)}"><span class="xi-origin-thumb">${platformImageMarkup(origin.image_url,origin.name)}</span><div><strong>${esc(origin.name)}</strong><small>Caja de procedencia</small></div></div></div>`);
+  }
  }
  if(feature.emoji_enabled)bits.push(`<div class="item-feature-row"><span>Uso especial</span><strong>Emoji :xi_${esc(feature.emoji_shortcode)}:</strong></div>`);
- if(extras){extras.innerHTML=bits.join('');extras.classList.toggle('hidden',!bits.length);}
+ if(extras){
+  extras.innerHTML=bits.join('');extras.classList.toggle('hidden',!bits.length);
+  if(feature.show_source_box && feature.source_box_id) {
+    let source=platformItemDefinitions.get(String(feature.source_box_id));
+    const target=extras.querySelector('[data-xi-source-box] .xi-origin-thumb');
+    if(!source){
+      const key=platformTypeId(item);
+      const token=platformDetailsSequence;
+      void supabase.rpc('xifre_item_public_origin',{p_item_id:key}).then(async({data,error})=>{
+        if(error||!data||token!==platformDetailsSequence||!extras.isConnected)return;
+        const signed=await platformSignImagePaths([data.image_path]);
+        if(token!==platformDetailsSequence||!extras.isConnected)return;
+        source={...data,image_url:signed.get(data.image_path)||''};
+        platformItemDefinitions.set(String(data.id),source);
+        const markup=`<div class="item-feature-row xi-origin-feature"><span>Procedencia</span><div class="xi-origin-box" data-xi-source-box="${esc(data.id)}"><span class="xi-origin-thumb">${platformImageMarkup(source.image_url,source.name)}</span><div><strong>${esc(source.name)}</strong><small>Caja de procedencia</small></div></div></div>`;
+        // Only add missing origin without resetting other feature rows.
+        if(!extras.querySelector('.xi-origin-feature')){extras.insertAdjacentHTML('beforeend',markup);extras.classList.remove('hidden');}
+      }).catch(()=>{});
+    }
+    const token=platformDetailsSequence;
+    if(source && target && !source.image_url && source.image_path) {
+      void platformSignImagePaths([source.image_path]).then(urls=>{
+        if(token!==platformDetailsSequence || !extras.contains(target))return;
+        const url=urls.get(source.image_path);
+        if(url){source.image_url=url;target.innerHTML=platformImageMarkup(url,source.name);}
+      }).catch(error=>console.warn('XIFRE SOURCE BOX IMAGE',error));
+    }
+  }
+ }
  if(upgrades){
   upgrades.innerHTML='';upgrades.classList.add('hidden');
   if(source==='collection' && feature.upgrade_enabled && !platformItemIsBox(item) && Number(item.upgrade_tier)<2){
@@ -4077,7 +4285,8 @@ function platformDrawItemExtras(item,source){
    const available=platformAvailableCopies(platformTypeId(item),target-1).length;
    const resultValue=Number(target===1?feature.gold_value:feature.neon_value);
    const label=target===1?'Dorado':'Neón';
-   upgrades.innerHTML=`<div class="item-upgrade-panel ${target===2?'xifre-grade-neon':'xifre-grade-gold'}"><strong>✦ Mejorar a ${label}</strong><p>Combina ${needed} copias ${target===1?'normales':'doradas'} del mismo objeto. Disponibles: <b>${available}/${needed}</b>.</p><p>Valor resultante: <b>${esc(platformFormatValue(resultValue))}</b> · La rareza original se mantiene.</p><button type="button" class="inventory-primary-button" data-upgrade-item="${esc(platformTypeId(item))}" data-upgrade-target="${target}" ${available<needed?'disabled':''}>Mejorar a ${label}</button></div>`;
+   const totalTier=platformInventoryItems.filter(x=>platformTypeId(x)===platformTypeId(item) && Number(x.upgrade_tier||0)===target-1).length;
+   upgrades.innerHTML=`<div class="item-upgrade-panel ${target===2?'xifre-grade-neon':'xifre-grade-gold'}"><strong>✦ Mejorar a ${label}</strong><p>Se consumen <b>${needed} copias ${target===1?'normales':'doradas'}</b> para crear <b>1 ${label}</b>. No se mezclan acabados.</p><div class="xi-upgrade-count"><span>Tienes <b>${totalTier}</b> ${target===1?'normales':'dorados'} · Libres <b>${available}</b></span><span class="${available>=needed?'xi-upgrade-ready':'xi-upgrade-missing'}">${available}/${needed} necesarios</span></div><p>Valor de la copia nueva: <b>${esc(platformFormatValue(resultValue))}</b> · La rareza original no cambia.</p><button type="button" class="inventory-primary-button" data-upgrade-item="${esc(platformTypeId(item))}" data-upgrade-target="${target}" ${available<needed?'disabled':''}>${available>=needed?'Convertir a '+label:'Faltan '+(needed-available)+' copias libres'}</button></div>`;
    upgrades.classList.remove('hidden');
   }
  }
@@ -4226,6 +4435,7 @@ async function platformInitialize() {
 }
 
 function platformStop() {
+  xiTradeChatStop();
   platformInlineEndEdit(true);platformInlineData={texts:[],images:[]};platformInlinePrepared=false;
   $$('.xi-inline-pencil,.xi-overlay-image').forEach(node=>node.remove());
   platformSessionGeneration += 1;
@@ -4487,7 +4697,10 @@ async function platformRefreshInventory() {
     const urls = await platformSignImagePaths(rawItems.map(item => item.image_path));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner) return;
     const marketReserved=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
-    await platformLoadItemFeatures();
+    // An item may have arrived from a gift, trade or market while the shared
+    // definition/instance cache is still warm. Don't mistake it for a normal copy.
+    const inventoryChanged=rawItems.length!==platformInstanceFeatures.size || rawItems.some(item=>!platformInstanceFeatures.has(platformItemKey(item)));
+    await platformLoadItemFeatures(inventoryChanged);
     platformInventoryItems = rawItems.map(item => platformHydrateItem({ ...item, is_box: platformItemIsBox(item), reserved:Boolean(item.reserved||marketReserved.has(platformItemKey(item))), image_url: urls.get(item.image_path) || '' }));
     platformRenderInventory();
     // Don't redraw the entire trade workspace: its item selection is interactive.
@@ -5065,6 +5278,7 @@ async function platformOpenTradeWorkspace(tradeId) {
   platformSetApp('inventory');
   platformSetInventoryTab('trades');
   platformActiveTradeId = String(tradeId);
+  xiTradeChatStart(tradeId);
   platformTradeOpenSequence += 1;
   platformTradeDraftTradeId = null;
   platformTradeOfferDraft = null;
@@ -5122,6 +5336,7 @@ async function platformRefreshTradeDetail(withInventory = false) {
       platformTradeDraftTradeId = tradeId;
     }
     platformActiveTradeDetail = nextDetail;
+    if(nextDetail.trade.status!=='active')xiTradeChatStop();
     platformRenderTradeWorkspace();
   } catch (error) {
     console.warn('XIFRE TRADE DETAIL', error);
@@ -5161,6 +5376,8 @@ function platformRenderTradeWorkspace() {
   setText('trade-workspace-subtitle', `Con ${otherName || 'tu amigo'}. Añade objetos abajo y, cuando estés listo, confirma.`);
   setText('trade-workspace-status', active ? 'EN CURSO' : platformTradeStatusLabel(trade.status).toLocaleUpperCase('es-ES'));
   $('#trade-cancel-button')?.classList.toggle('hidden', !active);
+  $('#xi-trade-chat-form')?.classList.toggle('hidden',!active);
+  if(active&&String(platformActiveTradeId)===String(trade.id) && xiTradeChatTradeId!==String(trade.id))xiTradeChatStart(trade.id);
   $('#trade-confirm-button')?.classList.toggle('hidden', !active);
   if (!platformTradeOfferMutationBusy && !platformTradeOfferDraftDirty && !platformTradeOfferRetryNeeded) {
     if (trade.status === 'completed') setText('trade-workspace-feedback', 'Intercambio completado. Los objetos se han transferido a sus nuevos dueños.');
@@ -5319,6 +5536,7 @@ async function platformConfirmTrade() {
   }
 }
 function platformLeaveTradeWorkspace(showList = true) {
+  xiTradeChatStop();
   platformActiveTradeId = null;
   platformActiveTradeDetail = null;
   platformTradeDraftTradeId = null;
@@ -5843,8 +6061,10 @@ async function platformBuyShopItem(id) {
   finally {platformShopBuying.delete(String(id));platformSetWalletUI(platformWalletBalance);}
 }
 
+let platformBulkMoneyRequest=null;
 function platformSearchShopMoneyUsers(value) {
   if(!platformShopOwner)return;
+  $('#shop-money-all')?.classList.remove('active');
   if(platformShopSearchTimer)clearTimeout(platformShopSearchTimer);
   const query=String(value || '').replace(/^@/,'').trim();
   platformShopSelectedRecipient=null;
@@ -5864,10 +6084,19 @@ function platformSearchShopMoneyUsers(value) {
   },250);
 }
 
+function platformShopSelectAllRecipients(){
+ if(!platformShopOwner)return;
+ platformShopSelectedRecipient={id:'__all__',username:'todos los usuarios'};
+ $('#shop-money-all')?.classList.add('active');
+ setText('shop-money-selected','Destinatario: todos los usuarios con correo confirmado (incluida tu cuenta).');
+ $('#shop-money-selected')?.classList.remove('hidden');
+ setText('shop-money-results','Se aplicará un único ajuste a cada usuario.');
+}
 function platformSelectShopMoneyUser(id) {
   const user=platformShopSearchRows.find(row=>String(row.id)===String(id));
   if(!user)return;
   platformShopSelectedRecipient=user;
+  $('#shop-money-all')?.classList.remove('active');
   setText('shop-money-selected',`Destinatario: ${user.username} (@${user.email_handle || user.username})`);
   $('#shop-money-selected')?.classList.remove('hidden');
   setText('shop-money-results','Usuario seleccionado.');
@@ -5882,10 +6111,23 @@ async function platformGiveShopMoney(event) {
     if(!platformShopSelectedRecipient?.id)throw new Error('Selecciona primero un usuario.');
     const amount=platformMoneyToCents($('#shop-money-amount').value);
     if(amount<=0)throw new Error('El importe tiene que ser positivo.');
-    const {error}=await supabase.rpc('xifre_admin_give_money',{p_target_user:platformShopSelectedRecipient.id,p_amount_cents:amount});
-    if(error)throw error;
-    setText('shop-money-message',`Se han entregado ${platformMoney(amount)} a ${platformShopSelectedRecipient.username}.`);
-    if(String(platformShopSelectedRecipient.id)===String(currentUser.id))await platformLoadWallet();
+    if(platformShopSelectedRecipient.id==='__all__'){
+      const yes=await askConfirm('Entregar saldo a todos',`¿Entregar ${platformMoney(amount)} virtuales A CADA usuario con correo confirmado? No se puede deshacer.`, 'Confirmar entrega global');
+      if(!yes)return;
+      const request=platformBulkMoneyRequest||crypto.randomUUID();platformBulkMoneyRequest=request;
+      const {data,error}=await supabase.rpc('xifre_admin_give_money_all',{p_amount_cents:amount,p_request_id:request});
+      if(error)throw error;
+      platformBulkMoneyRequest=null;
+      setText('shop-money-message',`Se han entregado ${platformMoney(amount)} a cada uno de los ${Number(data?.recipients||0)} usuarios. Total: ${platformMoney(data?.total_cents||0)}.`);
+    }else{
+      const {error}=await supabase.rpc('xifre_admin_give_money',{p_target_user:platformShopSelectedRecipient.id,p_amount_cents:amount});
+      if(error)throw error;
+      setText('shop-money-message',`Se han entregado ${platformMoney(amount)} a ${platformShopSelectedRecipient.username}.`);
+    }
+    // The owner is also one of the verified recipients in the bulk grant.
+    if(platformShopSelectedRecipient.id==='__all__' || String(platformShopSelectedRecipient.id)===String(currentUser.id)){
+      await platformLoadWallet();
+    }
     toast('Saldo entregado.','success');
   }catch(error){setText('shop-money-message','Error: '+friendlyError(error));}
   finally {setLoading(button,false);}
@@ -6160,14 +6402,16 @@ function platformRenderMarket() {
 }
 function platformRenderMarketInventory() {
   const excluded=new Set(platformMarketMyListings.filter(r=>r.status==='active').map(r=>String(r.inventory_instance_id)));
+  // Instance grades are loaded for the owner: treat them as separate inventory copies.
+  platformMarketInventory=platformMarketInventory.map(row=>platformHydrateItem(row));
   const items=platformMarketInventory.filter(i=>!i.listed&&!i.reserved&&!excluded.has(String(i.instance_id)));
   const host=$('#market-my-inventory');
   platformApplyMarkup(host,items.length?items.map(item=>`<button type="button" data-market-select="${esc(item.instance_id)}" class="market-inventory-item ${platformRarityMarketClass(item)} ${platformMarketSelectedInstance===String(item.instance_id)?'active':''}">
-    <span class="market-art">${platformImageMarkup(item.image_url,item.name)}</span><strong>${esc(item.name)}</strong><small>${esc(platformRarity(item).label)} · ${esc(platformFormatValue(item.value))}</small></button>`).join(''):'<div class="market-empty">No hay objetos disponibles. Los objetos puestos a la venta o en un intercambio están reservados.</div>');
+    <span class="market-art">${platformImageMarkup(item.image_url,item.name)}</span><strong>${esc(item.name)}</strong><small>${esc(platformRarity(item).label)} · ${esc(platformGradeName(item.upgrade_tier))} · ${esc(platformFormatValue(item.value))}</small></button>`).join(''):'<div class="market-empty">No hay objetos disponibles. Los objetos puestos a la venta o en un intercambio están reservados.</div>');
   const selected=items.find(i=>String(i.instance_id)===platformMarketSelectedInstance);
   $('#market-sell-selection')?.classList.toggle('hidden',!selected);
   if(selected){
-    setText('market-sell-selected',`${selected.name} · ${platformRarity(selected).label}`);
+    setText('market-sell-selected',`${selected.name} · ${platformRarity(selected).label} · ${platformGradeName(selected.upgrade_tier)} · Valor ${platformFormatValue(selected.value)}`);
     setText('market-instant-price',platformMoney(selected.instant_sell_cents));
   }else platformMarketSelectedInstance='';
 }
@@ -6268,8 +6512,9 @@ async function platformAdminLoadAssets(){
   if(String(platformAdminRecipient?.id)!==target)return;
   const host=$('#admin-assets-items');
   platformApplyMarkup(host,(data?.items||[]).length?(data.items||[]).map(row=>{
+    const rowTier=Number(row.upgrade_tier||0);
     const rarity=platformRarity(row),locked=Boolean(row.reserved);
-    return `<div class="admin-asset-row ${platformRarityMarketClass(row)}"><span class="admin-asset-thumb">${platformImageMarkup(urls.get(row.image_path)||'',row.name)}</span><div><strong>${esc(row.name)}</strong><small>${esc(rarity.label)} · ${esc(platformFormatValue(row.value))} ${locked?'· EN VENTA':''}</small></div>
+    return `<div class="admin-asset-row ${platformRarityMarketClass(row)}"><span class="admin-asset-thumb">${platformImageMarkup(urls.get(row.image_path)||'',row.name)}</span><div><strong>${esc(row.name)}</strong><small>${esc(rarity.label)} · ${esc(platformGradeName(rowTier))} · ${esc(platformFormatValue(row.value))} ${locked?'· RESERVADO':''}</small></div>
     <button type="button" class="inventory-secondary-button compact" data-admin-remove-instance="${esc(row.instance_id)}">Quitar copia</button></div>`;
   }).join(''):'<p class="inventory-inline-empty">Este usuario no tiene objetos.</p>');
 }
@@ -6380,7 +6625,7 @@ const PLATFORM_INLINE_SECTIONS={
  'chat-settings':{root:'#settings-modal',fields:{}},
  'inventory-header':{root:'#inventory-app-view .inventory-header',fields:{'xi-inventory-title':'.inventory-header-title h1','xi-inventory-description':'.inventory-header-title p'}},
  'inventory-collection':{root:'#inventory-panel-collection',fields:{'xi-collection-title':'.inventory-panel-heading h2','xi-collection-desc':'.inventory-panel-heading p'}},
- 'inventory-trades':{root:'#inventory-panel-trades',fields:{'xi-trades-title':'#trade-list-view .inventory-panel-heading h2','xi-trades-desc':'#trade-list-view .inventory-panel-heading p','xi-trades-new':'#trade-request-form .trade-request-copy > strong'}},
+ 'inventory-trades':{root:'#trade-list-view',fields:{'xi-trades-title':'.inventory-panel-heading h2','xi-trades-desc':'.inventory-panel-heading p','xi-trades-new':'#trade-request-form .trade-request-copy > strong'}},
  'inventory-trade-workspace':{root:'#trade-workspace',fields:{'xi-tradework-title':'.trade-workspace-heading h2'}},
  'inventory-admin':{root:'#inventory-panel-admin',fields:{'xi-invadmin-title':'.inventory-panel-heading h2'}},
  'shop-header':{root:'#shop-app-view .shop-header',fields:{'xi-shop-title':'#shop-title-text','xi-shop-description':'.shop-header > div:first-of-type p'}},
@@ -6598,6 +6843,7 @@ function platformAlpha14Bind(){
   $('#market-search')?.addEventListener('input',platformRenderMarket);
   $('#market-filter-rarity')?.addEventListener('change',platformRenderMarket);
   $('#admin-assets-money-form')?.addEventListener('submit',event=>void platformAdminAdjustMoney(event));
+  $('#xi-trade-chat-form')?.addEventListener('submit',event=>void xiTradeChatSubmit(event));
   $('#xifre-editor-key')?.addEventListener('change',platformUiFillEditor);
   $('#xifre-editor-form')?.addEventListener('submit',event=>void platformUiSave(event));
 }
@@ -6689,6 +6935,7 @@ function platformBindEvents() {
   $('#shop-admin-reset')?.addEventListener('click',platformResetShopForm);
   $('#shop-money-search')?.addEventListener('input',event=>platformSearchShopMoneyUsers(event.target.value));
   $('#shop-money-form')?.addEventListener('submit',event=>void platformGiveShopMoney(event));
+  $('#shop-money-all')?.addEventListener('click',platformShopSelectAllRecipients);
   $('#admin-item-is-box')?.addEventListener('change',platformToggleBoxFields);
   $('#admin-box-add-drop')?.addEventListener('click',()=>platformAddBoxDropRow());
   $('#admin-box-drops')?.addEventListener('input',platformUpdateBoxPercent);
@@ -6768,7 +7015,14 @@ setMessage('login-message', `No se pudo conectar con XIFRE: ${friendlyError(erro
 }
 }
 
-window.XIFRE = { showScreen, login, register, logout };
+window.XIFRE = { showScreen, login, register, logout,
+ debugServerAlert(seconds=0){
+  const n=Number(seconds);
+  xifreServerPreviewAt=Number.isFinite(n)&&n>0?Date.now()-Math.min(n,86400)*1000:0;
+  xifreUpdateServerBanner();
+  return xifreServerPreviewAt?'Vista previa activada. XIFRE.debugServerAlert(0) para cerrar.':'Vista previa cerrada.';
+ }
+};
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
 else init();
 })();
