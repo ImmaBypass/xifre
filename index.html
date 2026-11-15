@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261115-alpha-17">
+<link rel="stylesheet" href="style.css?v=20261115-alpha-18">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -297,6 +297,10 @@
                 <p class="admin-feature-hint">Solo se combinan copias libres de idéntico artículo y acabado. Su rareza no cambia.</p>
                 <div class="admin-form-row"><label>Normales necesarias para Dorado<input id="admin-item-gold-count" type="number" min="2" max="100" step="1" value="3"></label><label>Valor conceptual Dorado<input id="admin-item-gold-value" type="number" min="0" max="9000000000000000" step="1" value="0"></label></div>
                 <div class="admin-form-row"><label>Doradas necesarias para Neón<input id="admin-item-neon-count" type="number" min="2" max="100" step="1" value="3"></label><label>Valor conceptual Neón<input id="admin-item-neon-value" type="number" min="0" max="9000000000000000" step="1" value="0"></label></div>
+                <div class="admin-feature-divider"></div>
+                <div class="xi-item-route-head"><strong>Rutas de upgrades personalizados</strong><p class="admin-feature-hint">Puedes crear varias rutas que partan del mismo acabado (ramas). Cada una tiene un destino, copias necesarias y valor propio. Los estilos se diseñan en «Estudio de upgrades».</p></div>
+                <div id="xi-item-route-list" class="xi-item-route-list"></div>
+                <button id="xi-route-add" type="button" class="inventory-secondary-button compact">+ Añadir ruta de mejora</button>
                 <div class="admin-feature-divider"></div><strong>Usos especiales</strong>
                 <label class="xifre-check-row"><input type="checkbox" id="admin-item-emoji-enabled"><span>Este artículo se puede utilizar como emoji en el chat</span></label>
                 <label>Código del emoji (sin espacios)<input id="admin-item-emoji-code" type="text" maxlength="26" pattern="[a-zA-Z][a-zA-Z0-9_]{1,25}" placeholder="ej. smilexifre"></label>
@@ -327,6 +331,32 @@
           <div id="admin-assets-content" class="hidden"><div class="admin-assets-balance">Saldo actual <strong id="admin-assets-balance">0.00€</strong></div>
           <form id="admin-assets-money-form"><label>Ajustar saldo (€): número positivo para añadir, negativo para quitar<input id="admin-assets-money-delta" type="number" min="-10000000000" step="0.01" value="-0.01" required></label><button type="submit" class="inventory-secondary-button">Aplicar ajuste</button></form>
           <div id="admin-assets-items" class="admin-assets-items"></div></div>
+        </section>
+        <!-- Alpha 1.8: editor de acabados independiente de la creación de objetos. -->
+        <section class="admin-card xi-up-editor">
+          <div class="admin-card-heading"><span class="admin-card-icon">✦</span><div><h3>Estudio de upgrades personalizados</h3><p>Diseña acabados y transformaciones sin cambiar la rareza base. Los estilos se crean aquí y se asignan a cada objeto en su ficha de edición.</p></div></div>
+          <div class="xi-up-editor-layout">
+            <aside class="xi-up-editor-sidebar"><div class="xi-up-side-head"><strong>Biblioteca de acabados</strong><button id="xi-up-new" class="inventory-secondary-button compact" type="button">+ Nuevo</button></div><div id="xi-up-style-list" class="xi-up-style-list"><p class="admin-feature-hint">No hay estilos todavía.</p></div></aside>
+            <form id="xi-up-form" class="xi-up-form">
+              <div class="xi-up-fields">
+                <label>Nombre del acabado<input id="xi-up-name" maxlength="45" value="Nueva mejora" required></label>
+                <label>Símbolo (hasta 8 caracteres)<input id="xi-up-symbol" maxlength="8" value="✦" required></label>
+                <label>Color principal<input id="xi-up-color-a" type="color" value="#7969ff"></label>
+                <label>Color secundario<input id="xi-up-color-b" type="color" value="#2be7ff"></label>
+                <label>Efecto de material<select id="xi-up-effect"><option value="none">Sin efecto</option><option value="glow">Brillo</option><option value="prism" selected>Prisma</option><option value="flame">Fuego</option><option value="ice">Hielo</option><option value="plasma">Plasma</option><option value="holo">Holográfico</option><option value="galaxy">Galaxia</option><option value="electric">Eléctrico</option><option value="aurora">Aurora</option><option value="sparkles">Estrellas</option><option value="metal">Metal pulido</option></select></label>
+                <label>Animación del acabado<select id="xi-up-animation"><option value="none">Estático</option><option value="pulse" selected>Pulso</option><option value="flow">Flujo cromático</option><option value="spin">Rotación de halo</option><option value="shimmer">Destello diagonal</option><option value="float">Levitación</option><option value="flicker">Chispas</option><option value="breath">Respiración</option></select></label>
+                <label>Animación al crear<select id="xi-up-reveal"><option value="none">Sin animación</option><option value="forge" selected>Forja</option><option value="portal">Portal</option><option value="beam">Rayo de luz</option><option value="constellation">Constelación</option><option value="flash">Destello</option><option value="vortex">Vórtice</option></select></label>
+                <label>Borde<select id="xi-up-border"><option value="solid">Continuo</option><option value="double">Doble</option><option value="dashed">Segmentado</option><option value="ridge">Relieve</option></select></label>
+                <label>Forma<select id="xi-up-shape"><option value="rounded">Esquinas redondeadas</option><option value="square">Cuadrado</option><option value="pill">Muy redondeado</option></select></label>
+                <label>Tamaño de tarjeta<select id="xi-up-size"><option value="normal">Normal · 1 espacio</option><option value="large">Gigante · 4 espacios (2×2)</option></select></label>
+                <label>Intensidad de aura <output id="xi-up-glow-value">65%</output><input id="xi-up-glow" type="range" min="0" max="100" value="65"></label>
+                <label>Dirección del degradado <output id="xi-up-angle-value">135°</output><input id="xi-up-angle" type="range" min="0" max="360" value="135"></label>
+              </div>
+              <label class="xifre-check-row"><input id="xi-up-active" type="checkbox" checked><span>Acabado activo y disponible para nuevas transformaciones</span></label>
+              <button id="xi-up-save" class="inventory-primary-button" type="submit">Crear estilo</button>
+            </form>
+            <div class="xi-up-preview-col"><strong>Vista previa interactiva</strong><span>Los cambios se muestran al instante, sin guardarlos.</span><div class="xi-up-stage"><div id="xi-up-live-card" class="xi-upgrade-card xi-custom-upgrade"><span class="xi-card-preview-caption">VISTA PREVIA</span><div class="xi-card-preview-art">✦</div><strong>Nueva mejora</strong><small>Rareza original · Valor conceptual</small></div></div><p id="xi-up-size-note">Ocupa un espacio normal en la colección.</p><button id="xi-up-preview-reveal" class="inventory-secondary-button compact" type="button">▶ Probar animación de transformación</button><p class="admin-feature-hint">Las animaciones se adaptan a la preferencia de movimiento reducido del usuario.</p></div>
+          </div>
         </section>
         <section class="admin-card admin-catalog-card"><div class="admin-card-heading"><span class="admin-card-icon">▤</span><div><h3>Catálogo de objetos</h3><p>Gestiona los objetos ya creados y consulta cuántas copias existen.</p></div></div><div id="admin-item-list" class="admin-item-list"><div class="inventory-inline-empty">Todavía no hay objetos.</div></div></section>
       </section>
@@ -706,6 +736,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261115-alpha-17"></script>
+<script src="app.js?v=20261115-alpha-18"></script>
+<div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
