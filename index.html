@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261115-alpha-111">
+<link rel="stylesheet" href="style.css?v=20261115-alpha-112">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -82,6 +82,12 @@
     </button>
     <button id="app-market-button" class="app-launcher app-launcher-market hidden" type="button" data-platform-app="market" title="Mercado de jugadores" aria-label="Abrir Mercado">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M5 7l2-4h10l2 4M5 7v13h14V7M9 20v-8h6v8M8 10h2m4 0h2"/></svg><span id="notification-market" class="xifre-app-count hidden" aria-label="Notificaciones">0</span>
+    </button>
+    <button id="app-plaza-button" class="app-launcher app-launcher-plaza hidden" type="button" data-platform-app="plaza" title="La Plaza de XIFRE" aria-label="Abrir La Plaza">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6M7 10h10M12 4v-2"/></svg><span id="notification-plaza" class="xifre-app-count hidden">0</span>
+    </button>
+    <button id="app-bank-button" class="app-launcher app-launcher-bank hidden" type="button" data-platform-app="bank" title="Banco XIFRE" aria-label="Abrir Banco">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18M5 9l7-5 7 5M6 9v11M10 9v11M14 9v11M18 9v11M3 20h18"/></svg><span id="notification-bank" class="xifre-app-count hidden">0</span>
     </button>
   </div>
   <div class="appbar-tools">
@@ -459,6 +465,51 @@
     <footer class="market-disclaimer">Todas las cifras son monedas virtuales de XIFRE, sin valor real. No existen comisiones.</footer>
   </div>
 </section>
+
+<!-- ALPHA 1.12 · PLAZA: teaser + minijuego independiente -->
+<section id="plaza-app-view" class="app-view plaza-app hidden" aria-label="La Plaza de XIFRE">
+  <div class="xi-plaza-scroll">
+    <div class="xi-plaza-hero">
+      <span class="xi-plaza-eyebrow">XIFRE · PRÓXIMAMENTE</span>
+      <div class="xi-plaza-logo" aria-hidden="true"><span>✦</span><span>XP</span></div>
+      <h1>La Plaza <em>de XIFRE</em></h1>
+      <h2>La Plaza tendrá que esperar.</h2>
+      <p>La Plaza es un proyecto de XIFRE en desarrollo que traerá trabajos, actividades variadas y, sobre todo, mucha vida a la web. Sin embargo, un proyecto tan ambicioso necesita tiempo para implementarse, pulirse y perfeccionarse dentro de la plataforma. ¡Por ahora seguimos trabajando en ello!</p>
+      <p class="xi-plaza-invitation">Mientras tanto, prueba este minijuego para ganar un poco de dinero virtual.</p>
+      <button id="xi-plaza-open-game" class="xi-plaza-primary" type="button">🎮 Abrir Block Breaker</button>
+      <span class="xi-plaza-small-note">+0,01 € virtuales por ronda superada · Máximo diario: 2,00 € · Sin valor real</span>
+    </div>
+    <div id="xi-plaza-game" class="xi-plaza-game hidden">
+      <div class="xi-plaza-game-top">
+        <div><span class="xi-plaza-eyebrow">ARCADE · XIFRE</span><h2>Block Breaker</h2><p>Destruye todos los bloques. ¡Cuidado con la caída!</p></div>
+        <div class="xi-plaza-game-tools"><button type="button" id="xi-plaza-sound" title="Activar o silenciar sonidos" aria-label="Sonido">♪</button><button type="button" id="xi-plaza-fullscreen" title="Pantalla completa">⛶</button><button type="button" id="xi-plaza-pause" title="Pausar o reanudar">Ⅱ</button></div>
+      </div>
+      <div class="xi-plaza-stats"><span>Ronda <strong id="xi-plaza-round">1</strong></span><span>Vidas <strong id="xi-plaza-lives">♥♥♥</strong></span><span>Puntos <strong id="xi-plaza-score">0</strong></span><span>Ganado <strong id="xi-plaza-earned">0,00 €</strong></span></div>
+      <div id="xi-plaza-stage" class="xi-plaza-canvas-wrap" tabindex="0" aria-label="Zona de juego Block Breaker">
+        <canvas id="xi-plaza-canvas" width="900" height="600" aria-label="Minijuego de romper bloques"></canvas>
+        <div id="xi-plaza-overlay" class="xi-plaza-overlay"><div class="xi-plaza-overlay-card"><strong id="xi-plaza-overlay-title">¿Preparado?</strong><p id="xi-plaza-overlay-copy">Mueve la barra con ← → o A/D. Usa Espacio para lanzar la bola.</p><button id="xi-plaza-overlay-action" type="button" class="xi-plaza-primary">Empezar partida</button></div></div>
+      </div>
+      <div class="xi-plaza-touch"><button type="button" id="xi-plaza-left" aria-label="Mover a la izquierda">◀</button><span>← → o A/D para mover · Espacio para lanzar · P para pausar</span><button type="button" id="xi-plaza-right" aria-label="Mover a la derecha">▶</button></div>
+      <div class="xi-plaza-footer"><span id="xi-plaza-game-message" role="status">Los premios se añaden automáticamente a tu saldo virtual.</span><span>Bloques especiales: ⇧ barra · ✚ vida · ◉ multibola · ✦ láser · ◈ ralentizar · 💥 explosión</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ALPHA 1.12 · BANCO: cuenta virtual, Bizum, monedas y movimientos -->
+<section id="bank-app-view" class="app-view xi-bank-app hidden" aria-label="Banco XIFRE">
+  <div class="xi-bank-scroll">
+    <header class="xi-bank-head"><div><span class="xi-bank-eyebrow">XIFRE · SERVICIOS FINANCIEROS VIRTUALES</span><h1>Banco XIFRE</h1><p>Tu dinero virtual, siempre bajo control.</p></div><button id="xi-bank-refresh" class="xi-bank-refresh" type="button" aria-label="Actualizar saldo y movimientos">↻ Actualizar</button></header>
+    <section class="xi-bank-balance-card"><div class="xi-bank-card-orb"></div><span>MI SALDO DISPONIBLE</span><strong id="xi-bank-balance">0,00 €</strong><p>Moneda de XIFRE · Sin valor monetario real</p><div class="xi-bank-card-bottom"><span>CUENTA PERSONAL</span><b>✦ XIFRE BANK</b></div></section>
+    <div class="xi-bank-actions">
+      <button type="button" data-xi-bank-action="bizum"><span class="xi-bank-action-icon">⇄</span><strong>Bizum</strong><small>Enviar dinero</small></button>
+      <button type="button" data-xi-bank-action="withdraw"><span class="xi-bank-action-icon">◎</span><strong>Convertir en metálico</strong><small>Crear una moneda</small></button>
+      <button type="button" data-xi-bank-action="deposit"><span class="xi-bank-action-icon">↥</span><strong>Depositar</strong><small>Ingresar una moneda</small></button>
+    </div>
+    <div id="xi-bank-panel" class="xi-bank-panel hidden"><button type="button" id="xi-bank-panel-close" aria-label="Cerrar operación">×</button><h2 id="xi-bank-panel-title">Operación</h2><div id="xi-bank-panel-content"></div><p id="xi-bank-feedback" role="status"></p></div>
+    <div class="xi-bank-bottom-grid"><section class="xi-bank-bottom-card"><div class="xi-bank-section-title"><h2>Mis monedas</h2><span>DINERO EN EL INVENTARIO</span></div><div id="xi-bank-coin-list" class="xi-bank-coins"><p>No tienes monedas para depositar.</p></div></section><section class="xi-bank-bottom-card"><div class="xi-bank-section-title"><h2>Últimos movimientos</h2><span>HISTORIAL</span></div><div id="xi-bank-history" class="xi-bank-history"><p>Cargando movimientos...</p></div></section></div>
+    <footer class="xi-bank-disclaimer">El saldo y las monedas son únicamente ficticios. Bizum en XIFRE no utiliza el servicio bancario real. Las monedas se pueden transferir en intercambios y depositarse, pero no venderse en el Mercado.</footer>
+  </div>
+</section>
 </div>
 
 
@@ -496,7 +547,7 @@
     <div class="item-details-body">
       <div class="item-details-top"><span class="inventory-eyebrow">FICHA DEL OBJETO</span><span id="item-details-rarity" class="item-details-rarity">Común</span></div>
       <h2 id="item-details-name">Objeto</h2>
-      <div class="item-details-value-wrap"><span>VALOR</span><strong id="item-details-value">0</strong></div>
+      <div class="item-details-value-wrap"><span id="item-details-value-label">VALOR</span><strong id="item-details-value">0</strong></div>
       <div class="item-details-section"><strong>Descripción</strong><p id="item-details-description">Sin descripción.</p></div>
       <p id="item-details-status" class="item-details-status"></p>
       <div id="item-details-extras" class="item-details-extras hidden"></div>
@@ -771,7 +822,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261115-alpha-111"></script>
+<script src="app.js?v=20261115-alpha-112"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
