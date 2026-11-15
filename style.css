@@ -2703,3 +2703,178 @@ html[data-theme="light"] .shop-admin-card input:not([type=checkbox]),html[data-t
   #inventory-app-view .trade-offer-columns { gap: 10px; }
   #inventory-app-view .xi-trade-chat-messages { height: 87px; }
 }
+
+/* ========================================================================
+   XIFRE ALPHA 1.8 · Acabados personalizables, administración y regalos
+   Mantiene los colores de rareza; los efectos son una capa independiente.
+   ======================================================================== */
+/* Regalos en formato compacto, al estilo de un adjunto pequeño. */
+#messages .xifre-gift-card {
+  display:grid!important;grid-template-columns:18px 33px minmax(0,1fr) auto auto!important;
+  align-items:center!important;column-gap:7px!important;min-height:42px!important;
+  width:min(355px,100%)!important;max-width:100%!important;
+  margin:3px 0!important;padding:5px 7px!important;border-radius:7px!important;
+  background:color-mix(in srgb,var(--xi-rarity,#778198) 7%,#24262b)!important;
+  border:1px solid rgba(var(--xi-rgb,120,135,168),.28)!important;
+  box-shadow:none!important;overflow:hidden;
+}
+#messages .xifre-gift-card .xi-gift-mark{font-size:14px;line-height:1;opacity:.85;}
+#messages .xifre-gift-card .xi-gift-art{
+  display:grid!important;place-items:center!important;min-width:33px!important;min-height:33px!important;
+  max-width:33px!important;max-height:33px!important;width:33px!important;height:33px!important;
+  background:rgba(var(--xi-rgb,110,125,170),.12)!important;border-radius:5px!important;
+}
+#messages .xifre-gift-card .xi-gift-art .platform-image-frame,
+#messages .xifre-gift-card .xi-gift-art .platform-image-fallback{width:100%!important;height:100%!important;display:grid;place-items:center;}
+#messages .xifre-gift-card .xi-gift-art img{width:auto!important;max-width:31px!important;max-height:31px!important;object-fit:contain!important;filter:none!important;}
+#messages .xifre-gift-card .xi-gift-info{display:flex!important;flex-direction:column;min-width:0;gap:1px!important;line-height:1.2!important;}
+#messages .xifre-gift-card .xi-gift-info strong{font-size:10px!important;font-weight:750!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#messages .xifre-gift-card .xi-gift-info small{font-size:8px!important;color:var(--xi-rarity,#abb2c2)!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#messages .xifre-gift-card .xi-gift-state{font-size:8px;font-weight:750;color:#b5c1d2;white-space:nowrap;}
+#messages .xifre-gift-card .xi-gift-action{display:block!important;min-width:0!important;grid-column:auto!important;}
+#messages .xifre-gift-card .xi-gift-button{min-width:55px!important;max-width:none!important;min-height:25px!important;width:auto!important;padding:4px 7px!important;font-size:9px!important;border-radius:5px!important;white-space:nowrap!important;font-weight:750!important;}
+#messages .xifre-gift-card .xi-gift-result{white-space:nowrap;font-size:8px!important;color:#b5bfcd;}
+#messages .xifre-gift-card.xi-custom-upgrade {box-shadow:inset 2px 0 0 var(--xi-fx-a)!important;}
+@media(max-width:520px){
+ #messages .xifre-gift-card {width:min(320px,100%)!important;grid-template-columns:15px 29px minmax(0,1fr) auto!important;gap:5px!important;}
+ #messages .xifre-gift-card .xi-gift-art{width:29px!important;min-width:29px!important;max-width:29px!important;height:29px!important;min-height:29px!important;max-height:29px!important;}
+ #messages .xifre-gift-card .xi-gift-state{display:none!important;}
+ #messages .xifre-gift-card .xi-gift-button{min-width:51px!important;font-size:8px!important;}
+}
+
+/* Estilo visual independiente del color de rareza. Las reglas no sustituyen
+   las variables --xi-rarity y --xi-rgb ya utilizadas en las cartas base. */
+.xi-custom-upgrade {position:relative;isolation:isolate;--xi-fx-a:#7969ff;--xi-fx-b:#2be7ff;--xi-fx-glow:.65;--xi-fx-angle:135deg;}
+#inventory-app-view .xifre-mini-item.xi-custom-upgrade,
+#inventory-app-view .trade-offer-item.xi-custom-upgrade,
+.market-listing.xi-custom-upgrade,
+.xi-gift-picker-item.xi-custom-upgrade {
+ border-color:var(--xi-fx-a)!important;
+ box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--xi-fx-b) 40%,transparent),0 0 calc(14px * var(--xi-fx-glow)) color-mix(in srgb,var(--xi-fx-a) 45%,transparent),0 8px 23px #0005!important;
+}
+#inventory-app-view .xifre-mini-item.xi-custom-upgrade::before,
+#inventory-app-view .trade-offer-item.xi-custom-upgrade::before,
+.market-listing.xi-custom-upgrade::before,
+.xi-gift-picker-item.xi-custom-upgrade::before,
+.xi-upgrade-card::before,
+.xi-route-card::before {
+ content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:0;
+ background:linear-gradient(var(--xi-fx-angle),transparent 17%,color-mix(in srgb,var(--xi-fx-a) 24%,transparent),color-mix(in srgb,var(--xi-fx-b) 28%,transparent),transparent 82%);
+ opacity:calc(.18 + var(--xi-fx-glow) * .45);background-size:230% 230%;
+}
+.xi-custom-upgrade>*{position:relative;z-index:1;}
+.xi-custom-upgrade[data-xi-shape="square"]{border-radius:2px!important;}
+.xi-custom-upgrade[data-xi-shape="pill"]{border-radius:24px!important;}
+.xi-custom-upgrade[data-xi-border="double"]{border-style:double!important;border-width:3px!important;}
+.xi-custom-upgrade[data-xi-border="dashed"]{border-style:dashed!important;}
+.xi-custom-upgrade[data-xi-border="ridge"]{border-style:ridge!important;border-width:3px!important;}
+.xi-custom-upgrade[data-xi-fx="none"]::before{opacity:0;}
+.xi-custom-upgrade[data-xi-fx="glow"]::before{background:radial-gradient(circle at 52% 38%,var(--xi-fx-a),transparent 75%);opacity:calc(.09 + var(--xi-fx-glow) * .3);}
+.xi-custom-upgrade[data-xi-fx="flame"]::before{background:radial-gradient(ellipse at bottom,var(--xi-fx-a),transparent 70%),linear-gradient(25deg,transparent 35%,var(--xi-fx-b),transparent 65%);}
+.xi-custom-upgrade[data-xi-fx="ice"]::before{background:repeating-linear-gradient(125deg,transparent 0 16px,var(--xi-fx-a) 16px 17px,transparent 17px 33px),radial-gradient(circle at top,var(--xi-fx-b),transparent);}
+.xi-custom-upgrade[data-xi-fx="plasma"]::before{background:conic-gradient(from 100deg,var(--xi-fx-a),transparent,var(--xi-fx-b),transparent,var(--xi-fx-a));}
+.xi-custom-upgrade[data-xi-fx="holo"]::before{background:linear-gradient(130deg,transparent 11%,var(--xi-fx-a) 25%,#c6fff4 44%,var(--xi-fx-b) 58%,transparent 85%);}
+.xi-custom-upgrade[data-xi-fx="galaxy"]::before{background:radial-gradient(circle at 25% 20%,var(--xi-fx-a),transparent 43%),radial-gradient(circle at 90% 70%,var(--xi-fx-b),transparent 58%);}
+.xi-custom-upgrade[data-xi-fx="electric"]::before{background:repeating-linear-gradient(128deg,transparent 0 13px,var(--xi-fx-a) 14px 15px,transparent 16px 35px);}
+.xi-custom-upgrade[data-xi-fx="aurora"]::before{background:linear-gradient(105deg,transparent 0,var(--xi-fx-a) 24%,transparent 45%,var(--xi-fx-b) 70%,transparent 93%);}
+.xi-custom-upgrade[data-xi-fx="sparkles"]::before{background:radial-gradient(circle at 20% 30%,var(--xi-fx-b) 0 2px,transparent 4px),radial-gradient(circle at 70% 10%,var(--xi-fx-a) 0 3px,transparent 6px),radial-gradient(circle at 78% 80%,#fff 0 1px,transparent 4px);}
+.xi-custom-upgrade[data-xi-fx="metal"]::before{background:linear-gradient(115deg,transparent 0,var(--xi-fx-b) 24%,#fff9 29%,var(--xi-fx-a) 58%,transparent 95%);opacity:calc(.16 + var(--xi-fx-glow)*.5);}
+.xi-custom-upgrade[data-xi-motion="pulse"]::before{animation:xiFxPulse 3.1s ease-in-out infinite alternate;}
+.xi-custom-upgrade[data-xi-motion="flow"]::before{animation:xiFxFlow 5s linear infinite;}
+.xi-custom-upgrade[data-xi-motion="spin"]::before{animation:xiFxSpin 8s linear infinite;}
+.xi-custom-upgrade[data-xi-motion="shimmer"]::before{animation:xiFxFlow 2.6s linear infinite;}
+.xi-custom-upgrade[data-xi-motion="float"]::before{animation:xiFxFloat 4s ease-in-out infinite;}
+.xi-custom-upgrade[data-xi-motion="flicker"]::before{animation:xiFxFlicker 3.6s ease-in-out infinite;}
+.xi-custom-upgrade[data-xi-motion="breath"]::before{animation:xiFxPulse 5s ease-in-out infinite alternate;}
+@keyframes xiFxPulse{from{opacity:.1}to{opacity:.65}}
+@keyframes xiFxFlow{from{background-position:0 20%}to{background-position:220% 100%}}
+@keyframes xiFxSpin{to{transform:rotate(360deg)}}
+@keyframes xiFxFloat{50%{transform:translateY(-8px)}}
+@keyframes xiFxFlicker{0%,62%,100%{opacity:.5}25%,66%{opacity:.14}30%,70%{opacity:.72}}
+.xi-custom-upgrade .xi-custom-tag,
+#inventory-app-view .xifre-mini-item.xi-custom-upgrade .xifre-grade-tag.xi-custom-tag {
+ color:white!important;background:linear-gradient(135deg,var(--xi-fx-a),var(--xi-fx-b))!important;
+ border:1px solid color-mix(in srgb,var(--xi-fx-b) 70%,white)!important;
+ box-shadow:0 0 9px color-mix(in srgb,var(--xi-fx-a) 60%,transparent);
+ padding:2px 5px;border-radius:5px;text-shadow:0 1px 2px #0006;max-width:92%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#item-details-modal.xi-custom-upgrade .item-details-card{border:2px solid var(--xi-fx-a)!important;box-shadow:0 0 25px color-mix(in srgb,var(--xi-fx-a) 26%,transparent),0 22px 70px #0009!important;}
+#item-details-modal.xi-custom-upgrade .item-details-value-wrap strong{color:var(--xi-fx-b)!important;text-shadow:0 0 14px var(--xi-fx-a);}
+#inventory-app-view .inventory-grid>.xi-custom-large {grid-column:span 2;grid-row:span 2;min-height:335px;}
+#inventory-app-view .inventory-grid>.xi-custom-large .mini-item-image{height:230px;}
+#inventory-app-view .inventory-grid>.xi-custom-large .mini-item-image img{max-height:195px;max-width:100%;}
+#inventory-app-view .inventory-grid>.xi-custom-large .mini-item-name{font-size:16px;}
+#inventory-app-view .inventory-grid>.xi-custom-large .mini-item-value{font-size:18px;}
+.market-listings>.xi-custom-large{grid-column:span 2;}
+.market-listings>.xi-custom-large .market-art{height:185px;}
+@media(max-width:600px){#inventory-app-view .inventory-grid>.xi-custom-large{min-height:270px;}#inventory-app-view .inventory-grid>.xi-custom-large .mini-item-image{height:165px;}.market-listings>.xi-custom-large{grid-column:span 1;}}
+
+/* Ramas de upgrades en el detalle de cada copia. */
+.xi-branch-group{margin-top:14px;}.xi-branch-group h3{font-size:14px;margin-bottom:10px;}
+.xi-branch-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;}
+.xi-route-card{position:relative;isolation:isolate;overflow:hidden;border:1.5px solid var(--xi-fx-a);border-radius:12px;background:#202636;padding:12px;box-shadow:inset 0 0 18px color-mix(in srgb,var(--xi-fx-a) 10%,transparent);}
+.xi-route-head{display:flex;gap:8px;align-items:center;}.xi-route-symbol{font-size:22px;color:var(--xi-fx-b);text-shadow:0 0 12px var(--xi-fx-a);}
+.xi-route-head>div{display:flex;flex-direction:column;gap:3px;min-width:0;}.xi-route-head strong{font-size:13px;color:#fff;}.xi-route-head small{font-size:10px;color:#a9b3cb;}
+.xi-route-count,.xi-route-card p{font-size:11px;color:#c4cede;line-height:1.5;margin:9px 0;}.xi-route-count b{color:#fff;}.xi-route-card button{width:100%;margin-top:5px;}
+
+/* Estudio de upgrades, solo visible en administración. */
+.xi-up-editor{margin-top:14px;}.xi-up-editor-layout{display:grid;grid-template-columns:minmax(155px,.7fr) minmax(270px,1.25fr) minmax(195px,.9fr);gap:16px;min-width:0;margin-top:12px;align-items:start;}
+.xi-up-editor-sidebar{border:1px solid rgba(153,170,220,.15);border-radius:11px;padding:9px;background:#1b202c;min-width:0;}
+.xi-up-side-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px;}.xi-up-side-head strong{font-size:11px;}
+.xi-up-style-list{display:grid;gap:5px;max-height:440px;overflow-y:auto;}
+.xi-style-row{display:flex;align-items:center;gap:8px;min-width:0;padding:7px;border:1px solid transparent;border-radius:7px;background:#252b3a;color:#fff;text-align:left;cursor:pointer;}
+.xi-style-row:hover,.xi-style-row.selected{border-color:#899aff;background:#303956;}.xi-style-dot{width:32px;height:32px;flex:0 0 32px;border-radius:8px;display:grid;place-items:center;font-size:19px;background:linear-gradient(130deg,var(--xi-fx-a),var(--xi-fx-b));}
+.xi-style-row>span:last-child{display:grid;gap:4px;min-width:0;}.xi-style-row strong{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.xi-style-row small{font-size:9px;color:#9babc8;}
+.xi-up-form{min-width:0;}.xi-up-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;}
+.xi-up-fields>label{display:flex;flex-direction:column;gap:5px;color:#bfcbe1;font-size:10px;font-weight:700;min-width:0;}
+.xi-up-fields input:not([type=range]),.xi-up-fields select{width:100%;height:37px;min-width:0;background:#1c2230;color:#f5f7ff;border:1px solid #8899be44;border-radius:7px;padding:7px 9px;font-size:11px;}
+.xi-up-fields input[type=color]{padding:3px;height:38px;cursor:pointer;}.xi-up-fields input[type=range]{width:100%;accent-color:#909bff;}
+.xi-up-form>.xifre-check-row{margin:14px 0;}.xi-up-form>.inventory-primary-button{width:100%;}
+.xi-up-preview-col{display:grid;gap:7px;min-width:0;position:sticky;top:7px;}.xi-up-preview-col>strong{font-size:12px;}.xi-up-preview-col>span,.xi-up-preview-col>p{color:#a6b3ca;font-size:10px;line-height:1.5;}
+.xi-up-stage{padding:16px;min-height:290px;display:grid;place-items:center;background:radial-gradient(circle,#36406a66,transparent 75%),#151b28;border:1px dashed #9eaacf55;border-radius:14px;overflow:hidden;}
+.xi-upgrade-card{display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:9px;position:relative;isolation:isolate;width:175px;min-height:215px;padding:10px;border:2px solid var(--xi-fx-a);border-radius:11px;background:radial-gradient(circle at 50% 25%,color-mix(in srgb,var(--xi-fx-a) 30%,transparent),transparent 65%),#202738;color:#fff;box-shadow:0 0 19px color-mix(in srgb,var(--xi-fx-a) 30%,transparent);overflow:hidden;}
+.xi-upgrade-card.xi-custom-large{width:min(100%,255px);min-height:255px;}
+.xi-card-preview-caption{color:#c4ccdb;font-size:9px;letter-spacing:1px;font-weight:900;}.xi-card-preview-art{display:grid;place-items:center;min-height:103px;font-size:63px;color:var(--xi-fx-b);text-shadow:0 0 25px var(--xi-fx-a);}
+.xi-card-preview-footer{font-size:9px;letter-spacing:.5px;color:var(--xi-fx-b);}.xi-upgrade-card strong{font-size:15px;}.xi-upgrade-card small{font-size:9px;color:#dde4f5;}
+.xi-item-route-head{margin:9px 0 7px;}.xi-item-route-head strong{font-size:12px;}.xi-item-route-list{display:grid;gap:7px;margin:8px 0;}
+.xi-route-editor{display:grid;grid-template-columns:1fr 1fr 72px 95px auto;gap:7px;padding:8px;border:1px solid #8995b53a;border-radius:8px;background:#1c2130;min-width:0;align-items:end;}
+.xi-route-editor label{display:grid;gap:5px;font-size:9px;color:#9eaecb;min-width:0;}.xi-route-editor select,.xi-route-editor input{min-width:0;width:100%;height:34px;border:1px solid #8d9bbb40;background:#131927;color:#eee;border-radius:6px;padding:5px;}
+@media(max-width:1080px){.xi-up-editor-layout{grid-template-columns:minmax(160px,.7fr) minmax(270px,1.3fr);}.xi-up-preview-col{grid-column:1/-1;position:static;}.xi-up-stage{min-height:210px;}.xi-route-editor{grid-template-columns:1fr 1fr 67px;}.xi-route-editor label:nth-child(4){grid-column:span 2;}}
+@media(max-width:650px){.xi-up-editor-layout{grid-template-columns:1fr;}.xi-up-preview-col{grid-column:auto;}.xi-up-fields{grid-template-columns:repeat(2,minmax(0,1fr));}.xi-route-editor{grid-template-columns:1fr 1fr;}.xi-route-editor label:nth-child(4){grid-column:span 1;}}
+
+/* La celebración es temporal y no desplaza ninguna ventana ni toca el inventario. */
+.xi-custom-reveal{position:fixed;inset:0;z-index:1200;pointer-events:none;display:grid;place-items:center;background:radial-gradient(circle,color-mix(in srgb,var(--xi-fx-a) 30%,transparent),#000b 70%);animation:xiRevealBg 2.4s ease both;}
+.xi-custom-reveal.hidden{display:none!important;}.xi-reveal-inner{display:grid;place-items:center;gap:8px;text-align:center;animation:xiRevealIn 1.35s cubic-bezier(.2,.8,.1,1) both;}
+.xi-reveal-inner i{display:grid;place-items:center;width:135px;height:135px;font-style:normal;font-size:74px;color:var(--xi-fx-b);text-shadow:0 0 35px var(--xi-fx-a);border:2px solid var(--xi-fx-a);border-radius:50%;box-shadow:0 0 65px var(--xi-fx-a),inset 0 0 25px var(--xi-fx-b);}
+.xi-reveal-inner strong{color:#fff;font-size:clamp(22px,5vw,44px);text-shadow:0 0 25px var(--xi-fx-a);}.xi-reveal-inner span{color:#d8e6ff;font-size:12px;letter-spacing:3px;font-weight:900;}
+.xi-reveal-portal .xi-reveal-inner i{animation:xiFxSpin 1.3s linear infinite;}.xi-reveal-beam .xi-reveal-inner i{border-radius:10px;}.xi-reveal-vortex .xi-reveal-inner{animation:xiRevealTwirl 1.7s ease both;}.xi-reveal-constellation .xi-reveal-inner i{border-style:dashed;}
+@keyframes xiRevealBg{0%{opacity:0}20%,75%{opacity:1}100%{opacity:0}}
+@keyframes xiRevealIn{0%{opacity:0;transform:translateY(38px) scale(.5)}36%{opacity:1;transform:scale(1.1)}65%{transform:scale(1)}100%{opacity:0;transform:translateY(-9px)}}
+@keyframes xiRevealTwirl{0%{opacity:0;transform:rotate(-140deg) scale(.1)}40%{opacity:1;transform:rotate(0) scale(1.05)}100%{opacity:0;transform:scale(1.1)}}
+@media(prefers-reduced-motion:reduce){.xi-custom-upgrade::before,.xi-custom-reveal,.xi-reveal-inner,.xi-reveal-inner i{animation:none!important;transition:none!important;}.xi-custom-reveal{display:none!important;}}
+
+/* Alpha 1.8 · Aplicar el acabado también fuera del inventario (sin alterar rareza). */
+#messages .xifre-gift-card.xifre-grade-gold,
+.market-inventory-item.xifre-grade-gold,
+#inventory-app-view .trade-offer-item.xifre-grade-gold,
+.admin-asset-row.xifre-grade-gold{
+ border-color:#f8c960!important;border-left:3px solid #ffd76b!important;
+ box-shadow:inset 0 0 10px #ffd36a18,0 0 8px #ffcc4b27!important;
+}
+#messages .xifre-gift-card.xifre-grade-neon,
+.market-inventory-item.xifre-grade-neon,
+#inventory-app-view .trade-offer-item.xifre-grade-neon,
+.admin-asset-row.xifre-grade-neon{
+ border-color:#52ffef!important;border-left:3px solid #65fcec!important;
+ box-shadow:inset 0 0 9px #52ffee20,0 0 11px #31ffe65a!important;
+}
+#messages .xifre-gift-card.xifre-grade-gold .xi-gift-info small{color:#f6d27b!important;}
+#messages .xifre-gift-card.xifre-grade-neon .xi-gift-info small{color:#8cfff4!important;}
+#messages .xifre-gift-card.xi-custom-upgrade .xi-gift-info small{color:var(--xi-fx-b)!important;}
+.market-inventory-item.xi-custom-upgrade,.admin-asset-row.xi-custom-upgrade{
+ border:1px solid var(--xi-fx-a)!important;box-shadow:inset 0 0 14px color-mix(in srgb,var(--xi-fx-b) 16%,transparent),0 0 12px color-mix(in srgb,var(--xi-fx-a) 30%,transparent)!important;
+}
+.trade-offer-item>.xifre-grade-tag,.market-inventory-item>.xifre-grade-tag,.admin-asset-row>.xifre-grade-tag{
+ position:absolute;left:4px;bottom:4px;z-index:3;font-size:8px;max-width:90%;
+}
+.trade-offer-item,.market-inventory-item,.admin-asset-row{position:relative;}
