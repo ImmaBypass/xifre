@@ -3501,3 +3501,18 @@ html[data-theme="light"] #item-details-modal.xi-item-details-custom #item-detail
 @media(max-width:650px){.xi-box-existing-row{grid-template-columns:40px minmax(0,1fr)}.xi-box-existing-row button{grid-column:2;justify-self:start}.xi-box-existing-head{flex-direction:column}.xi-decor-wardrobe{grid-template-columns:1fr}}
 
 .xi-admin-select-wrap{display:grid;gap:4px;min-width:0}.xi-admin-select-wrap select{width:100%;min-width:0}.xi-admin-select-wrap .xi-admin-item-search{margin:0 0 3px}
+
+/* Alpha 1.17 — edición masiva de la configuración heredada de cajas automáticas */
+.xi-series-existing-mode{margin-top:14px;border-color:rgba(117,131,255,.42)!important}
+.xi-series-existing-mode .xi-series-title,
+.xi-series-existing-mode .xi-series-file-label,
+.xi-series-existing-mode #xi-series-filter,
+.xi-series-existing-mode label[for="xi-series-filter"],
+.xi-series-existing-mode #xi-series-list,
+.xi-series-existing-mode .xi-series-footer,
+.xi-series-existing-mode #xi-series-feedback{display:none!important}
+.xi-series-bulk-notice{font-size:12px;line-height:1.6;padding:11px 13px;border:1px solid rgba(142,154,255,.3);border-radius:10px;background:rgba(88,101,242,.1);color:var(--text)}
+.xi-series-bulk-actions{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 2px 2px}
+.xi-series-bulk-actions>span{font-size:11px;color:var(--text-muted);line-height:1.5;flex:1 1 190px}
+.xi-series-bulk-actions>button{min-width:min(100%,245px);min-height:40px;font-weight:800}
+@media(max-width:650px){.xi-series-bulk-actions>button{width:100%}}
