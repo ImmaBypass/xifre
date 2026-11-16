@@ -5463,6 +5463,7 @@ function platformResetItemForm() {
   platformAdminEditingItemId = null;
   platformAdminEditingItemImagePath = null;
   xiBoxExistingHide();
+  xiSeriesBulkExit();
   $('#xi-box-return')?.classList.add('hidden');
   $('#xi-series-import')?.classList.remove('hidden');
   const button = $('#admin-item-save');
@@ -5482,6 +5483,7 @@ function platformEditItem(itemId) {
   if (!isXifreAdmin) return;
   const item = platformAdminItems.find(row => String(row.id) === String(itemId));
   if (!item) return toast('No se ha encontrado ese objeto.', 'error');
+  xiSeriesBulkExit();
   platformAdminEditingItemId = item.id;
   platformAdminEditingItemImagePath = item.image_path || null;
   $('#admin-item-name').value = item.name || '';
@@ -5497,7 +5499,9 @@ function platformEditItem(itemId) {
   xiFillItemRoutes(item.id);
   platformToggleBoxFields();
   xiBoxExistingHide();
+  // Una caja existente con serie automática debe enseñar su formulario heredado.
   $('#xi-series-import')?.classList.toggle('hidden',Boolean(item.is_box));
+  if(item.is_box) void xiSeriesBulkOpen(item.id);
   $('#xi-box-return')?.classList.toggle('hidden',!xiBoxReturnId || String(item.id)===String(xiBoxReturnId));
   $('#admin-box-drops')?.replaceChildren();
   if (item.is_box) void platformLoadBoxEditor(item.id);
@@ -8368,6 +8372,90 @@ function xiSeriesFeedback(message='',type=''){
  el.textContent=String(message||'');el.className='xi-series-feedback'+(type?' '+type:'');
 }
 function xiSeriesCleanName(filename){return String(filename).replace(/\.[^.]+$/,'').trim().slice(0,80);}
+/* Alpha 1.17 — formulario heredado también disponible AL EDITAR una caja automática.
+   Aplica todas las propiedades compartidas de una vez, en UNA sola transacción SQL. */
+let xiSeriesBulkBoxId = '';
+let xiSeriesBulkLoadRevision = 0;
+let xiSeriesBulkSaving = false;
+function xiSeriesBulkExit(){
+  xiSeriesBulkBoxId=''; xiSeriesBulkLoadRevision++;
+  const host=$('#xi-series-import');host?.classList.remove('xi-series-existing-mode');
+  $('#xi-series-bulk-actions')?.classList.add('hidden');
+  $('#xi-series-bulk-notice')?.classList.add('hidden');
+  if($('#xi-series-bulk-feedback'))$('#xi-series-bulk-feedback').textContent='';
+  setText('xi-series-common-heading','Configuración principal de los objetos');
+  setText('xi-series-common-explanation','Independiente de los datos de la caja. Se hereda en todos los premios salvo que edites uno individualmente.');
+}
+function xiSeriesBulkFill(cfg){
+  const set=(id,value)=>{const el=$(`#xi-series-common-${id}`);if(el && value!==undefined && value!==null)el.value=String(value);};
+  const check=(id,value)=>{const el=$(`#xi-series-common-${id}`);if(el)el.checked=!!value;};
+  set('name',cfg.series_name||'');set('description',cfg.description||'');set('rarity',cfg.rarity||'comun');
+  set('value',cfg.value??0);set('instant',(Number(cfg.instant_sell_cents??1)/100).toFixed(2));
+  check('show-series',cfg.show_series??true);check('show-origin',cfg.show_source_box??true);
+  check('upgradable',cfg.upgrade_enabled??false);set('gold-required',cfg.gold_required??3);
+  set('gold-value',cfg.gold_value??0);set('neon-required',cfg.neon_required??3);set('neon-value',cfg.neon_value??0);
+  check('emoji',cfg.emoji_enabled??false);
+  const decor=cfg.decoration||{};
+  check('equipable',decor.enabled??false);set('pos-x',decor.pos_x??0);set('pos-y',decor.pos_y??0);
+  set('scale',Math.round(Number(decor.scale??1.35)*100));set('rotation',decor.rotation??0);
+  set('glow',decor.glow??10);set('animation',decor.animation||'none');
+  const routes=$('#xi-series-common-routes');routes?.replaceChildren();
+  for(const p of cfg.routes||[]){
+    const source=p.source || (p.source_style_id?'custom:'+p.source_style_id:['normal','gold','neon'][Number(p.source_tier||0)]);
+    const route={source,target:p.target||p.target_style_id,required:p.required||p.copies_required,value:p.value??p.target_value};
+    routes?.insertAdjacentHTML('beforeend',xiSeriesRouteHTML(route));
+  }
+}
+async function xiSeriesBulkOpen(boxId){
+  const revision=++xiSeriesBulkLoadRevision,id=String(boxId);
+  if(!isXifreAdmin || !isValidUuid(id))return;
+  try{
+    const {data,error}=await supabase.rpc('xifre_admin_box_series_template',{p_box_id:id});
+    if(error)throw error;
+    if(revision!==xiSeriesBulkLoadRevision||String(platformAdminEditingItemId)!==id)return;
+    if(!data?.imported || !Number(data.count))return; // las cajas manuales no presentan este editor
+    xiSeriesBulkBoxId=id;
+    const host=$('#xi-series-import');host?.classList.remove('hidden');host?.classList.add('xi-series-existing-mode');
+    $('#xi-series-common')?.classList.remove('hidden');
+    $('#xi-series-bulk-actions')?.classList.remove('hidden');
+    $('#xi-series-bulk-notice')?.classList.remove('hidden');
+    setText('xi-series-common-heading','Editar formulario general de TODOS los premios');
+    setText('xi-series-common-explanation',`Esta caja tiene ${Number(data.count)} premios. Cambia aquí la configuración heredada y pulsa «Aplicar configuración a todos los objetos».`);
+    if($('#xi-series-bulk-feedback'))$('#xi-series-bulk-feedback').textContent=data.saved
+      ? 'Configuración general guardada anteriormente.'
+      : 'Valores iniciales tomados de un premio existente. Revisa los campos antes de aplicarlos a todos.';
+    xiSeriesBulkFill(data.config||{});
+  }catch(error){
+    if(revision===xiSeriesBulkLoadRevision&&String(platformAdminEditingItemId)===id)
+      platformSetMessage('admin-item-message','No se pudo cargar el formulario compartido: '+friendlyError(error),'error');
+  }
+}
+async function xiSeriesBulkApply(){
+  const id=String(xiSeriesBulkBoxId||'');
+  if(!isXifreAdmin||!isValidUuid(id)||xiSeriesBulkSaving||String(platformAdminEditingItemId)!==id)return;
+  let config;
+  try{ config=xiSeriesCommonConfig();xiSeriesValidateDecoration(config.decoration,'la colección'); }
+  catch(error){toast(friendlyError(error),'error');return;}
+  const accepted=await askConfirm('Modificar toda la colección',
+   'Se reemplazarán a la vez las configuraciones de TODOS los premios de esta caja: rareza, descripción, valor, venta instantánea, upgrades, rutas, emoji y decoración. Se conservarán las imágenes, nombres, copias y probabilidades. ¿Confirmas?',
+   'Aplicar a todos');
+  if(!accepted||String(xiSeriesBulkBoxId)!==id)return;
+  const button=$('#xi-series-bulk-apply'),feedback=$('#xi-series-bulk-feedback');
+  xiSeriesBulkSaving=true;if(button)button.disabled=true;
+  if(feedback)feedback.textContent='Guardando toda la colección en Supabase…';
+  try{
+    const {data,error}=await supabase.rpc('xifre_admin_box_series_apply',{p_box_id:id,p_config:config});
+    if(error)throw error;
+    if(feedback)feedback.textContent=`✓ ${Number(data?.updated||0)} premios actualizados correctamente.`;
+    await Promise.all([platformLoadItemFeatures(true),xiLoadCustomCatalog(true),xiDecorLoad(true)]);
+    await platformLoadAdminData();
+    // No cerrar el formulario: el administrador puede verificar los resultados.
+    const drops=await supabase.rpc('xifre_admin_box_drops',{p_box_item_id:id});
+    if(!drops.error && String(platformAdminEditingItemId)===id)xiBoxExistingShow(id,drops.data||[]);
+    toast(`${Number(data?.updated||0)} objetos de la colección actualizados.`, 'success');
+  }catch(error){if(feedback)feedback.textContent='ERROR: '+friendlyError(error);toast(friendlyError(error),'error');}
+  finally{xiSeriesBulkSaving=false;if(button)button.disabled=false;}
+}
 function xiSeriesReset(clearInput=true){
  for(const row of xiSeriesRows)if(row.url)URL.revokeObjectURL(row.url);
  xiSeriesRows=[];xiSeriesRequestId='';
@@ -8624,6 +8712,7 @@ async function xiSeriesSave(){
  }finally{xiSeriesSaving=false;if($('#xi-series-submit'))$('#xi-series-submit').disabled=xiSeriesRows.length===0;}
 }
 function xiDecorSeriesBind(){
+ $('#xi-series-bulk-apply')?.addEventListener('click',xiSeriesBulkApply);
  $('#xi-decor-enabled')?.addEventListener('change',xiDecorUpdatePreview);
  $('#xi-decor-editor')?.addEventListener('input',xiDecorUpdatePreview);
  $('#xi-decor-editor')?.addEventListener('change',xiDecorUpdatePreview);
