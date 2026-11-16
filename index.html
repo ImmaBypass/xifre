@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261115-alpha-114">
+<link rel="stylesheet" href="style.css?v=20261116-alpha-115">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -279,7 +279,7 @@
         <div class="admin-inventory-grid">
           <section class="admin-card">
             <div class="admin-card-heading"><span class="admin-card-icon">＋</span><div><h3 id="admin-item-form-title">Crear objeto</h3><p>Define el objeto que aparecerá en las colecciones.</p></div></div>
-            <form id="admin-item-form" class="admin-form">
+            <form id="admin-item-form" class="admin-form" novalidate>
               <label>Nombre<input id="admin-item-name" type="text" maxlength="80" placeholder="Ej. Fragmento solar" required></label>
               <label>Descripción<textarea id="admin-item-description" rows="3" maxlength="1000" placeholder="Describe el objeto..."></textarea></label>
               <div class="admin-form-row"><label>Rareza<select id="admin-item-rarity" required><option value="comun">Común</option><option value="poco_comun">Poco común</option><option value="raro">Raro</option><option value="epico">Épico</option><option value="legendario">Legendario</option><option value="mitico">Mítico</option><option value="divino">Divino</option></select></label><label>Valor conceptual<input id="admin-item-value" type="number" min="0" max="9000000000000000" step="1" value="0" required></label></div>
@@ -295,9 +295,39 @@
                   <label class="xi-series-file-label">Seleccionar carpeta de imágenes (PNG, JPG, WEBP o GIF)
                     <input id="xi-series-folder" type="file" webkitdirectory directory multiple accept="image/png,image/jpeg,image/webp,image/gif">
                   </label>
-                  <p>Los ajustes del formulario (rareza, valor, upgrades, serie y rutas) se aplicarán a todos los artículos. Pulsa «Editar» en cualquier imagen para sobrescribirlos individualmente.</p>
+                  <section id="xi-series-common" class="xi-series-common hidden" aria-label="Configuración común de los premios">
+                    <div class="xi-series-common-head"><strong>Configuración principal de los objetos</strong><small>Independiente de los datos de la caja. Se hereda en todos los premios salvo que edites uno individualmente.</small></div>
+                    <div class="xi-series-common-fields">
+                      <label>Nombre de la serie<input id="xi-series-common-name" maxlength="90" placeholder="Ej. Colección Galaxia"></label>
+                      <label>Descripción para todos<textarea id="xi-series-common-description" maxlength="1000" rows="2" placeholder="Descripción que tendrán los premios"></textarea></label>
+                      <label>Rareza común<select id="xi-series-common-rarity"><option value="comun">Común</option><option value="poco_comun">Poco común</option><option value="raro">Raro</option><option value="epico">Épico</option><option value="legendario">Legendario</option><option value="mitico">Mítico</option><option value="divino">Divino</option></select></label>
+                      <label>Valor conceptual común<input id="xi-series-common-value" type="number" min="0" step="1" value="0"></label>
+                      <label>Venta instantánea (€)<input id="xi-series-common-instant" type="number" min="0" step="0.01" value="0.01"></label>
+                      <label class="xi-series-check"><input id="xi-series-common-show-series" type="checkbox" checked> Mostrar serie en las fichas</label>
+                      <label class="xi-series-check"><input id="xi-series-common-show-origin" type="checkbox" checked> Mostrar caja de procedencia</label>
+                      <label class="xi-series-check"><input id="xi-series-common-upgradable" type="checkbox"> Permitir upgrades Dorado y Neón</label>
+                      <label>Normales para Dorado<input id="xi-series-common-gold-required" type="number" min="2" max="100" value="3"></label>
+                      <label>Valor Dorado<input id="xi-series-common-gold-value" type="number" min="0" step="1" value="0"></label>
+                      <label>Dorados para Neón<input id="xi-series-common-neon-required" type="number" min="2" max="100" value="3"></label>
+                      <label>Valor Neón<input id="xi-series-common-neon-value" type="number" min="0" step="1" value="0"></label>
+                      <label class="xi-series-check"><input id="xi-series-common-emoji" type="checkbox"> Habilitar como emojis</label>
+                      <label class="xi-series-check"><input id="xi-series-common-equipable" type="checkbox"> Equipables como decoración de avatar</label>
+                    </div>
+                    <details class="xi-series-decoration-details"><summary>Opciones comunes de decoración (si es equipable)</summary>
+                      <div class="xi-series-common-fields">
+                        <label>Posición X<input id="xi-series-common-pos-x" type="number" min="-90" max="90" value="0"></label>
+                        <label>Posición Y<input id="xi-series-common-pos-y" type="number" min="-90" max="90" value="0"></label>
+                        <label>Tamaño (%)<input id="xi-series-common-scale" type="number" min="30" max="300" value="135"></label>
+                        <label>Rotación (°)<input id="xi-series-common-rotation" type="number" min="-180" max="180" value="0"></label>
+                        <label>Brillo (px)<input id="xi-series-common-glow" type="number" min="0" max="40" value="10"></label>
+                        <label>Animación<select id="xi-series-common-animation"><option value="none">Ninguna</option><option value="float">Flotar</option><option value="pulse">Pulsación</option><option value="spin">Rotación</option><option value="shimmer">Destellos</option></select></label>
+                      </div>
+                    </details>
+                    <div class="xi-series-route-section"><strong>Rutas de upgrades personalizadas para toda la serie</strong><small>Puedes crear rutas ramificadas. Un premio puede sobrescribirlas desde su editor individual.</small><div id="xi-series-common-routes" class="xi-series-route-list"></div><button type="button" id="xi-series-add-common-route" class="inventory-secondary-button compact">+ Añadir ruta común</button></div>
+                  </section>
                   <div id="xi-series-list" class="xi-series-list"></div>
-                  <div class="xi-series-footer"><span id="xi-series-summary">Sin carpeta seleccionada</span><button id="xi-series-reset" type="button" class="inventory-secondary-button compact">Quitar carpeta</button></div>
+                  <div class="xi-series-footer"><span id="xi-series-summary">Sin carpeta seleccionada</span><div class="xi-series-footer-actions"><button id="xi-series-reset" type="button" class="inventory-secondary-button compact">Quitar carpeta</button><button id="xi-series-submit" type="submit" class="inventory-primary-button compact" disabled>Crear caja y premios</button></div></div>
+                  <p id="xi-series-feedback" class="xi-series-feedback" aria-live="polite"></p>
                 </section>
                 <span id="admin-box-probability" class="admin-box-probability">Total: 0%</span>
               </div>
@@ -849,7 +879,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261115-alpha-114"></script>
+<script src="app.js?v=20261116-alpha-115"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
