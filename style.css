@@ -3475,3 +3475,29 @@ html[data-theme="light"] #item-details-modal.xi-item-details-custom #item-detail
 @media(max-width:780px){.xi-series-common-fields{grid-template-columns:1fr}.xi-series-common-fields label:first-child,.xi-series-common-fields label:nth-child(2){grid-column:auto}.xi-series-route-row{grid-template-columns:repeat(2,minmax(0,1fr))}.xi-series-route-row button{width:36px}}
 
 .xi-series-footer-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.xi-series-footer-actions button{width:auto;padding:8px 12px;min-height:33px}.xi-series-feedback{font-size:12px;line-height:1.5;color:var(--text-muted);min-height:16px;white-space:pre-wrap}.xi-series-feedback.error{color:#ff9999}.xi-series-feedback.info{color:#b8c5ff}.xi-series-feedback.success{color:#81e6b1}
+
+/* Alpha 1.16 — Admin item selectors and existing series navigation */
+.xi-admin-item-search,.xi-admin-search-label input{display:block;width:100%;min-width:0;margin:5px 0 7px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:9px;background:var(--composer);color:var(--text);outline:none;font:inherit;font-size:12px}
+.xi-admin-item-search:focus,.xi-admin-search-label input:focus{border-color:#818dff;box-shadow:0 0 0 3px #6573ec24}
+.xi-admin-search-label{display:grid;gap:2px;margin:8px 0 12px;font-size:11px;color:var(--text-muted)}
+.xi-box-existing{margin-top:16px;padding:15px;border:1px solid #838dff55;border-radius:13px;background:linear-gradient(145deg,#7179ff0d,#a48cff09);min-width:0}
+.xi-box-existing-head{display:flex;align-items:start;justify-content:space-between;gap:10px}
+.xi-box-existing-head>div{display:grid;gap:6px}.xi-box-existing-head strong{font-size:14px;color:var(--text)}.xi-box-existing-head small{font-size:11px;line-height:1.5;color:var(--text-faint)}
+#xi-box-existing-count{flex:none;color:#bcc4ff;font-size:11px;font-weight:800}
+.xi-box-existing-list{display:grid;gap:8px;max-height:430px;overflow:auto;scrollbar-width:thin}
+.xi-box-existing-row{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;min-width:0;border-radius:10px;padding:8px;border:1px solid var(--line);background:var(--panel)}
+.xi-box-existing-thumb{width:44px;height:44px;display:grid;place-items:center;border-radius:8px;overflow:hidden;background:var(--composer)}
+.xi-box-existing-thumb img{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain}
+.xi-box-existing-copy{display:grid;gap:3px;min-width:0}.xi-box-existing-copy strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.xi-box-existing-copy small{font-size:10px;color:var(--text-faint)}
+.xi-box-existing-row button{font-size:10px;min-height:34px}
+.xi-box-return{width:max-content;margin-bottom:12px;font-size:12px}
+.xi-decor-wardrobe{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.xi-decor-wardrobe .xi-decor-choice{cursor:default;min-width:0;display:grid;grid-template-columns:43px minmax(0,1fr) auto;padding:10px;border-radius:12px;gap:9px;transition:border-color .18s,background .18s}
+.xi-decor-choice img{width:43px;height:43px;object-fit:contain}
+.xi-decor-choice-copy{min-width:0;display:grid;gap:4px}.xi-decor-choice-copy strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.xi-decor-choice-copy small{font-size:10px;color:var(--text-faint)}
+.xi-decor-choice-action{cursor:pointer;border:1px solid #7d84f1a0;border-radius:8px;background:#5865f2;color:white;font-size:11px;font-weight:800;padding:9px 12px;transition:filter .16s,transform .16s}
+.xi-decor-choice-action:hover:not(:disabled){filter:brightness(1.16);transform:translateY(-1px)}.xi-decor-choice-action.is-equipped,.xi-decor-remove-button{background:#333640;color:#e6e6ef;border:1px solid var(--line-strong)}
+.xi-decor-choice-action:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:650px){.xi-box-existing-row{grid-template-columns:40px minmax(0,1fr)}.xi-box-existing-row button{grid-column:2;justify-self:start}.xi-box-existing-head{flex-direction:column}.xi-decor-wardrobe{grid-template-columns:1fr}}
+
+.xi-admin-select-wrap{display:grid;gap:4px;min-width:0}.xi-admin-select-wrap select{width:100%;min-width:0}.xi-admin-select-wrap .xi-admin-item-search{margin:0 0 3px}
