@@ -7550,11 +7550,35 @@ function xiBankShowPanel(type){
  setText('xi-bank-panel-title',titles[type]||'Banco');setText('xi-bank-feedback','');
  if(!body)return;
  if(type==='bizum') body.innerHTML=`<form id="xi-bank-bizum-form" class="xi-bank-form"><p class="xi-bank-hint">Envía dinero virtual a otro usuario de XIFRE. La transferencia es inmediata y no tiene comisiones.</p><label>Buscar por usuario o @<input id="xi-bank-username" type="search" maxlength="30" placeholder="Username o @usuario" autocomplete="off" required></label><div id="xi-bank-user-results" class="xi-bank-user-results"></div><div id="xi-bank-selected" class="xi-bank-selected hidden"></div><label>Cantidad (€)<input id="xi-bank-send-amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="0.50" required></label><button class="xi-bank-submit" type="submit">Continuar · Enviar Bizum</button></form>`;
- else if(type==='withdraw')body.innerHTML=`<form id="xi-bank-withdraw-form" class="xi-bank-form"><p class="xi-bank-hint">Elige una cantidad. Se descontará de tu cuenta y aparecerá como una moneda individual en tu inventario. Puedes intercambiar esa moneda con un amigo y él podrá depositarla.</p><label>Cantidad a convertir (€)<input id="xi-bank-withdraw-amount" type="number" min="0.01" step="0.01" max="1000000" placeholder="1.00" required></label><button class="xi-bank-submit" type="submit">Convertir en moneda</button></form>`;
+ else if(type==='withdraw')body.innerHTML=`<form id="xi-bank-withdraw-form" class="xi-bank-form"><p class="xi-bank-hint">Elige una cantidad. Se descontará de tu cuenta y aparecerá como una moneda individual en tu inventario. Puedes intercambiar esa moneda con un amigo y él podrá depositarla.</p><label>Cantidad a convertir (€)<input id="xi-bank-withdraw-amount" type="number" min="0.01" step="0.01" max="1000000" placeholder="1.00" required></label><p id="xi-bank-mint-info" class="xi-bank-hint" aria-live="polite">Se permite una moneda cada 2 minutos. Varias acuñaciones rápidas pueden activar una pausa única de 10 minutos.</p><button class="xi-bank-submit" type="submit">Convertir en moneda</button></form>`;
  else if(type==='deposit')body.innerHTML=`<p class="xi-bank-hint">Elige una moneda de tu inventario. Al depositarla, desaparecerá y su importe volverá a tu saldo. Las monedas incluidas en un intercambio activo no están disponibles.</p><div id="xi-bank-deposit-options"></div>`;
  if(type==='deposit')xiBankRenderCoins();
+ if(type==='withdraw')void xiBankFetchMintStatus();
 }
-function xiBankClosePanel(){xiBankPanel='';xiBankRecipient=null;$('#xi-bank-panel')?.classList.add('hidden');$$('.xi-bank-actions button').forEach(b=>b.classList.remove('active'));}
+let xiBankMintNextAt=0,xiBankMintPenalty=false,xiBankMintTimer=null,xiBankMintFetchSeq=0;
+function xiBankMintRenderStatus(){
+ const node=$('#xi-bank-mint-info');if(!node)return;
+ const remain=Math.max(0,Math.ceil((xiBankMintNextAt-Date.now())/1000));
+ const submit=$('#xi-bank-withdraw-form [type="submit"]');if(submit)submit.disabled=Boolean(xiBankBusy||remain>0);
+ if(remain>0){const mm=Math.floor(remain/60),ss=String(remain%60).padStart(2,'0');
+  node.textContent=`${xiBankMintPenalty?'Pausa de seguridad (10 minutos)':'Cooldown de creación'}: ${mm}:${ss} restantes.`;
+ }else node.textContent='Puedes crear una moneda. Después tendrás que esperar 2 minutos; si acuñas varias en poco tiempo, se activará una pausa de 10 minutos.';
+ if(remain===0 && xiBankMintTimer){clearInterval(xiBankMintTimer);xiBankMintTimer=null;}
+}
+async function xiBankFetchMintStatus(){
+ if(!currentUser||!supabase||xiBankPanel!=='withdraw')return;
+ const seq=++xiBankMintFetchSeq,owner=String(currentUser.id);
+ try{
+  const {data,error}=await supabase.rpc('xifre_bank_mint_status');if(error)throw error;
+  if(seq!==xiBankMintFetchSeq||xiBankPanel!=='withdraw'||String(currentUser?.id)!==owner)return;
+  const secs=Math.max(0,Number(data?.seconds_remaining)||0);
+  xiBankMintNextAt=Date.now()+secs*1000;xiBankMintPenalty=Boolean(data?.burst_penalty);
+  if(xiBankMintTimer)clearInterval(xiBankMintTimer);
+  xiBankMintTimer=secs?setInterval(xiBankMintRenderStatus,1000):null;
+  xiBankMintRenderStatus();
+ }catch(error){const node=$('#xi-bank-mint-info');if(node)node.textContent='No se ha podido consultar el cooldown. El servidor verificará el tiempo al crear la moneda.';}
+}
+function xiBankClosePanel(){xiBankPanel='';xiBankRecipient=null;++xiBankMintFetchSeq;if(xiBankMintTimer)clearInterval(xiBankMintTimer);xiBankMintTimer=null;$('#xi-bank-panel')?.classList.add('hidden');$$('.xi-bank-actions button').forEach(b=>b.classList.remove('active'));}
 function xiBankRenderCoins(){
  const list=xiBankCoinList().filter(x=>Number(x.cash_cents)>0);
  const markup=list.length?list.map(coin=>`<div class="xi-bank-coin-option" data-bank-coin="${esc(platformItemKey(coin))}">${xiBankCoinArt(true)}<span><strong>${esc(xiBankEur(coin.cash_cents))}</strong><small>Moneda XIFRE · una copia individual</small></span><button type="button" data-xi-bank-deposit="${esc(platformItemKey(coin))}" ${coin.reserved?'disabled title="Reservada en un intercambio"':''}>${coin.reserved?'Reservada':'Depositar'}</button></div>`).join(''):'<p class="xi-bank-hint">No tienes monedas físicas. Puedes convertir saldo en monedas desde el Banco.</p>';
@@ -7620,7 +7644,11 @@ async function xiBankSubmit(event,type){
  if(amount>platformWalletBalance)return setText('xi-bank-feedback','Saldo insuficiente.');
  if(type==='bizum' && !xiBankRecipient)return setText('xi-bank-feedback','Elige primero al usuario destinatario.');
  const text=type==='bizum'?`¿Enviar ${xiBankEur(amount)} a @${xiBankRecipient.name}?`:`¿Convertir ${xiBankEur(amount)} en una moneda física?`;
- if(!window.confirm(text))return;
+ xiBankBusy=true;
+ let approved=false;
+ try{approved=await askConfirm(type==='bizum'?'Confirmar Bizum':'Crear moneda',text,type==='bizum'?'Enviar Bizum':'Crear moneda');}
+ finally{xiBankBusy=false;}
+ if(!approved)return;
  const owner=String(currentUser.id),button=event.target.querySelector('[type="submit"]');xiBankBusy=true;if(button)button.disabled=true;
  try {
   const opKey=[owner,type,amount,type==='bizum'?xiBankRecipient.id:''].join(':');
@@ -7634,16 +7662,20 @@ async function xiBankSubmit(event,type){
   platformSetWalletUI(data?.balance_cents);
   toast(type==='bizum'?'Bizum enviado correctamente.':'Moneda creada y añadida al inventario.','success');
   xiBankClosePanel();await Promise.all([xiBankLoad(),platformRefreshInventory()]);
- }catch(error){setText('xi-bank-feedback','No se pudo completar: '+friendlyError(error));}
- finally{xiBankBusy=false;if(button)button.disabled=false;}
+ }catch(error){setText('xi-bank-feedback','No se pudo completar: '+friendlyError(error));if(type==='withdraw')void xiBankFetchMintStatus();}
+ finally{xiBankBusy=false;if(button)button.disabled=false;if(type==='withdraw')xiBankMintRenderStatus();}
 }
 async function xiBankDeposit(instanceId){
  const id=String(instanceId||'');const coin=xiBankCoinList().find(c=>platformItemKey(c)===id);
  if(!coin||!coin.cash_cents)return toast('Esta moneda ya no está disponible.','info');
  if(xiBankBusy)return;
  if(coin.reserved)return toast('Esta moneda está reservada.','info');
- if(!window.confirm(`¿Depositar ${xiBankEur(coin.cash_cents)} en tu saldo? La moneda desaparecerá.`))return;
- xiBankBusy=true;const owner=String(currentUser?.id||'');
+ xiBankBusy=true;
+ let approved=false;
+ try{approved=await askConfirm('Depositar moneda',`¿Depositar ${xiBankEur(coin.cash_cents)} en tu saldo? La moneda desaparecerá de tu inventario.`, 'Depositar moneda');}
+ finally{if(!approved)xiBankBusy=false;}
+ if(!approved)return;
+ const owner=String(currentUser?.id||'');
  try{
   const {data,error}=await supabase.rpc('xifre_bank_deposit',{p_instance_id:id});
   if(error)throw error;
@@ -7655,7 +7687,7 @@ async function xiBankDeposit(instanceId){
  }catch(error){toast('No se pudo depositar: '+friendlyError(error),'error');}
  finally{xiBankBusy=false;}
 }
-function xiBankResetSession(){xiBankClosePanel();xiBankRecipient=null;xiBankCoinMap.clear();xiBankHistory=[];xiBankPendingRequest=null;xiBankBusy=false;xiBankLoadRevision++;xiBankRenderCoins();xiBankRenderHistory();}
+function xiBankResetSession(){xiBankClosePanel();xiBankRecipient=null;xiBankCoinMap.clear();xiBankHistory=[];xiBankPendingRequest=null;xiBankBusy=false;xiBankMintNextAt=0;xiBankMintPenalty=false;xiBankLoadRevision++;xiBankRenderCoins();xiBankRenderHistory();}
 
 /* ==================== PLAZA: Canvas Block Breaker ===================== */
 const XI_PLAZA_WIDTH=900, XI_PLAZA_HEIGHT=600;
@@ -7716,10 +7748,16 @@ function xiPlazaStartWave(){
  p.bricks=[];
  const cols=7,rows=Math.min(6,3+Math.floor((p.round-1)/3));
  const gap=9,w=102,h=28,startX=(900-(w+gap)*cols+gap)/2;
+ // Exactamente cinco potenciadores beneficiosos por ronda, distribuidos entre
+ // bloques diferentes. Obstáculo rojo ocasional a partir de la ronda 3.
+ const indices=Array.from({length:cols*rows},(_,i)=>i);
+ for(let i=indices.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[indices[i],indices[j]]=[indices[j],indices[i]];}
+ const powers=new Map(),help=['wide','multi','slow','blast','life'];
+ for(let i=0;i<Math.min(5,indices.length);i++)powers.set(indices[i],help[i]);
+ if(p.round>=3&&Math.random()<.55)powers.set(indices[5],['shrink','sluggish'][Math.floor(Math.random()*2)]);
  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
   const tough=Math.random()<Math.min(.24,.045+Math.max(0,p.round-2)*.022);
-  // Como máximo 3 tipos de ayuda y 2 obstáculos: menos caos visual.
-  const power=Math.random()<.075?(Math.random()<.35?['shrink','sluggish'][Math.floor(Math.random()*2)]:['wide','life','blast'][Math.floor(Math.random()*3)]):null;
+  const power=powers.get(row*cols+col)||null;
   p.bricks.push({x:startX+col*(w+gap),y:80+row*40,w,h,hp:tough?2:1,maxHp:tough?2:1,color:xiPlazaColors[(row+p.round-1)%xiPlazaColors.length],power});
  }
  xiPlazaCreateBall(true);xiPlazaStats();xiPlazaStatus(`Ronda ${p.round}: destruye todos los bloques para ganar 0,03 € virtuales. ¡Cuidado con los potenciadores rojos!`);
@@ -8216,16 +8254,33 @@ function xiDecorStop(){
  if(xiDecorObjectUrl)URL.revokeObjectURL(xiDecorObjectUrl);xiDecorObjectUrl='';xiDecorUpdatePreview.lastFile=null;
  $$('.xi-decor-overlay').forEach(n=>n.remove());$$('.xi-decor-host').forEach(n=>{n.classList.remove('xi-decor-host');delete n.dataset.xiDecorSig;});
 }
-/* ================== ALPHA 1.14 · IMPORTACIÓN DE SERIES ================== */
+/* ================== ALPHA 1.15 · SERIES CON FORMULARIO INDEPENDIENTE ================== */
 let xiSeriesRows=[],xiSeriesSaving=false,xiSeriesRequestId='';
 const XI_SERIES_RARITIES=['comun','poco_comun','raro','epico','legendario','mitico','divino'];
+const XI_SERIES_ANIMATIONS=['none','float','pulse','spin','shimmer'];
+function xiSeriesFeedback(message='',type=''){
+ const el=$('#xi-series-feedback');if(!el)return;
+ el.textContent=String(message||'');el.className='xi-series-feedback'+(type?' '+type:'');
+}
 function xiSeriesCleanName(filename){return String(filename).replace(/\.[^.]+$/,'').trim().slice(0,80);}
 function xiSeriesReset(clearInput=true){
  for(const row of xiSeriesRows)if(row.url)URL.revokeObjectURL(row.url);
  xiSeriesRows=[];xiSeriesRequestId='';
- if(clearInput && $('#xi-series-folder'))$('#xi-series-folder').value='';
+ if(clearInput){
+  if($('#xi-series-folder'))$('#xi-series-folder').value='';
+  $$('#xi-series-common input, #xi-series-common textarea, #xi-series-common select').forEach(el=>{
+   if(el.type==='checkbox')el.checked=el.defaultChecked;
+   else if(el.tagName==='SELECT')el.selectedIndex=0;
+   else el.value=el.defaultValue;
+  });
+  $('#xi-series-common-routes')?.replaceChildren();
+ }
+ $('#xi-series-common')?.classList.add('hidden');
+ if($('#xi-series-submit'))$('#xi-series-submit').disabled=true;
+ xiSeriesFeedback('');
  $('#xi-series-list')?.replaceChildren();setText('xi-series-summary','Sin carpeta seleccionada');
  $('#admin-box-drops')?.classList.remove('hidden');$('#admin-box-add-drop')?.classList.remove('hidden');
+ $$('#admin-box-drops input, #admin-box-drops select, #admin-box-drops button').forEach(el=>{el.disabled=false;});
 }
 function xiSeriesSelectFolder(files){
  if(xiSeriesSaving)return;
@@ -8235,57 +8290,119 @@ function xiSeriesSelectFolder(files){
  if(images.some(f=>!f.size||f.size>XIFRE_SYSTEM_MEDIA_MAX_BYTES)||images.reduce((s,f)=>s+f.size,0)>160*1024*1024){toast('Cada imagen debe pesar menos de 8 MB y la carpeta menos de 160 MB.','error');return;}
  const names=images.map(f=>xiSeriesCleanName(f.name));
  if(names.some(n=>!n)||new Set(names.map(n=>n.toLowerCase())).size!==names.length){toast('Hay nombres de archivos vacíos o repetidos. Renómbralos antes de importar.','error');return;}
+ const hadRows=xiSeriesRows.length>0;
  xiSeriesReset(false);$('#admin-item-is-box').checked=true;platformToggleBoxFields();
  const sorted=images.sort((a,b)=>a.name.localeCompare(b.name,'es'));
- xiSeriesRows=sorted.map((file,i)=>({file,url:URL.createObjectURL(file),name:xiSeriesCleanName(file.name),chance:0,hidden:false,overrides:{}}));
+ xiSeriesRows=sorted.map(file=>({file,url:URL.createObjectURL(file),name:xiSeriesCleanName(file.name),chance:'0.0000',hidden:false,overrides:{}}));
  const total=1000000,base=Math.floor(total/xiSeriesRows.length),remainder=total-base*xiSeriesRows.length;
  xiSeriesRows.forEach((row,i)=>{row.chance=((base+(i<remainder?1:0))/10000).toFixed(4);});
  xiSeriesRequestId=(window.crypto?.randomUUID?.()||`${Date.now()}`);
+ if(!hadRows && !String($('#xi-series-common-name')?.value||'').trim())$('#xi-series-common-name').value=String($('#admin-item-name')?.value||'').trim().slice(0,90);
+ $('#xi-series-common')?.classList.remove('hidden');
+ if($('#xi-series-submit'))$('#xi-series-submit').disabled=false;
+ xiSeriesFeedback('Configura los premios aquí; la rareza y el valor de la caja se configuran en su formulario superior.','info');
  $('#admin-box-drops')?.classList.add('hidden');$('#admin-box-add-drop')?.classList.add('hidden');
+ // Los select required de premios antiguos ocultos bloquearían submit nativo.
+ $$('#admin-box-drops input, #admin-box-drops select, #admin-box-drops button').forEach(el=>{el.disabled=true;});
  xiSeriesRender();
+}
+function xiSeriesSourceChoices(){
+ return [['normal','Normal'],['gold','Dorado'],['neon','Neón'], ...[...xiCustomStyles.values()].map(s=>['custom:'+s.id,s.name])];
+}
+function xiSeriesRouteHTML(route={}){
+ const source=route.source||'normal';
+ const target=route.target||'';
+ const sources=xiSeriesSourceChoices();const styles=[...xiCustomStyles.values()].filter(s=>s.is_active||s.id===target);
+ return `<div class="xi-series-route-row" data-xi-series-route-row>
+ <label>Desde<select data-xi-series-route-field="source">${sources.map(([id,name])=>`<option value="${esc(id)}" ${source===id?'selected':''}>${esc(name)}</option>`).join('')}</select></label>
+ <label>Hacia<select data-xi-series-route-field="target"><option value="">Elige mejora</option>${styles.map(s=>`<option value="${esc(s.id)}" ${target===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label>
+ <label>Copias<input type="number" min="2" max="100" step="1" value="${esc(route.required??3)}" data-xi-series-route-field="required"></label>
+ <label>Nuevo valor<input type="number" min="0" step="1" value="${esc(route.value??0)}" data-xi-series-route-field="value"></label>
+ <button type="button" data-xi-series-remove-route aria-label="Eliminar ruta">✕</button>
+ </div>`;
+}
+function xiSeriesRouteDraft(container){
+ if(!container)return [];
+ return [...container.querySelectorAll('[data-xi-series-route-row]')].map(line=>{
+  const val=field=>line.querySelector(`[data-xi-series-route-field="${field}"]`)?.value||'';
+  return {source:val('source'),target:val('target'),required:val('required'),value:val('value')};
+ });
+}
+function xiSeriesRouteValidated(routes,label){
+ if(routes.length>40)throw new Error(`Máximo 40 rutas en ${label}.`);
+ const unique=new Set();
+ return routes.map((route,i)=>{
+  const source=String(route.source||'normal'),target=String(route.target||'');
+  const count=xiSeriesToSafeInteger(route.required,`copias de ruta ${i+1}`),value=xiSeriesToSafeInteger(route.value,`valor de ruta ${i+1}`);
+  if(!isValidUuid(target)||count<2||count>100||!xiCustomStyles.has(target))throw new Error(`Ruta inválida en ${label}: elige una mejora válida y entre 2 y 100 copias.`);
+  if(unique.has(target))throw new Error(`Se ha repetido una misma mejora de destino en ${label}.`);
+  unique.add(target);
+  if(source==='custom:'+target)throw new Error(`Una mejora no puede transformarse en sí misma en ${label}.`);
+  if(!['normal','gold','neon'].includes(source)&&!(source.startsWith('custom:')&&isValidUuid(source.slice(7))&&xiCustomStyles.has(source.slice(7))))throw new Error(`Origen no válido en ${label}.`);
+  return {source_style_id:source.startsWith('custom:')?source.slice(7):null,source_tier:source==='gold'?1:source==='neon'?2:0,target_style_id:target,copies_required:count,target_value:value};
+ });
 }
 function xiSeriesRender(){
  const host=$('#xi-series-list');if(!host)return;
- const options='<option value="">Común a toda la serie</option>'+XI_SERIES_RARITIES.map(v=>`<option value="${v}">${platformRarity({rarity:v}).label}</option>`).join('');
+ const options='<option value="">Heredar rareza común</option>'+XI_SERIES_RARITIES.map(v=>`<option value="${v}">${platformRarity({rarity:v}).label}</option>`).join('');
+ const inherited='<option value="">Heredar</option><option value="yes">Sí</option><option value="no">No</option>';
+ const animation='<option value="">Heredar animación</option>'+XI_SERIES_ANIMATIONS.map(v=>`<option value="${v}">${v}</option>`).join('');
  host.innerHTML=xiSeriesRows.map((r,i)=>`<article class="xi-series-entry" data-xi-series-index="${i}">
  <img src="${esc(r.url)}" alt="${esc(r.name)}">
  <div class="xi-series-entry-main">
  <div class="xi-series-compact">
  <label>Nombre<input data-xi-series-field="name" maxlength="80" value="${esc(r.name)}"></label>
  <label>Rareza<select data-xi-series-field="rarity">${options}</select></label>
- <label>Valor propio<input type="number" data-xi-series-field="value" min="0" step="1" placeholder="Heredar" value="${esc(r.overrides.value||'')}"></label>
+ <label>Valor propio<input type="number" data-xi-series-field="value" min="0" step="1" placeholder="Heredar" value="${esc(r.overrides.value??'')}"></label>
  <label>Probabilidad %<input type="number" data-xi-series-field="chance" min="0.0001" max="100" step="0.0001" value="${esc(r.chance)}"></label>
  </div>
  <label class="xifre-check-row"><input data-xi-series-field="hidden" type="checkbox" ${r.hidden?'checked':''}> Premio oculto</label>
- <details><summary>✎ Editar individualmente</summary><div class="xi-series-entry-advanced">
- <label>Descripción propia<textarea data-xi-series-field="description" maxlength="1000" rows="2" placeholder="Usar descripción común">${esc(r.overrides.description||'')}</textarea></label>
- <label>Venta instantánea (€)<input data-xi-series-field="instant" type="number" step="0.01" min="0" placeholder="Heredar"></label>
- <label>Upgrades<select data-xi-series-field="upgradable"><option value="">Heredar configuración</option><option value="yes">Permitir</option><option value="no">No permitir</option></select></label>
- <label>Copias para Dorado<input data-xi-series-field="gold_required" type="number" min="2" max="100" placeholder="Heredar"></label>
- <label>Valor Dorado<input data-xi-series-field="gold_value" type="number" min="0" step="1" placeholder="Heredar"></label>
- <label>Copias para Neón<input data-xi-series-field="neon_required" type="number" min="2" max="100" placeholder="Heredar"></label>
- <label>Valor Neón<input data-xi-series-field="neon_value" type="number" min="0" step="1" placeholder="Heredar"></label>
- <label>Emoji personalizado<select data-xi-series-field="emoji"><option value="">Heredar configuración</option><option value="yes">Sí (código desde nombre)</option><option value="no">No</option></select></label>
- <label>Decoración de perfil<select data-xi-series-field="equipable"><option value="">Heredar configuración</option><option value="yes">Sí</option><option value="no">No</option></select></label>
- </div><small>Las rutas avanzadas se heredan del formulario principal. Podrás modificarlas después desde «Editar objeto».</small></details>
+ <details><summary>✎ Personalizar este premio (sobrescribe solo sus opciones)</summary><div class="xi-series-entry-advanced">
+ <label>Descripción propia<textarea data-xi-series-field="description" maxlength="1000" rows="2" placeholder="Heredar descripción">${esc(r.overrides.description??'')}</textarea></label>
+ <label>Venta instantánea propia (€)<input data-xi-series-field="instant" type="number" step="0.01" min="0" placeholder="Heredar" value="${esc(r.overrides.instant??'')}"></label>
+ <label>Upgrades Dorado/Neón<select data-xi-series-field="upgradable">${inherited}</select></label>
+ <label>Normales para Dorado<input data-xi-series-field="gold_required" type="number" min="2" max="100" placeholder="Heredar" value="${esc(r.overrides.gold_required??'')}"></label>
+ <label>Valor Dorado<input data-xi-series-field="gold_value" type="number" min="0" step="1" placeholder="Heredar" value="${esc(r.overrides.gold_value??'')}"></label>
+ <label>Dorados para Neón<input data-xi-series-field="neon_required" type="number" min="2" max="100" placeholder="Heredar" value="${esc(r.overrides.neon_required??'')}"></label>
+ <label>Valor Neón<input data-xi-series-field="neon_value" type="number" min="0" step="1" placeholder="Heredar" value="${esc(r.overrides.neon_value??'')}"></label>
+ <label>Mostrar serie<select data-xi-series-field="show_series">${inherited}</select></label>
+ <label>Mostrar caja de procedencia<select data-xi-series-field="show_source_box">${inherited}</select></label>
+ <label>Emoji personalizado<select data-xi-series-field="emoji">${inherited}</select></label>
+ <label>Decoración de perfil<select data-xi-series-field="equipable">${inherited}</select></label>
+ <label>Posición X<input data-xi-series-field="pos_x" type="number" min="-90" max="90" placeholder="Heredar" value="${esc(r.overrides.pos_x??'')}"></label>
+ <label>Posición Y<input data-xi-series-field="pos_y" type="number" min="-90" max="90" placeholder="Heredar" value="${esc(r.overrides.pos_y??'')}"></label>
+ <label>Tamaño (%)<input data-xi-series-field="scale" type="number" min="30" max="300" placeholder="Heredar" value="${esc(r.overrides.scale??'')}"></label>
+ <label>Rotación (°)<input data-xi-series-field="rotation" type="number" min="-180" max="180" placeholder="Heredar" value="${esc(r.overrides.rotation??'')}"></label>
+ <label>Brillo (px)<input data-xi-series-field="glow" type="number" min="0" max="40" placeholder="Heredar" value="${esc(r.overrides.glow??'')}"></label>
+ <label>Animación de avatar<select data-xi-series-field="animation">${animation}</select></label>
+ <section class="xi-series-route-section"><label class="xi-series-check"><input data-xi-series-field="own_routes" type="checkbox" ${r.overrides.own_routes?'checked':''}> Utilizar rutas individuales en este premio</label>
+ <div class="xi-series-route-list" data-xi-series-item-routes="${i}">${(r.overrides.routes||[]).map(xiSeriesRouteHTML).join('')}</div>
+ <button type="button" class="inventory-secondary-button compact" data-xi-series-add-route="${i}">+ Añadir ruta individual</button></section>
+ </div></details>
  </div></article>`).join('');
- for(const [i,row] of xiSeriesRows.entries()){
-  const block=host.children[i];if(!block)continue;
-  for(const key of ['rarity','instant','upgradable','gold_required','gold_value','neon_required','neon_value','emoji','equipable']){
-   const field=block.querySelector(`[data-xi-series-field="${key}"]`);if(field)field.value=row.overrides[key]||'';
+ xiSeriesRows.forEach((r,i)=>{
+  const node=host.children[i];if(!node)return;
+  for(const key of ['rarity','upgradable','show_series','show_source_box','emoji','equipable','animation']){
+   const field=node.querySelector(`[data-xi-series-field="${key}"]`);if(field)field.value=r.overrides[key]??'';
   }
- }
- setText('xi-series-summary',`${xiSeriesRows.length} archivos · ${xiSeriesRows.reduce((sum,row)=>sum+Number(row.chance),0).toFixed(4)}% de probabilidad`);
+  const holder=node.querySelector('[data-xi-series-item-routes]');if(holder)holder.classList.toggle('hidden',!r.overrides.own_routes);
+ });
+ xiSeriesSummary();
 }
+function xiSeriesSummary(){setText('xi-series-summary',`${xiSeriesRows.length} archivos · ${xiSeriesRows.reduce((sum,row)=>sum+Math.round(Number(row.chance||0)*10000),0)/10000}% total`);}
 function xiSeriesChange(event){
  const control=event.target.closest('[data-xi-series-field]');if(!control)return;
- const index=Number(control.closest('[data-xi-series-index]')?.dataset.xiSeriesIndex);
- const row=xiSeriesRows[index];if(!row)return;
- const key=control.dataset.xiSeriesField;
- const value=control.type==='checkbox'?control.checked:control.value;
- if(['name','chance','hidden'].includes(key))row[key]=value;
- else row.overrides[key]=value;
- if(key==='chance')setText('xi-series-summary',`${xiSeriesRows.length} archivos · ${xiSeriesRows.reduce((sum,entry)=>sum+Number(entry.chance),0).toFixed(4)}% de probabilidad`);
+ const index=Number(control.closest('[data-xi-series-index]')?.dataset.xiSeriesIndex),row=xiSeriesRows[index];if(!row)return;
+ const key=control.dataset.xiSeriesField,value=control.type==='checkbox'?control.checked:control.value;
+ if(['name','chance','hidden'].includes(key))row[key]=value;else row.overrides[key]=value;
+ if(key==='chance')xiSeriesSummary();
+ if(key==='own_routes')control.closest('.xi-series-route-section')?.querySelector('.xi-series-route-list')?.classList.toggle('hidden',!value);
+}
+function xiSeriesRouteInput(event){
+ const line=event.target.closest('[data-xi-series-route-row]');if(!line)return;
+ const list=line.parentElement;
+ const index=list.hasAttribute('data-xi-series-item-routes')?Number(list.dataset.xiSeriesItemRoutes):null;
+ if(index!==null && xiSeriesRows[index])xiSeriesRows[index].overrides.routes=xiSeriesRouteDraft(list);
 }
 function xiSeriesToSafeInteger(value,label){
  if(!/^\d+$/.test(String(value))||!Number.isSafeInteger(Number(value))||Number(value)>9000000000000000)throw new Error('Revisa '+label+'.');
@@ -8295,88 +8412,109 @@ function xiSeriesSlug(name,index){
  let code=String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9_]/g,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'').slice(0,23);
  if(!/^[a-z]/.test(code))code='xi_'+code;
  if(code.length<2)code='xi_'+index;
- return code.slice(0,26);
+ // Prefijo estable de la importación: evita conflictos de emojis con series
+ // anteriores que tengan archivos del mismo nombre.
+ const suffix=String(xiSeriesRequestId||'').replace(/[^a-f0-9]/gi,'').slice(0,8).toLowerCase();
+ return `${code.slice(0,17)}_${suffix||'nuevo'}`.slice(0,26);
+}
+function xiSeriesCommonConfig(){
+ const get=n=>String($(`#xi-series-common-${n}`)?.value??'').trim();
+ const checked=n=>Boolean($(`#xi-series-common-${n}`)?.checked);
+ const name=get('name');if(!name||name.length>90)throw new Error('Escribe el nombre de la serie en el formulario común de premios.');
+ const cfg={series_name:name,description:get('description'),rarity:get('rarity'),
+  value:xiSeriesToSafeInteger(get('value'),'valor común'),instant_sell_cents:platformMoneyToCents(get('instant')),
+  show_series:checked('show-series'),show_source_box:checked('show-origin'),upgrade_enabled:checked('upgradable'),
+  gold_required:xiSeriesToSafeInteger(get('gold-required'),'copias para Dorado'),gold_value:xiSeriesToSafeInteger(get('gold-value'),'valor Dorado'),
+  neon_required:xiSeriesToSafeInteger(get('neon-required'),'copias para Neón'),neon_value:xiSeriesToSafeInteger(get('neon-value'),'valor Neón'),
+  emoji_enabled:checked('emoji'),decoration:{enabled:checked('equipable'),
+   pos_x:Number(get('pos-x')),pos_y:Number(get('pos-y')),scale:Number(get('scale'))/100,
+   rotation:Number(get('rotation')),glow:Number(get('glow')),animation:get('animation')||'none'},
+  routes:xiSeriesRouteValidated(xiSeriesRouteDraft($('#xi-series-common-routes')),'la serie')};
+ if(cfg.description.length>1000||!XI_SERIES_RARITIES.includes(cfg.rarity)||!Number.isSafeInteger(cfg.instant_sell_cents)||cfg.instant_sell_cents<0||
+  cfg.gold_required<2||cfg.gold_required>100||cfg.neon_required<2||cfg.neon_required>100)throw new Error('Revisa los valores de la configuración común de premios.');
+ return cfg;
+}
+function xiSeriesValidateDecoration(config,label){
+ const vals=['pos_x','pos_y','rotation','glow'];
+ if(vals.some(v=>!Number.isInteger(config[v]))||!Number.isFinite(config.scale)||config.pos_x< -90||config.pos_x>90||config.pos_y< -90||config.pos_y>90||config.scale<.30||config.scale>3||config.rotation< -180||config.rotation>180||config.glow<0||config.glow>40||!XI_SERIES_ANIMATIONS.includes(config.animation))throw new Error('Decoración inválida en '+label+'.');
 }
 async function xiSeriesSave(){
  if(!isXifreAdmin||!currentUser||xiSeriesSaving)return;
  if(platformAdminEditingItemId)throw new Error('La importación desde carpeta solo está disponible al crear una caja nueva.');
- if(!$('#admin-item-is-box')?.checked || !xiSeriesRows.length)throw new Error('Selecciona una caja y una carpeta.');
- const boxFile=$('#admin-item-image')?.files?.[0];if(!boxFile)throw new Error('Selecciona también la imagen de la caja.');
- const common={
-  name:String($('#admin-item-name')?.value||'').trim(),description:String($('#admin-item-description')?.value||'').trim(),
-  rarity:$('#admin-item-rarity')?.value||'comun',value:xiSeriesToSafeInteger($('#admin-item-value')?.value,'valor común'),
+ if(!$('#admin-item-is-box')?.checked||!xiSeriesRows.length)throw new Error('Selecciona una caja y una carpeta.');
+ const boxFile=$('#admin-item-image')?.files?.[0];if(!boxFile)throw new Error('Selecciona la imagen de la caja (en el formulario de la caja).');
+ const common=xiSeriesCommonConfig();
+ const box={name:String($('#admin-item-name')?.value||'').trim(),description:String($('#admin-item-description')?.value||'').trim(),
+  rarity:$('#admin-item-rarity')?.value||'comun',value:xiSeriesToSafeInteger($('#admin-item-value')?.value,'valor de la caja'),
   instant_sell_cents:platformMoneyToCents($('#admin-item-instant-price')?.value||'0.01'),
-  series_name:String($('#admin-item-series')?.value||'').trim(),show_series:!!$('#admin-item-show-series')?.checked,
-  show_source_box:!!$('#admin-item-show-origin')?.checked,
-  upgrade_enabled:!!$('#admin-item-upgradable')?.checked,
-  emoji_enabled:!!$('#admin-item-emoji-enabled')?.checked,decoration:xiDecorConfigFromForm(),
-  gold_required:Number($('#admin-item-gold-count')?.value||3), gold_value:xiSeriesToSafeInteger($('#admin-item-gold-value')?.value||'0','valor Dorado'),
-  neon_required:Number($('#admin-item-neon-count')?.value||3),neon_value:xiSeriesToSafeInteger($('#admin-item-neon-value')?.value||'0','valor Neón')
- };
- if(!common.name||common.name.length>80 || !common.series_name)throw new Error('Escribe el nombre de la caja y el nombre de la serie.');
- const routes=xiReadRouteRows();
- let total=0;
+  series_name:common.series_name,show_series:common.show_series};
+ if(!box.name||box.name.length>80||box.description.length>1000||!XI_SERIES_RARITIES.includes(box.rarity))throw new Error('Revisa el nombre, rareza, descripción o valor de la caja.');
+ const total=xiSeriesRows.reduce((sum,r)=>sum+Math.round(Number(r.chance||0)*10000),0);
+ if(total!==1000000)throw new Error(`Las probabilidades deben sumar 100 %. Ahora: ${(total/10000).toFixed(4)} %.`);
  const usedShortcodes=new Set();
  const draft=xiSeriesRows.map((r,i)=>{
-  const o=r.overrides;
-  const n=String(r.name||'').trim();if(!n||n.length>80)throw new Error('Nombre inválido en la imagen '+(i+1));
-  const chance=Number(r.chance);if(!Number.isFinite(chance)||chance<=0||!/^\d+(?:\.\d{1,4})?$/.test(String(r.chance)))throw new Error('Probabilidad inválida de '+n);
-  total+=chance;
-  const integer=(key,fallback)=>o[key]!==undefined&&String(o[key])!==''?xiSeriesToSafeInteger(o[key],key+' de '+n):fallback;
-  const emoji=o.emoji==='yes' || (o.emoji!=='no' && common.emoji_enabled);
+  const o=r.overrides,n=String(r.name||'').trim();
+  if(!n||n.length>80)throw new Error('Nombre inválido del premio '+(i+1));
+  const chance=Number(r.chance);
+  if(!Number.isFinite(chance)||chance<=0||!/^(?:\d+)(?:\.\d{1,4})?$/.test(String(r.chance)))throw new Error('Probabilidad inválida de '+n);
+  const integer=(key,fallback)=>o[key]!==undefined&&String(o[key])!==''?xiSeriesToSafeInteger(o[key],`${key} de ${n}`):fallback;
+  const bool=(key,defaultValue)=>o[key]==='yes'?true:o[key]==='no'?false:defaultValue;
+  const emoji=bool('emoji',common.emoji_enabled);
   let shortcode=emoji?xiSeriesSlug(n,i+1):'';
-  if(emoji){let count=2;const root=shortcode;while(usedShortcodes.has(shortcode)){shortcode=`${root.slice(0,22)}_${count++}`;}usedShortcodes.add(shortcode);}
-  return {
-   name:n,description:String(o.description||common.description),rarity:o.rarity||common.rarity,
-   value:integer('value',common.value),instant_sell_cents:o.instant!==undefined&&String(o.instant)!==''?platformMoneyToCents(o.instant):common.instant_sell_cents,
+  if(emoji){let count=2;const root=shortcode;while(usedShortcodes.has(shortcode))shortcode=`${root.slice(0,22)}_${count++}`;usedShortcodes.add(shortcode);}
+  const equipable=bool('equipable',common.decoration.enabled);
+  const decoration={...common.decoration,enabled:equipable};
+  for(const k of ['pos_x','pos_y','rotation','glow'])if(o[k]!==undefined&&String(o[k])!=='')decoration[k]=Number(o[k]);
+  if(o.scale!==undefined&&String(o.scale)!=='')decoration.scale=Number(o.scale)/100;
+  if(o.animation)decoration.animation=o.animation;
+  xiSeriesValidateDecoration(decoration,n);
+  const routes=o.own_routes?xiSeriesRouteValidated(o.routes||[],n):common.routes;
+  return {name:n,description:o.description!==undefined&&o.description!==''?String(o.description):common.description,
+   rarity:o.rarity||common.rarity,value:integer('value',common.value),
+   instant_sell_cents:o.instant!==undefined&&String(o.instant)!==''?platformMoneyToCents(o.instant):common.instant_sell_cents,
    chance:Number(chance.toFixed(4)),hidden:!!r.hidden,
-   upgrade_enabled:o.upgradable==='yes'?true:o.upgradable==='no'?false:common.upgrade_enabled,
-   gold_required:integer('gold_required',common.gold_required), gold_value:integer('gold_value',common.gold_value),
-   neon_required:integer('neon_required',common.neon_required),neon_value:integer('neon_value',common.neon_value),
-   emoji_enabled:emoji,emoji_shortcode:shortcode,
-   show_series:common.show_series,show_source_box:common.show_source_box,routes,
-   decoration:{...common.decoration,enabled:o.equipable==='yes'?true:o.equipable==='no'?false:common.decoration.enabled}
-  };
+   upgrade_enabled:bool('upgradable',common.upgrade_enabled),gold_required:integer('gold_required',common.gold_required),
+   gold_value:integer('gold_value',common.gold_value),neon_required:integer('neon_required',common.neon_required),neon_value:integer('neon_value',common.neon_value),
+   emoji_enabled:emoji,emoji_shortcode:shortcode,show_series:bool('show_series',common.show_series),show_source_box:bool('show_source_box',common.show_source_box),
+   routes,decoration};
  });
- if(Math.abs(total-100)>0.00001)throw new Error('Las probabilidades deben sumar 100%. Total: '+total.toFixed(4)+'%.');
  if(new Set(draft.map(r=>r.name.toLowerCase())).size!==draft.length)throw new Error('Hay objetos con nombres repetidos.');
- if(draft.some(row=>row.gold_required<2||row.gold_required>100||row.neon_required<2||row.neon_required>100))throw new Error('Las mejoras necesitan entre 2 y 100 copias.');
- if(draft.some(row=>row.instant_sell_cents<0))throw new Error('El precio debe ser positivo o cero.');
- const uploaded=[];let committed=false;xiSeriesSaving=true;
+ if(draft.some(r=>r.gold_required<2||r.gold_required>100||r.neon_required<2||r.neon_required>100||r.instant_sell_cents<0||!Number.isSafeInteger(r.instant_sell_cents)))throw new Error('Alguno de los premios tiene un precio o requisito de upgrade inválido.');
+ const uploaded=[];let rpcStarted=false,committed=false;xiSeriesSaving=true;
+ if($('#xi-series-submit'))$('#xi-series-submit').disabled=true;
+ xiSeriesFeedback(`Creando la caja y ${draft.length} premios. Conserva esta pestaña abierta…`,'info');
  const generation=platformSessionGeneration,uid=String(currentUser.id);
  try{
   platformSetMessage('admin-item-message','Subiendo imagen de la caja…','info');
   const boxPath=await platformUploadImage(boxFile,'items');uploaded.push(boxPath);
   const out=[];
-  // Lotes limitados: evitamos sobrecargar Supabase Storage.
   for(let start=0;start<xiSeriesRows.length;start+=3){
-   if(generation!==platformSessionGeneration || String(currentUser?.id)!==uid)throw new Error('La sesión ha cambiado. Importación cancelada.');
-   platformSetMessage('admin-item-message',`Subiendo imágenes ${start+1}–${Math.min(start+3,xiSeriesRows.length)} de ${xiSeriesRows.length}…`,'info');
-   const chunk=xiSeriesRows.slice(start,start+3);
-   const paths=await Promise.all(chunk.map(async row=>{
-    const path=await platformUploadImage(row.file,'items');uploaded.push(path);return path;
-   }));
+   if(generation!==platformSessionGeneration||String(currentUser?.id)!==uid)throw new Error('La sesión ha cambiado. Importación cancelada.');
+   platformSetMessage('admin-item-message',`Subiendo premios ${start+1}–${Math.min(start+3,xiSeriesRows.length)} de ${xiSeriesRows.length}…`,'info');
+   const settled=await Promise.allSettled(xiSeriesRows.slice(start,start+3).map(row=>platformUploadImage(row.file,'items')));
+   const paths=settled.map(r=>{if(r.status==='fulfilled')uploaded.push(r.value);return r.status==='fulfilled'?r.value:null;});
+   const failed=settled.find(r=>r.status==='rejected');if(failed)throw failed.reason;
    out.push(...paths);
   }
-  const payload=draft.map((row,i)=>({...row,image_path:out[i]}));
-  const {data,error}=await supabase.rpc('xifre_admin_create_box_series',{
-   p_box:{...common,image_path:boxPath},p_items:payload,p_request_id:xiSeriesRequestId
-  });
+  const payload=draft.map((r,i)=>({...r,image_path:out[i]}));
+  rpcStarted=true;
+  const {data,error}=await supabase.rpc('xifre_admin_create_box_series',{p_box:{...box,image_path:boxPath},p_items:payload,p_request_id:xiSeriesRequestId});
   if(error)throw error;
   committed=true;
-  if(data?.duplicate){for(const path of uploaded)await platformDeleteImage(path);}
-  platformSetMessage('admin-item-message',`Caja creada: ${data?.created?.length||draft.length} premios nuevos.`,'success');
+  if(data?.duplicate)for(const path of uploaded)await platformDeleteImage(path);
   xiSeriesReset();platformResetItemForm();
   await Promise.all([platformLoadItemFeatures(true),platformLoadBoxMeta(),xiLoadCustomCatalog(true)]);
-  await platformLoadAdminData();toast('Caja y serie creadas correctamente.','success');
+  await platformLoadAdminData();toast('Caja y serie creadas correctamente: '+(data?.created?.length||draft.length)+' premios.','success');
  }catch(error){
-  // Un error de red después del commit puede ser ambiguo. Nunca borrar imágenes
-  // si el resultado del RPC es desconocido; el request_id permite reintentar.
-  if(!committed && !(error?.message||'').includes('fetch') && !(error?.message||'').includes('network')){
-   for(const path of uploaded)await platformDeleteImage(path);
-  }
-  throw error;
- }finally{xiSeriesSaving=false;}
+  // Si el servidor pudo haber confirmado la operación pero se perdió la respuesta,
+  // se preservan las imágenes para permitir reintento con el mismo request_id.
+  const ambiguous=rpcStarted && (/network|fetch|timeout|abort|desconex|connection/i.test(String(error?.message||'')));
+  if(!committed&&!ambiguous)for(const path of uploaded)await platformDeleteImage(path);
+  const message='No se pudo guardar la serie. Tus archivos y ajustes siguen seleccionados. '+friendlyError(error);
+  xiSeriesFeedback(message,'error');
+  $('#xi-series-import')?.scrollIntoView({behavior:'smooth',block:'start'});
+  throw new Error(message);
+ }finally{xiSeriesSaving=false;if($('#xi-series-submit'))$('#xi-series-submit').disabled=xiSeriesRows.length===0;}
 }
 function xiDecorSeriesBind(){
  $('#xi-decor-enabled')?.addEventListener('change',xiDecorUpdatePreview);
@@ -8387,6 +8525,25 @@ function xiDecorSeriesBind(){
  $('#xi-series-reset')?.addEventListener('click',xiSeriesReset);
  $('#xi-series-list')?.addEventListener('input',xiSeriesChange);
  $('#xi-series-list')?.addEventListener('change',xiSeriesChange);
+ const routeContainer=$('#xi-series-import');
+ routeContainer?.addEventListener('input',xiSeriesRouteInput);
+ routeContainer?.addEventListener('change',xiSeriesRouteInput);
+ routeContainer?.addEventListener('click',event=>{
+  const addCommon=event.target.closest('#xi-series-add-common-route');
+  const addIndividual=event.target.closest('[data-xi-series-add-route]');
+  const remove=event.target.closest('[data-xi-series-remove-route]');
+  if(addCommon){event.preventDefault();$('#xi-series-common-routes')?.insertAdjacentHTML('beforeend',xiSeriesRouteHTML());}
+  if(addIndividual){event.preventDefault();const index=Number(addIndividual.dataset.xiSeriesAddRoute),row=xiSeriesRows[index];if(!row)return;
+   row.overrides.own_routes=true;
+   const item=addIndividual.closest('.xi-series-entry'),chk=item?.querySelector('[data-xi-series-field="own_routes"]');if(chk)chk.checked=true;
+   const holder=item?.querySelector('[data-xi-series-item-routes]');holder?.classList.remove('hidden');holder?.insertAdjacentHTML('beforeend',xiSeriesRouteHTML());
+   row.overrides.routes=xiSeriesRouteDraft(holder);
+  }
+  if(remove){event.preventDefault();const list=remove.closest('.xi-series-route-list');remove.closest('.xi-series-route-row')?.remove();
+   const index=list?.hasAttribute('data-xi-series-item-routes')?Number(list.dataset.xiSeriesItemRoutes):null;
+   if(index!==null&&xiSeriesRows[index])xiSeriesRows[index].overrides.routes=xiSeriesRouteDraft(list);
+  }
+ });
  document.addEventListener('click',event=>{
   const button=event.target.closest('[data-xi-decor-equip]');
   if(button){event.preventDefault();void xiDecorEquip(button.dataset.xiDecorEquip);}
