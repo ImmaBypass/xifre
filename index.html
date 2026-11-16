@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261116-alpha-116">
+<link rel="stylesheet" href="style.css?v=20261116-alpha-117">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -302,7 +302,8 @@
                     <input id="xi-series-folder" type="file" webkitdirectory directory multiple accept="image/png,image/jpeg,image/webp,image/gif">
                   </label>
                   <section id="xi-series-common" class="xi-series-common hidden" aria-label="Configuración común de los premios">
-                    <div class="xi-series-common-head"><strong>Configuración principal de los objetos</strong><small>Independiente de los datos de la caja. Se hereda en todos los premios salvo que edites uno individualmente.</small></div>
+                    <div class="xi-series-common-head"><strong id="xi-series-common-heading">Configuración principal de los objetos</strong><small id="xi-series-common-explanation">Independiente de los datos de la caja. Se hereda en todos los premios salvo que edites uno individualmente.</small></div>
+                    <div id="xi-series-bulk-notice" class="xi-series-bulk-notice hidden" role="status">Estos valores se aplicarán a <b>todos los objetos de esta serie</b>. No se cambiarán sus nombres, imágenes, probabilidades, premios ocultos ni las copias que tengan los usuarios. Las configuraciones individuales de los campos aplicados quedarán sustituidas.</div>
                     <div class="xi-series-common-fields">
                       <label>Nombre de la serie<input id="xi-series-common-name" maxlength="90" placeholder="Ej. Colección Galaxia"></label>
                       <label>Descripción para todos<textarea id="xi-series-common-description" maxlength="1000" rows="2" placeholder="Descripción que tendrán los premios"></textarea></label>
@@ -331,6 +332,10 @@
                     </details>
                     <div class="xi-series-route-section"><strong>Rutas de upgrades personalizadas para toda la serie</strong><small>Puedes crear rutas ramificadas. Un premio puede sobrescribirlas desde su editor individual.</small><div id="xi-series-common-routes" class="xi-series-route-list"></div><button type="button" id="xi-series-add-common-route" class="inventory-secondary-button compact">+ Añadir ruta común</button></div>
                   </section>
+                  <div id="xi-series-bulk-actions" class="xi-series-bulk-actions hidden">
+                    <span id="xi-series-bulk-feedback" role="status" aria-live="polite"></span>
+                    <button id="xi-series-bulk-apply" class="inventory-primary-button" type="button">Aplicar configuración a todos los objetos</button>
+                  </div>
                   <label class="xi-admin-search-label" for="xi-series-filter">Buscar en los objetos importados<input id="xi-series-filter" type="search" placeholder="Nombre del archivo…" autocomplete="off"></label>
                   <div id="xi-series-list" class="xi-series-list"></div>
                   <div class="xi-series-footer"><span id="xi-series-summary">Sin carpeta seleccionada</span><div class="xi-series-footer-actions"><button id="xi-series-reset" type="button" class="inventory-secondary-button compact">Quitar carpeta</button><button id="xi-series-submit" type="submit" class="inventory-primary-button compact" disabled>Crear caja y premios</button></div></div>
@@ -887,7 +892,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261116-alpha-116"></script>
+<script src="app.js?v=20261116-alpha-117"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
