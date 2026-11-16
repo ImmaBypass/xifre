@@ -4600,6 +4600,7 @@ function platformOpenItemDetails(key, source = 'collection') {
   button?.classList.add('hidden');
   button?.removeAttribute('data-box-instance');
   if (platformItemIsBox(item)) void platformRenderBoxPreview(item,source);
+  xiDecorDetailsKey=source==='collection'?String(key):'';
   xiDecorShowItemAction(item,source);
   openModal('item-details-modal');
 }
@@ -4822,17 +4823,59 @@ async function platformUpgradeItem(itemId,tier){
    {preset:'neon',name:'NEÓN',symbol:'✺',color_a:'#34fdeb',color_b:'#b47aff',reveal_effect:'portal',fx_config:{colors:['#34fdeb','#b47aff']}});
  }catch(error){toast(friendlyError(error),'error');if(button)button.disabled=false;}
 }
+/* Alpha 1.16 — same searchable selector in every admin object picker. */
+const xiAdminSelectStates=new WeakMap();
+function xiAdminNormalizeSearch(value){
+ return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim();
+}
+function xiAdminSearchableSelect(select,placeholder='Buscar objeto por nombre…'){
+ if(!select)return;
+ let state=xiAdminSelectStates.get(select);
+ if(!state){
+  const search=document.createElement('input');search.type='search';search.autocomplete='off';
+  search.className='xi-admin-item-search';search.placeholder=placeholder;
+  search.setAttribute('aria-label',placeholder);
+  // Los premios de caja utilizan una cuadrícula de cuatro columnas.
+  // Mantener el buscador y el SELECT dentro de la misma columna.
+  if(select.classList.contains('admin-box-drop-item') && select.parentElement?.classList.contains('admin-box-drop-row')){
+   const wrapper=document.createElement('div');wrapper.className='xi-admin-select-wrap';
+   select.parentElement.insertBefore(wrapper,select);wrapper.append(search,select);
+  }else select.parentElement?.insertBefore(search,select);
+  state={search,options:[]};xiAdminSelectStates.set(select,state);
+  search.addEventListener('input',()=>xiAdminFilterSelect(select));
+ }
+ state.options=Array.from(select.options).map(opt=>({value:opt.value,text:opt.textContent,disabled:opt.disabled}));
+ xiAdminFilterSelect(select);
+}
+function xiAdminFilterSelect(select){
+ const state=xiAdminSelectStates.get(select);if(!state)return;
+ const query=xiAdminNormalizeSearch(state.search.value),selected=select.value;
+ const visible=state.options.filter((o,i)=>i===0||!query||xiAdminNormalizeSearch(o.text).includes(query)||o.value===selected);
+ const fragment=document.createDocumentFragment();
+ for(const row of visible){const opt=document.createElement('option');opt.value=row.value;opt.textContent=row.text;opt.disabled=row.disabled;fragment.appendChild(opt);}
+ select.replaceChildren(fragment);
+ if(visible.some(o=>o.value===selected))select.value=selected;
+ else select.value='';
+}
+function xiAdminFilterEntries(container,selector,query,readName){
+ if(!container)return;
+ const q=xiAdminNormalizeSearch(query);
+ container.querySelectorAll(selector).forEach(node=>{
+  node.classList.toggle('hidden',!!q&&!xiAdminNormalizeSearch(readName(node)).includes(q));
+ });
+}
 function platformPopulateOriginBoxSelect(){
  const select=$('#admin-item-origin-box');if(!select)return;
  const previous=select.value;
  select.innerHTML='<option value="">Ninguna / no indicar</option>'+platformAdminItems.filter(item=>item.is_box).map(box=>`<option value="${esc(box.id)}">${esc(box.name)}</option>`).join('');
  if(previous && select.querySelector(`option[value="${CSS.escape(previous)}"]`))select.value=previous;
+ xiAdminSearchableSelect(select,'Buscar caja de procedencia…');
 }
 function platformPopulateItemFeatureEditor(item){
  const field=(id,value)=>{const el=$('#'+id);if(el)el.value=value??'';};
  const checkbox=(id,value)=>{const el=$('#'+id);if(el)el.checked=Boolean(value);};
  field('admin-item-series',item?.series_name||'');checkbox('admin-item-show-series',item?.show_series);
- platformPopulateOriginBoxSelect();field('admin-item-origin-box',item?.source_box_id||'');checkbox('admin-item-show-origin',item?.show_source_box);
+ platformPopulateOriginBoxSelect();const origin=$('#admin-item-origin-box'),search=xiAdminSelectStates.get(origin);if(search){search.search.value='';xiAdminFilterSelect(origin);}field('admin-item-origin-box',item?.source_box_id||'');checkbox('admin-item-show-origin',item?.show_source_box);
  checkbox('admin-item-upgradable',item?.upgrade_enabled);field('admin-item-gold-count',item?.gold_required||3);
  field('admin-item-gold-value',item?.gold_value??0);field('admin-item-neon-count',item?.neon_required||3);field('admin-item-neon-value',item?.neon_value??0);
  checkbox('admin-item-emoji-enabled',item?.emoji_enabled);field('admin-item-emoji-code',item?.emoji_shortcode||'');
@@ -5351,6 +5394,7 @@ function platformRenderAdminItems() {
       <div class="admin-item-row-actions"><button type="button" class="inventory-secondary-button compact" data-admin-edit-item="${esc(item.id)}">Editar</button><button type="button" class="inventory-secondary-button compact" data-admin-toggle-item="${esc(item.id)}" data-enabled="${item.active ? 'false' : 'true'}">${item.active ? 'Desactivar' : 'Activar'}</button></div>
     </article>`;
   }).join(''));
+  xiAdminFilterEntries(list,'.admin-item-row',$('#xi-admin-catalog-search')?.value,node=>node.querySelector('.admin-item-row-copy strong')?.textContent||'');
 }
 function platformPopulateGrantItemSelect() {
   const select = $('#admin-grant-item');
@@ -5358,6 +5402,7 @@ function platformPopulateGrantItemSelect() {
   const selected = select.value;
   select.innerHTML = '<option value="">Selecciona un objeto...</option>' + platformAdminItems.filter(item => item.active).map(item => `<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}</option>`).join('');
   if (selected && platformAdminItems.some(item => item.id === selected && item.active)) select.value = selected;
+  xiAdminSearchableSelect(select,'Buscar objeto para entregar…');
 }
 
 function platformRenderSystemAppAdmin() {
@@ -5383,12 +5428,43 @@ async function platformToggleSystemApp(appId, enabled) {
   }
 }
 
+/* Existing imported box prizes stay as their original database objects. Editing one
+   opens the full, already validated object editor; no duplicated rows or inventories. */
+let xiBoxReturnId='';
+function xiBoxExistingHide(){
+ const area=$('#xi-box-existing');area?.classList.add('hidden');
+ $('#xi-box-existing-list')?.replaceChildren();
+ if($('#xi-box-existing-search'))$('#xi-box-existing-search').value='';
+}
+function xiBoxExistingShow(boxId,drops){
+ const area=$('#xi-box-existing'),host=$('#xi-box-existing-list');if(!area||!host)return;
+ if(String(platformAdminEditingItemId)!==String(boxId))return;
+ const pool=new Map();
+ for(const drop of drops){const id=String(drop.item_id||drop.prize_item_id||'');if(isValidUuid(id))pool.set(id,drop);}
+ // Include imported objects whose drop was subsequently edited or removed.
+ for(const item of platformAdminItems)if(String(item.source_box_id||'')===String(boxId)&&!pool.has(String(item.id)))pool.set(String(item.id),null);
+ const rows=[...pool].map(([id,drop])=>({item:platformAdminItems.find(v=>String(v.id)===id),id,drop}));
+ area.classList.remove('hidden');
+ setText('xi-box-existing-count',`${rows.length} ${rows.length===1?'objeto':'objetos'}`);
+ host.innerHTML=rows.length?rows.sort((a,b)=>String(a.item?.name||'').localeCompare(String(b.item?.name||''),'es')).map(({id,item,drop})=>{
+  const rarity=item?platformRarity(item):{label:'Objeto no disponible',className:'common'};
+  return `<div class="xi-box-existing-row" data-xi-box-existing-name="${esc(item?.name||'Objeto')}" >
+    <span class="xi-box-existing-thumb">${item?platformImageMarkup(item.image_url,item.name):'?'}</span>
+    <div class="xi-box-existing-copy"><strong>${esc(item?.name||'Objeto no encontrado')}</strong><small>${esc(rarity.label)} · ${esc(item?platformFormatValue(item.value):'—')}${drop?' · '+esc(String(drop.chance))+'%':''}${drop?.hidden?' · Secreto':''}</small></div>
+    <button type="button" class="inventory-secondary-button compact" data-xi-box-edit-prize="${esc(id)}" data-xi-box-parent="${esc(boxId)}" ${item?'':'disabled'}>Editar formulario completo</button>
+   </div>`;
+ }).join(''):'<p class="inventory-inline-empty">No hay premios guardados en esta caja.</p>';
+ xiAdminFilterEntries(host,'.xi-box-existing-row',$('#xi-box-existing-search')?.value,node=>node.dataset.xiBoxExistingName||'');
+}
 function platformResetItemForm() {
   const form = $('#admin-item-form');
   if (form) form.reset();
   if($('#admin-item-instant-price'))$('#admin-item-instant-price').value='0.01';
   platformAdminEditingItemId = null;
   platformAdminEditingItemImagePath = null;
+  xiBoxExistingHide();
+  $('#xi-box-return')?.classList.add('hidden');
+  $('#xi-series-import')?.classList.remove('hidden');
   const button = $('#admin-item-save');
   if (button) button.textContent = 'Crear objeto';
   setText('admin-item-form-title', 'Crear objeto');
@@ -5420,6 +5496,9 @@ function platformEditItem(itemId) {
   xiDecorPopulateEditor(item);xiSeriesReset();
   xiFillItemRoutes(item.id);
   platformToggleBoxFields();
+  xiBoxExistingHide();
+  $('#xi-series-import')?.classList.toggle('hidden',Boolean(item.is_box));
+  $('#xi-box-return')?.classList.toggle('hidden',!xiBoxReturnId || String(item.id)===String(xiBoxReturnId));
   $('#admin-box-drops')?.replaceChildren();
   if (item.is_box) void platformLoadBoxEditor(item.id);
   setText('admin-item-form-title', 'Editar objeto');
@@ -5437,6 +5516,7 @@ async function platformSaveItem(event) {
   let uploadedPath = null;
   let saveRpcStarted = false;
   const wasEditing = Boolean(platformAdminEditingItemId);
+  const returnToBox=xiBoxReturnId;
   setLoading(button, true);
   platformSetMessage('admin-item-message', 'Guardando objeto...', 'info');
   try {
@@ -5507,6 +5587,7 @@ async function platformSaveItem(event) {
     platformResetItemForm();
     await platformLoadAdminData();
     await platformRefreshInventory();
+    if(returnToBox && wasEditing){xiBoxReturnId='';platformEditItem(returnToBox);}
     toast(wasEditing ? 'Objeto actualizado.' : 'Objeto creado.', 'success');
   } catch (error) {
     if (uploadedPath && !saveRpcStarted) await platformDeleteImage(uploadedPath);
@@ -6323,6 +6404,7 @@ function platformAddBoxDropRow(itemId='',chance='',hidden=false) {
   row.innerHTML=`<select class="admin-box-drop-item" aria-label="Premio" required><option value="">Selecciona premio</option>${valid.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}</option>`).join('')}</select><div class="admin-box-drop-chance"><input type="number" class="admin-box-drop-percent" min="0.0001" max="100" step="0.0001" placeholder="Prob. %" aria-label="Probabilidad en porcentaje" value="${esc(chance)}"><span>%</span></div><label class="admin-box-drop-hidden" title="Ocultar el premio a usuarios"><input type="checkbox" class="admin-box-drop-secret" ${hidden?'checked':''}> Oculto</label><button class="inventory-secondary-button compact" type="button" data-box-drop-remove aria-label="Quitar premio">×</button>`;
   host.appendChild(row);
   row.querySelector('select').value=String(itemId || '');
+  xiAdminSearchableSelect(row.querySelector('select'),'Buscar premio por nombre…');
   platformUpdateBoxPercent();
 }
 
@@ -6359,6 +6441,7 @@ async function platformLoadBoxEditor(itemId) {
     if (String(platformAdminEditingItemId)!==String(itemId)) return;
     $('#admin-box-drops')?.replaceChildren();
     drops.forEach(drop=>platformAddBoxDropRow(drop.item_id,String(drop.chance),Boolean(drop.hidden)));
+    xiBoxExistingShow(itemId,drops);
     platformUpdateBoxPercent();
   } catch(error) { platformSetMessage('admin-item-message','No se pudieron cargar los premios: '+friendlyError(error),'error'); }
 }
@@ -6502,6 +6585,7 @@ function platformPopulateShopAdminSelect() {
   const selected=select.value;
   select.innerHTML='<option value="">Elige un objeto...</option>'+platformAdminItems.filter(item=>item.active).map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(platformRarity(item).label)}${item.is_box?' · CAJA':''}</option>`).join('');
   if(selected && platformAdminItems.some(item=>String(item.id)===selected))select.value=selected;
+  xiAdminSearchableSelect(select,'Buscar objeto para la tienda…');
 }
 
 function platformRenderShopAdminList() {
@@ -7056,6 +7140,7 @@ async function platformAdminLoadAssets(){
     return `<div class="admin-asset-row ${platformRarityMarketClass(row)} ${platformGradeClass(row)}" ${xiCustomFxAttrs(row)}>${platformGradeTag(row)}<span class="admin-asset-thumb">${platformImageMarkup(urls.get(row.image_path)||'',row.name)}</span><div><strong>${esc(row.name)}</strong><small>${esc(rarity.label)} · ${esc(xiVariantName({...row,upgrade_tier:rowTier}))} · ${esc(platformFormatValue(row.value))} ${locked?'· RESERVADO':''}</small></div>
     <button type="button" class="inventory-secondary-button compact" data-admin-remove-instance="${esc(row.instance_id)}">Quitar copia</button></div>`;
   }).join(''):'<p class="inventory-inline-empty">Este usuario no tiene objetos.</p>');
+  xiAdminFilterEntries(host,'.admin-asset-row',$('#xi-admin-assets-search')?.value,node=>node.querySelector('strong')?.textContent||'');
 }
 async function platformAdminAdjustMoney(event){
   event.preventDefault();if(!platformShopOwner || !platformAdminRecipient?.id)return;
@@ -7441,8 +7526,10 @@ function platformBindEvents() {
       platformToggleTradeItem(tradeToggle.dataset.tradeToggle);
       return;
     }
+    const editPrize=event.target.closest('[data-xi-box-edit-prize]');
+    if(editPrize){event.preventDefault();xiBoxReturnId=editPrize.dataset.xiBoxParent;platformEditItem(editPrize.dataset.xiBoxEditPrize);return;}
     const editItem = event.target.closest('[data-admin-edit-item]');
-    if (editItem) { platformEditItem(editItem.dataset.adminEditItem); return; }
+    if (editItem) { xiBoxReturnId='';platformEditItem(editItem.dataset.adminEditItem); return; }
     const toggleItem = event.target.closest('[data-admin-toggle-item]');
     if (toggleItem) { void platformToggleItem(toggleItem.dataset.adminToggleItem, toggleItem.dataset.enabled === 'true'); return; }
     const toggleApp = event.target.closest('[data-admin-app-toggle]');
@@ -7459,6 +7546,11 @@ function platformBindEvents() {
     if (editRelease) { platformEditRelease(editRelease.dataset.editRelease); return; }
   });
 
+  $('#xi-box-return')?.addEventListener('click',()=>{const id=xiBoxReturnId;xiBoxReturnId='';if(id)platformEditItem(id);});
+  $('#xi-box-existing-search')?.addEventListener('input',e=>xiAdminFilterEntries($('#xi-box-existing-list'),'.xi-box-existing-row',e.target.value,node=>node.dataset.xiBoxExistingName||''));
+  $('#xi-series-filter')?.addEventListener('input',e=>xiAdminFilterEntries($('#xi-series-list'),'.xi-series-entry',e.target.value,node=>node.querySelector('[data-xi-series-field="name"]')?.value||''));
+  $('#xi-admin-catalog-search')?.addEventListener('input',e=>xiAdminFilterEntries($('#admin-item-list'),'.admin-item-row',e.target.value,node=>node.querySelector('.admin-item-row-copy strong')?.textContent||''));
+  $('#xi-admin-assets-search')?.addEventListener('input',e=>xiAdminFilterEntries($('#admin-assets-items'),'.admin-asset-row',e.target.value,node=>node.querySelector('strong')?.textContent||''));
   $('#inventory-refresh-button')?.addEventListener('click', () => {
     void platformRefreshInventory();
     void platformLoadTrades(false);
@@ -7482,7 +7574,7 @@ function platformBindEvents() {
   $('#xi-item-route-list')?.addEventListener('click',event=>{const remove=event.target.closest('[data-xi-route-remove]');if(remove)remove.closest('.xi-route-editor')?.remove();});
   $('#xi-up-style-list')?.addEventListener('click',event=>{const id=event.target.closest('[data-xi-style-edit]')?.dataset.xiStyleEdit;const style=xiCustomStyles.get(String(id||''));if(style){xiFormAssign(style);xiRenderStyleList();}});
   xiFormAssign(null);
-  $('#admin-item-reset')?.addEventListener('click', platformResetItemForm);
+  $('#admin-item-reset')?.addEventListener('click',()=>{xiBoxReturnId='';platformResetItemForm();});
   $('#admin-item-image')?.addEventListener('change', event => platformSetPreview('admin-item-image-preview', event.target.files?.[0] || null, platformAdminEditingItemImagePath || ''));
   $('#admin-user-search')?.addEventListener('input', event => void platformSearchAdminUsers(event.target.value));
   $('#admin-grant-form')?.addEventListener('submit', event => void platformGrantItem(event));
@@ -8217,20 +8309,27 @@ function xiDecorRenderAll(){
  if(peer)xiDecorMount($('#member-profile-avatar'),String(peer));
  if(currentConversationData && currentConversationData.type!=='group')xiDecorMount($('#chat-avatar'),conversationPeerId(currentConversationData));
 }
+let xiDecorDetailsKey='';
 function xiDecorDrawWardrobe(){
  const host=$('#xi-decor-wardrobe');if(!host||!currentUser)return;
- const seen=new Set(),items=[];
- for(const item of platformInventoryItems){
-  const id=platformTypeId(item),style=xiDecorStyles.get(id);
-  if(!style?.enabled ||seen.has(id))continue;
-  seen.add(id);items.push({item,style});
- }
  const equipped=xiDecorEquipped.get(String(currentUser.id));
- const rows=items.map(({item,style})=>{
-  const id=platformItemKey(item);
-  return `<button class="xi-decor-choice ${String(equipped?.item_id)===platformTypeId(item)?'selected':''}" type="button" data-xi-decor-equip="${esc(id)}"><img src="${esc(style.image_url)}" alt=""><span>${esc(item.name)}${String(equipped?.item_id)===platformTypeId(item)?' · Equipado':''}</span></button>`;
- });
- host.innerHTML=(equipped?'<button class="xi-decor-choice" type="button" data-xi-decor-equip="">✕ Quitar decoración</button>':'')+(rows.join('')||'<span class="admin-feature-hint">Todavía no tienes objetos decorativos.</span>');
+ const byType=new Map();
+ for(const item of platformInventoryItems){
+  const type=platformTypeId(item),style=xiDecorStyles.get(type);
+  if(!style?.enabled)continue;
+  const existing=byType.get(type);
+  if(!existing || String(platformItemKey(item))===String(equipped?.instance_id) || (existing.item.reserved&&!item.reserved))byType.set(type,{item,style});
+ }
+ const rows=[...byType.values()].sort((a,b)=>String(a.item.name).localeCompare(String(b.item.name),'es'));
+ host.innerHTML=rows.length?rows.map(({item,style})=>{
+  const id=platformItemKey(item),active=String(equipped?.item_id)===platformTypeId(item);
+  const canEquip=!item.reserved;
+  return `<div class="xi-decor-choice ${active?'selected':''}">
+    <img src="${esc(style.image_url||item.image_url)}" alt="" loading="lazy">
+    <div class="xi-decor-choice-copy"><strong>${esc(item.name)}</strong><small>${active?'Decoración equipada':'Decoración disponible'}</small></div>
+    <button class="xi-decor-choice-action ${active?'is-equipped':''}" type="button" data-xi-decor-equip="${active?'':esc(id)}" ${!active&&!canEquip?'disabled title="Copia reservada"':''}>${active?'Desequipar':'Equipar'}</button>
+   </div>`;
+ }).join(''):'<span class="admin-feature-hint">Todavía no tienes objetos decorativos.</span>';
 }
 function xiDecorShowItemAction(item,source){
  const host=$('#xi-decor-detail-action');if(!host)return;
@@ -8238,18 +8337,24 @@ function xiDecorShowItemAction(item,source){
  const canEquip=source==='collection'&&style?.enabled;
  host.classList.toggle('hidden',!canEquip);host.innerHTML='';
  if(!canEquip)return;
- const instance=platformInventoryItems.find(v=>platformGroupSignature(v)===platformGroupSignature(item) && !v.reserved);
  const equipped=xiDecorEquipped.get(String(currentUser?.id));
- host.innerHTML=`<span class="xi-decor-equip-label">✧ ITEM EQUIPABLE</span><p>Úsalo alrededor de tu foto de perfil.</p>${instance?`<button class="xi-decor-equip-button" type="button" data-xi-decor-equip="${esc(platformItemKey(instance))}">${String(equipped?.item_id)===platformTypeId(item)?'Equipar esta copia':'Equipar decoración'}</button>`:'<small>No tienes copias disponibles.</small>'}`;
+ const active=String(equipped?.item_id)===platformTypeId(item);
+ const instance=platformInventoryItems.find(v=>platformGroupSignature(v)===platformGroupSignature(item) && !v.reserved);
+ host.innerHTML=`<span class="xi-decor-equip-label">✧ ITEM EQUIPABLE</span><p>Personaliza tu perfil con este objeto.</p>
+ ${active?'<button class="xi-decor-equip-button xi-decor-remove-button" type="button" data-xi-decor-equip="">Desequipar decoración</button>':
+ instance?`<button class="xi-decor-equip-button" type="button" data-xi-decor-equip="${esc(platformItemKey(instance))}">Equipar objeto</button>`:'<small>Necesitas una copia disponible.</small>'}`;
 }
 async function xiDecorEquip(instance){
  if(!currentUser || !supabase)return;
  try{
   const {error}=await supabase.rpc('xifre_avatar_equip',{p_instance_id:instance||null});if(error)throw error;
-  await xiDecorLoad(true);toast(instance?'Decoración equipada.':'Decoración quitada.','success');
+  await xiDecorLoad(true);
+  const detailsId=xiDecorDetailsKey; if(detailsId && !$('#item-details-modal')?.classList.contains('hidden')){const item=platformFindItemForDetails(detailsId,'collection');if(item)xiDecorShowItemAction(item,'collection');}
+  toast(instance?'Decoración equipada.':'Decoración quitada.','success');
  }catch(error){toast('No se pudo equipar: '+friendlyError(error),'error');}
 }
 function xiDecorStop(){
+ xiDecorDetailsKey='';xiBoxReturnId='';
  xiDecorStyles.clear();xiDecorEquipped.clear();xiDecorFetchedAt=0;xiDecorEditingItemId='';xiDecorSavedImageUrl='';
  if(xiDecorObjectUrl)URL.revokeObjectURL(xiDecorObjectUrl);xiDecorObjectUrl='';xiDecorUpdatePreview.lastFile=null;
  $$('.xi-decor-overlay').forEach(n=>n.remove());$$('.xi-decor-host').forEach(n=>{n.classList.remove('xi-decor-host');delete n.dataset.xiDecorSig;});
@@ -8388,6 +8493,7 @@ function xiSeriesRender(){
   const holder=node.querySelector('[data-xi-series-item-routes]');if(holder)holder.classList.toggle('hidden',!r.overrides.own_routes);
  });
  xiSeriesSummary();
+ xiAdminFilterEntries(host,'.xi-series-entry',$('#xi-series-filter')?.value,node=>node.querySelector('[data-xi-series-field="name"]')?.value||'');
 }
 function xiSeriesSummary(){setText('xi-series-summary',`${xiSeriesRows.length} archivos · ${xiSeriesRows.reduce((sum,row)=>sum+Math.round(Number(row.chance||0)*10000),0)/10000}% total`);}
 function xiSeriesChange(event){
@@ -8396,6 +8502,7 @@ function xiSeriesChange(event){
  const key=control.dataset.xiSeriesField,value=control.type==='checkbox'?control.checked:control.value;
  if(['name','chance','hidden'].includes(key))row[key]=value;else row.overrides[key]=value;
  if(key==='chance')xiSeriesSummary();
+ if(key==='name')xiAdminFilterEntries($('#xi-series-list'),'.xi-series-entry',$('#xi-series-filter')?.value,node=>node.querySelector('[data-xi-series-field="name"]')?.value||'');
  if(key==='own_routes')control.closest('.xi-series-route-section')?.querySelector('.xi-series-route-list')?.classList.toggle('hidden',!value);
 }
 function xiSeriesRouteInput(event){
