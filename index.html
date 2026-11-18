@@ -7,7 +7,7 @@
 <title>XIFRE</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261116-alpha-117">
+<link rel="stylesheet" href="style.css?v=20261119-alpha-118">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -69,6 +69,7 @@
   <div class="appbar-brand">
     <span class="appbar-logo">XIFRE</span>
     <span id="appbar-version" class="appbar-version">ALPHA 1</span>
+    <div id="xi-membership-brand" class="xi-membership-brand" aria-label="Tus membresías"></div>
   </div>
   <div class="appbar-launchers" aria-label="Aplicaciones">
     <button id="app-chat-button" class="app-launcher app-launcher-chat active" type="button" data-platform-app="chat" aria-label="Abrir CHAT" title="CHAT">
@@ -133,7 +134,7 @@
 <div class="left-pane-userbar">
 <div class="userbar-profile" data-action="open-settings" role="button" tabindex="0">
 <span id="bottom-profile-avatar" class="userbar-avatar">X</span>
-<span class="userbar-copy"><strong id="bottom-profile-name">Usuario</strong><small id="bottom-profile-username">@usuario</small></span>
+<span class="userbar-copy"><strong id="bottom-profile-name">Usuario</strong><small id="bottom-profile-username">@usuario</small><span id="xi-membership-my-badges" class="xi-membership-profile-badges"></span></span>
 </div>
 <button type="button" class="userbar-button" data-action="open-settings" aria-label="Configuración">⚙</button>
 <button type="button" class="userbar-button logout" data-action="logout" aria-label="Cerrar sesión">⇥</button>
@@ -204,7 +205,7 @@
 <div id="right-dm-content" class="right-profile hidden">
 <div class="right-cover"></div>
 <div class="right-profile-avatar-wrap"><span id="right-profile-avatar" class="right-profile-avatar">X</span></div>
-<div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3><p id="right-profile-handle">@usuario</p></div>
+<div class="right-profile-body"><h3 id="right-profile-name">Usuario</h3><p id="right-profile-handle">@usuario</p><div id="xi-membership-right-badges" class="xi-membership-profile-badges"></div></div>
 </div>
 <div id="right-group-content" class="right-group hidden">
 <div class="right-group-head"><span id="right-group-avatar" class="right-group-avatar">#</span><div><h3 id="right-group-name">Grupo</h3><p id="right-group-count">0 miembros</p></div></div>
@@ -478,6 +479,9 @@
     <div id="shop-featured" class="shop-featured"></div>
     <div class="shop-section-heading"><div><span>EXPLORA EL CATÁLOGO</span><h2>Ofertas y artículos</h2></div><span id="shop-count">0 artículos</span></div>
     <div id="shop-products" class="shop-products"></div>
+    <div class="shop-section-heading xi-membership-shop-heading"><div><span>SERVICIOS Y VENTAJAS</span><h2>Extras y membresías</h2></div><span>Más que objetos</span></div>
+    <p class="xi-membership-section-intro">Ventajas exclusivas con el saldo virtual de XIFRE, sin pagos reales.</p>
+    <div id="xi-membership-shop-list" class="xi-membership-shop-list"></div>
     <section id="shop-admin" class="shop-admin hidden">
       <div class="shop-admin-top"><span>◈ ADMINISTRACIÓN</span><h2>Gestionar tienda</h2><p>Crea ofertas visibles para todos. El saldo y las compras se gestionan en Supabase.</p></div>
       <div class="shop-admin-layout">
@@ -497,6 +501,24 @@
         </div>
       </div>
       <div class="shop-admin-card shop-admin-catalog"><h3>Ofertas creadas</h3><div id="shop-admin-list"></div></div>
+      <section class="shop-admin-card xi-membership-admin">
+        <div class="xi-membership-admin-heading"><span class="inventory-eyebrow">EXTRAS · MEMBRESÍAS</span><h3 id="xi-membership-admin-title">Crear membresía</h3><p>Diseña la ficha de tienda, el emblema y sus beneficios.</p></div>
+        <form id="xi-membership-admin-form" class="xi-membership-admin-form">
+          <div class="shop-admin-form-row"><label>Nombre<input id="xi-mem-name" maxlength="60" placeholder="VIP" required></label><label>Símbolo del emblema<input id="xi-mem-icon" maxlength="12" value="✦" placeholder="✦" required></label></div>
+          <label>Descripción y ventajas<textarea id="xi-mem-description" rows="4" maxlength="1800" required></textarea></label>
+          <div class="shop-admin-form-row"><label>Color principal<input id="xi-mem-primary" type="color" value="#f6c65b"></label><label>Color secundario<input id="xi-mem-secondary" type="color" value="#f59d36"></label><label>Color del emblema<input id="xi-mem-badge" type="color" value="#ffd776"></label><label>Color de fondo<input id="xi-mem-background" type="color" value="#1f1a33"></label></div>
+          <div class="shop-admin-form-row"><label>Acabado de tarjeta<select id="xi-mem-card-style"><option value="gradient">Degradado</option><option value="solid">Sólido</option><option value="glass">Cristal</option></select></label><label>Tipo de pago<select id="xi-mem-billing"><option value="subscription">Suscripción renovable</option><option value="one_time">Pago único</option></select></label></div>
+          <div class="shop-admin-form-row"><label>Precio (€)<input id="xi-mem-price" type="number" min="0" step="0.01" value="5.00" required></label><label>Cada / duración<input id="xi-mem-period" type="number" min="1" max="3650" step="1" value="1" required></label><label>Unidad<select id="xi-mem-period-unit"><option value="day">Día(s)</option><option value="week">Semana(s)</option><option value="month">Mes(es) de 30 días</option></select></label></div>
+          <div class="xi-membership-admin-checks"><label><input id="xi-mem-active" type="checkbox" checked> Publicar en tienda</label><label><input id="xi-mem-trial-on" type="checkbox"> Activar prueba gratis</label><label><input id="xi-mem-x3" type="checkbox"> Permitir abrir ×3 cajas</label><label><input id="xi-mem-show-locked" type="checkbox" checked> Mostrar botón ×3 bloqueado a otros usuarios</label></div>
+          <div id="xi-mem-trial-settings" class="shop-admin-form-row hidden"><label>Duración de prueba (horas)<input id="xi-mem-trial-hours" type="number" min="1" max="8760" value="168"></label><label>Oferta válida durante (horas)<input id="xi-mem-trial-offer-hours" type="number" min="1" max="8760" value="24"></label><label><input id="xi-mem-trial-restart" type="checkbox"> Reiniciar plazo al guardar</label></div>
+          <div class="xi-membership-editor-preview"><span class="inventory-eyebrow">VISTA PREVIA</span><div id="xi-mem-live-card"></div></div>
+          <div class="xi-membership-rewards"><strong>Paquete de objetos al activar</strong><p>Los objetos exclusivos quedan marcados permanentemente. Los demás conservan la procedencia en cada copia entregada. No se entrega otro paquete en cada renovación.</p><div id="xi-mem-rewards-list"></div><button id="xi-mem-add-reward" type="button" class="inventory-secondary-button compact">+ Añadir objeto</button></div>
+          <div class="shop-admin-actions"><button id="xi-mem-reset" type="button" class="inventory-secondary-button">Nueva membresía</button><button id="xi-mem-save" type="submit" class="inventory-primary-button">Guardar membresía</button></div><p id="xi-mem-admin-feedback" role="status"></p>
+        </form>
+        <div class="xi-membership-admin-divider"></div><h3>Membresías creadas</h3><div id="xi-mem-admin-list"></div>
+        <div class="xi-membership-admin-divider"></div><h3>Entregar membresía manualmente</h3>
+        <form id="xi-mem-grant-form" class="xi-membership-grant-form"><label>Membresía<select id="xi-mem-grant-membership" required><option value="">Selecciona una membresía</option></select></label><label>Buscar usuario / @<input id="xi-mem-grant-search" type="search" autocomplete="off" placeholder="@usuario"></label><div id="xi-mem-grant-results" class="shop-money-results"></div><p id="xi-mem-grant-selected" class="xi-bank-hint"></p><div class="shop-admin-form-row"><label>Tiempo<input id="xi-mem-grant-time" type="number" min="1" max="87600" value="30" required></label><label>Unidad<select id="xi-mem-grant-unit"><option value="day">Días</option><option value="hour">Horas</option><option value="week">Semanas</option></select></label></div><button id="xi-mem-grant-submit" class="inventory-primary-button" type="submit">Entregar membresía</button><p id="xi-mem-grant-feedback" role="status"></p></form>
+      </section>
     </section>
     <footer class="shop-footer">✦ XIFRE STORE · Moneda ficticia sin valor real · Los premios de las cajas tienen probabilidades públicas.</footer>
   </div>
@@ -572,9 +594,11 @@
       <button type="button" data-xi-bank-action="bizum"><span class="xi-bank-action-icon">⇄</span><strong>Bizum</strong><small>Enviar dinero</small></button>
       <button type="button" data-xi-bank-action="withdraw"><span class="xi-bank-action-icon">◎</span><strong>Convertir en metálico</strong><small>Crear una moneda</small></button>
       <button type="button" data-xi-bank-action="deposit"><span class="xi-bank-action-icon">↥</span><strong>Depositar</strong><small>Ingresar una moneda</small></button>
+      <button type="button" data-xi-bank-action="memberships"><span class="xi-bank-action-icon">✦</span><strong>Membresías</strong><small>Mis suscripciones</small></button>
     </div>
     <div id="xi-bank-panel" class="xi-bank-panel hidden"><button type="button" id="xi-bank-panel-close" aria-label="Cerrar operación">×</button><h2 id="xi-bank-panel-title">Operación</h2><div id="xi-bank-panel-content"></div><p id="xi-bank-feedback" role="status"></p></div>
     <div class="xi-bank-bottom-grid"><section class="xi-bank-bottom-card"><div class="xi-bank-section-title"><h2>Mis monedas</h2><span>DINERO EN EL INVENTARIO</span></div><div id="xi-bank-coin-list" class="xi-bank-coins"><p>No tienes monedas para depositar.</p></div></section><section class="xi-bank-bottom-card"><div class="xi-bank-section-title"><h2>Últimos movimientos</h2><span>HISTORIAL</span></div><div id="xi-bank-history" class="xi-bank-history"><p>Cargando movimientos...</p></div></section></div>
+    <section class="xi-bank-bottom-card xi-bank-membership-card"><div class="xi-bank-section-title"><h2>Mis membresías</h2><span>SUSCRIPCIONES Y FECHAS</span></div><div id="xi-bank-memberships">No tienes membresías activas.</div></section>
     <footer class="xi-bank-disclaimer">El saldo y las monedas son únicamente ficticios. Bizum en XIFRE no utiliza el servicio bancario real. Las monedas se pueden transferir en intercambios y depositarse, pero no venderse en el Mercado.</footer>
   </div>
 </section>
@@ -604,6 +628,7 @@
  <span class="shop-eyebrow">XIFRE · APERTURA DE CAJA</span><h2 id="box-opening-title">Descubriendo tu premio...</h2>
  <div id="box-rarity-celebration" class="box-rarity-celebration" aria-hidden="true"></div>
  <div class="box-reel-window" id="box-reel-window"><div class="box-reel-strip" id="box-reel-strip"></div><span class="box-reel-marker"></span></div>
+ <div id="xi-box-triple-reels" class="xi-box-triple-reels hidden"></div>
  <div id="box-opening-result" class="box-opening-result hidden"></div><p id="box-opening-hint">El premio se determina en el servidor antes de comenzar la animación.</p>
  <button id="box-opening-done" class="inventory-primary-button hidden" type="button">Volver a mi inventario</button></div>
 </div>
@@ -624,6 +649,7 @@
       <div class="item-details-actions"><button id="item-instant-sell" type="button" class="inventory-secondary-button hidden">Vender al instante</button></div>
       <div id="item-box-preview" class="item-box-preview hidden"></div>
       <button id="item-open-box-button" type="button" class="inventory-primary-button item-open-box-button hidden">✦ Abrir caja</button>
+      <button id="xi-item-open-box3" type="button" class="inventory-secondary-button xi-box3-button hidden">✦ Abrir 3 cajas a la vez</button>
       <button class="inventory-primary-button item-details-close" type="button" data-action="close-modal" data-modal="item-details-modal">Cerrar</button>
     </div>
   </div>
@@ -702,6 +728,7 @@
   <div id="member-profile-avatar" class="member-profile-avatar">X</div>
   <strong id="member-profile-name">Usuario</strong>
   <small id="member-profile-username">@usuario</small>
+  <div id="xi-membership-member-badges" class="xi-membership-profile-badges"></div>
   <div class="member-profile-divider"></div>
   <span id="member-profile-role" class="member-profile-role">Miembro del grupo</span>
   <button id="member-profile-add-friend" class="member-profile-add-friend hidden" type="button" data-action="send-member-friend-request">Añadir amigo</button>
@@ -709,6 +736,9 @@
 </div>
 
 <!-- FRIENDS / REQUESTS / ADD FRIENDS -->
+<div id="xi-mem-purchase-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="xi-mem-purchase-title">
+  <div class="modal-card xi-mem-purchase-card"><button type="button" class="modal-close" data-action="close-modal" data-modal="xi-mem-purchase-modal" aria-label="Cerrar">×</button><span class="shop-eyebrow">XIFRE · VENTAJAS VIRTUALES</span><div id="xi-mem-purchase-content"></div><p id="xi-mem-purchase-feedback" role="status"></p><div class="xi-mem-purchase-actions"><button id="xi-mem-purchase-back" class="inventory-secondary-button" type="button">Volver</button><button id="xi-mem-purchase-confirm" class="inventory-primary-button" type="button">Confirmar</button></div></div>
+</div>
 <div id="people-modal" class="modal hidden">
 <div class="modal-card people-modal-card">
 <button class="modal-close" type="button" data-action="close-modal" data-modal="people-modal">×</button>
@@ -892,7 +922,7 @@
 <div id="toast-container" class="toast-container"></div>
 </main>
 
-<script src="app.js?v=20261116-alpha-117"></script>
+<script src="app.js?v=20261119-alpha-118"></script>
 <div id="xi-custom-reveal" class="xi-custom-reveal hidden" aria-hidden="true"></div>
 </body>
 </html>
