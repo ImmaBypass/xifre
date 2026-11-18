@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 
-const XIFRE_BUILD='alpha-1.8.0';
+const XIFRE_BUILD='alpha-1.18.0';
 const CHAT_MEDIA_BUCKET = 'xifre-chat-media';
 const CHAT_MEDIA_MAX_BYTES = 8 * 1024 * 1024;
 const CHAT_MESSAGE_MAX_CHARS = 2000;
@@ -2806,6 +2806,7 @@ avatarInto($('#right-profile-avatar'), name, other?.avatar_url, 'private', other
 ensurePresenceDot($('#right-profile-avatar'), getMemberId(other));
 setText('right-profile-name', name);
 setText('right-profile-handle', `@${other?.email_handle || other?.username || 'usuario'}`);
+void xiMembershipShowUserBadge(getMemberId(other),'xi-membership-right-badges');
 renderPresenceIndicators();
 } else {
 const name = currentConversationData?.name || 'Grupo';
@@ -2835,6 +2836,7 @@ function showMemberProfile(member, anchor) {
   ensurePresenceDot($('#member-profile-avatar'), getMemberId(member));
   setText('member-profile-name', member.username || 'Usuario');
   setText('member-profile-username', `@${member.email_handle || member.username || 'usuario'}`);
+  void xiMembershipShowUserBadge(getMemberId(member),'xi-membership-member-badges');
   const role = $('#member-profile-role');
   const roleName = member.is_owner ? 'Creador del grupo' : member.is_admin ? 'Administrador del grupo' : 'Miembro del grupo';
   setText('member-profile-role', roleName);
@@ -4424,6 +4426,7 @@ let platformShopListings = [];
 let platformShopOwner = false;
 let platformShopEditingId = null;
 let platformShopBuying = new Set();
+const xiShopQuantities = new Map();
 let platformWalletBalance = 0;
 let platformWalletTimer = null;
 let platformWalletLoading = false;
@@ -4511,8 +4514,10 @@ function platformItemKey(item) {
 
 function platformGroupSignature(item) {
   // The grouping compares the full public item definition, not just its display name.
+  const membershipLabel=xiMemLabels.get(platformItemKey(item));
   return JSON.stringify([String(item.name || ''),String(item.description || ''),String(item.rarity || ''),
-    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item)),String(item.item_id||item.id||''),Number(item.upgrade_tier||0),String(item.custom_upgrade_id||''), xiBankIsCoin(item)?Number(item.cash_cents||0):null]);
+    String(item.value ?? 0),String(item.image_path || ''),Boolean(platformItemIsBox(item)),String(item.item_id||item.id||''),Number(item.upgrade_tier||0),String(item.custom_upgrade_id||''), xiBankIsCoin(item)?Number(item.cash_cents||0):null,
+    membershipLabel?.source_membership||'',membershipLabel?.exclusive_membership||'']);
 }
 function platformGroupItems(items) {
   const groups = new Map();
@@ -4533,12 +4538,15 @@ function platformItemCardMarkup(item, { mode = 'collection', disabled = false, s
   const image = xiBankIsCoin(item) ? xiBankCoinArt(false) : platformImageMarkup(item.image_url,item.name);
   const coinClass=xiBankIsCoin(item)?' xi-coin-card':'';
   const boxIcon = platformItemIsBox(item) ? '<span class="mini-item-box" title="Caja consumible">✦ CAJA</span>' : '';
+  const memLabel=xiMemLabels.get(instanceId);
+  const memBadge=memLabel?.exclusive?'<span class="xi-mem-mini-badge" title="'+esc('Exclusivo '+memLabel.exclusive_membership)+'">✦ EXCLUSIVO</span>':
+   memLabel?.acquired_from_membership?'<span class="xi-mem-mini-badge" title="'+esc('Obtenido mediante '+memLabel.source_membership)+'">✦ MIEMBRO</span>':'';
   const numericValue = Number(item?.value) || 0;
   const valueGlow = numericValue >= 5000 ? 'value-precious' : numericValue >= 1000 ? 'value-high' : '';
   const gradeClass=platformGradeClass(item),gradeBadge=platformGradeTag(item),customAttrs=xiCustomFxAttrs(item),customSize=xiCustomCardClass(item);
   if (mode === 'trade') {
     return `<div class="trade-select-item xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize}${coinClass} ${valueGlow} ${selected ? 'is-offered' : ''} ${disabled ? 'is-locked' : ''}" ${customAttrs} data-trade-tile="${esc(instanceId)}">
-      ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${gradeBadge}
+      ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${gradeBadge}${memBadge}
       <button class="trade-select-hitarea" type="button" data-trade-toggle="${esc(instanceId)}" aria-pressed="${selected}" ${disabled?'disabled':''} title="Añadir una copia">
         <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong><span class="mini-item-selection">+ Ofrecer</span>
       </button><button class="mini-item-info" type="button" data-open-item="${esc(instanceId)}" data-item-source="trade" aria-label="Detalles">ⓘ</button>
@@ -4546,7 +4554,7 @@ function platformItemCardMarkup(item, { mode = 'collection', disabled = false, s
     </div>`;
   }
   return `<button type="button" class="inventory-item-card xifre-mini-item rarity-${esc(rarity.className)} ${gradeClass}${customSize}${coinClass} ${valueGlow} ${item.reserved?'is-reserved':''}" ${customAttrs} data-open-item="${esc(instanceId)}" data-item-source="collection" title="Detalles de ${esc(item.name)}">
-    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}${xiDecorStyles.get(platformTypeId(item))?.enabled?'<span class="xi-decor-equip-label">ITEM EQUIPABLE</span>':''}
+    ${count>1?`<span class="mini-item-quantity">×${count}</span>`:''}${boxIcon}${gradeBadge}${memBadge}${xiDecorStyles.get(platformTypeId(item))?.enabled?'<span class="xi-decor-equip-label">ITEM EQUIPABLE</span>':''}
     <span class="mini-item-image">${image}</span><span class="mini-item-name">${esc(item.name)}</span><strong class="mini-item-value">${esc(xiBankIsCoin(item)?xiBankEur(item.cash_cents):platformFormatValue(item.value))}</strong>
   </button>`;
 }
@@ -4599,6 +4607,8 @@ function platformOpenItemDetails(key, source = 'collection') {
   const button = $('#item-open-box-button');
   button?.classList.add('hidden');
   button?.removeAttribute('data-box-instance');
+  $('#xi-item-open-box3')?.classList.add('hidden');
+  xiMembershipDrawItemLabel(item);
   if (platformItemIsBox(item)) void platformRenderBoxPreview(item,source);
   xiDecorDetailsKey=source==='collection'?String(key):'';
   xiDecorShowItemAction(item,source);
@@ -4937,6 +4947,7 @@ async function platformInitialize() {
   void platformLoadReleases();
   platformShopOwner = isXifreAdmin && String(currentUser.email || '').toLowerCase() === 'samuelgil@vedrunaimmaculada.cat';
   $('#shop-admin')?.classList.toggle('hidden',!platformShopOwner);
+  void xiMembershipRefreshPersonal();
   void platformLoadWallet(true);
   platformStartWalletTimer();
   platformUpdateClock();
@@ -4987,6 +4998,7 @@ async function platformInitialize() {
 
 function platformStop() {
   xiPlazaStop();xiBankResetSession();xiDecorStop();xiSeriesReset();
+  xiMembershipReset();
   xiTradeChatStop();
   platformInlineEndEdit(true);platformInlineData={texts:[],images:[]};platformInlinePrepared=false;
   $$('.xi-inline-pencil,.xi-overlay-image').forEach(node=>node.remove());
@@ -5053,6 +5065,7 @@ function platformStop() {
   platformBoxIds=new Set();platformBoxInstances=new Set();
   platformBoxInstanceToItem.clear();platformBoxPreviewCache.clear();platformPurchaseRequestIds.clear();
   platformShopListings=[];platformShopOwner=false;platformShopEditingId=null;platformShopBuying.clear();
+  xiShopQuantities.clear();
   platformMarketListings=[];platformMarketMyListings=[];platformMarketInventory=[];platformMarketHistory=[];
   platformMarketSelectedInstance='';platformMarketTab='explore';platformMarketLoadBusy=false;platformMarketRefreshQueued=false;platformMarketPurchaseRequests.clear();platformMarketMutations.clear();
   platformUiRecords=[];platformUiLoaded=false;platformReadTradeIds.clear();platformChatBadgeBaseline=0;
@@ -5178,9 +5191,9 @@ function platformSetApp(appId, forceAdmin = false) {
   for(const id of ['plaza','bank']) {$('#'+id+'-app-view')?.classList.toggle('active',appId===id);$('#'+id+'-app-view')?.classList.toggle('hidden',appId!==id);$('#app-'+id+'-button')?.classList.toggle('active',appId===id);}
   platformMarkAppSeen(appId);
   if(appId==='plaza'){xiPlazaOpenIntro();void platformLoadWallet(false);}
-  if(appId==='bank'){xiBankClosePanel();void xiBankLoad();}
+  if(appId==='bank'){xiBankClosePanel();void xiBankLoad();void xiMembershipLoadMine();}
   if(appId==='market'){void platformLoadMarket(true);void platformLoadWallet(false);}
-  if (appId==='shop') { void platformLoadShop();void platformLoadWallet(false); }
+  if (appId==='shop') { void platformLoadShop();void platformLoadWallet(false);void xiMembershipLoadShop(); }
   if (appId === 'inventory') {
     if (forceAdmin && isXifreAdmin) platformSetInventoryTab('admin');
     void platformRefreshInventory();
@@ -5265,6 +5278,7 @@ async function platformRefreshInventory() {
     await xiLoadCustomCatalog(inventoryChanged || rawItems.some(item=>item.custom_upgrade_id && xiCustomInstanceStyles.get(platformItemKey(item))!==String(item.custom_upgrade_id)));
     if(rawItems.some(item=>xiBankIsCoin(item)))await xiBankLoadCoins();
     platformInventoryItems = rawItems.map(item => platformHydrateItem({ ...item, is_box: platformItemIsBox(item), reserved:Boolean(item.reserved||marketReserved.has(platformItemKey(item))), image_url: urls.get(item.image_path) || '' }));
+    await xiMembershipLoadItemLabels(platformInventoryItems.map(platformItemKey));
     platformRenderInventory();
     // Don't redraw the entire trade workspace: its item selection is interactive.
     if (platformActiveTradeId && !platformTradeOfferMutationBusy) platformRenderTradeAvailableItems();
@@ -5934,6 +5948,7 @@ async function platformRefreshTradeDetail(withInventory = false) {
     }
     if((inventory||[]).some(item=>xiBankIsCoin(item)) || (data.offers||[]).some(item=>xiBankIsCoin(item))) await xiBankLoadCoins(tradeId);
     const urls = await platformSignImagePaths([...(inventory || []).map(item => item.image_path), ...(data.offers || []).map(item => item.image_path)]);
+    await xiMembershipLoadItemLabels([...(inventory||[]),...(data.offers||[])].map(item=>item.instance_id||item.id));
     if (generation !== platformSessionGeneration || !currentUser || String(currentUser.id) !== owner || String(platformActiveTradeId) !== tradeId || revision !== platformTradeOfferRevision || platformTradeOfferMutationBusy) return;
     if (inventory) {
       await platformLoadItemFeatures();
@@ -6379,6 +6394,7 @@ async function platformRenderBoxPreview(item, source) {
       button.dataset.boxInstance=platformItemKey(available);
       button.classList.remove('hidden');
     }
+    xiMembershipShowBox3(item);
   }
   try {
     const drops = await platformGetBoxDrops(itemId);
@@ -6471,9 +6487,18 @@ function platformSetWalletUI(cents) {
   $$('#shop-products [data-shop-buy],#shop-featured [data-shop-buy]').forEach(button=>{
     const listing=platformShopListings.find(l=>l.id===button.dataset.shopBuy);
     if(!listing)return;
+    const quantity=xiShopQuantity(listing);
     const busy=platformShopBuying.has(String(listing.id));
-    button.disabled=busy || Number(listing.price_cents)>platformWalletBalance || listing.stock===0 || !listing.active;
-    button.textContent=busy?'Comprando...':Number(listing.price_cents)>platformWalletBalance?'Saldo insuficiente':'Comprar ahora';
+    const total=Number(listing.price_cents)*quantity;
+    button.disabled=busy || total>platformWalletBalance || (listing.stock!==null && Number(listing.stock)<quantity) || !listing.active;
+    button.textContent=busy?'Comprando...':total>platformWalletBalance?'Saldo insuficiente':'Comprar '+quantity;
+    const totalNode=button.closest('.shop-purchase-controls')?.querySelector('.shop-purchase-total strong');
+    if(totalNode)totalNode.textContent=platformMoney(total);
+    const qtyNode=button.closest('.shop-purchase-controls')?.querySelector('.shop-quantity-stepper output');
+    if(qtyNode)qtyNode.textContent=String(quantity);
+    button.closest('.shop-purchase-controls')?.querySelectorAll('[data-shop-qty-step]').forEach(step=>{
+      step.disabled=busy || (Number(step.dataset.shopQtyStep)<0 ? quantity<=1 : quantity>=xiShopMaxQuantity(listing));
+    });
   });
 }
 
@@ -6548,6 +6573,7 @@ async function platformLoadShop() {
   platformShopListings=listings.map(row=>({...row,image_url:urls.get(row.image_path)||''}));
   platformRenderShop();
   platformUpdateListingBadges('shop',platformShopListings.filter(r=>r.active));
+  void xiMembershipLoadShop();
   if(platformShopOwner) {
     if(!platformAdminItems.length)void platformLoadAdminData();
     platformPopulateShopAdminSelect();
@@ -6560,13 +6586,14 @@ function platformShopListingMarkup(listing, featured = false) {
   const disabled=!listing.active || !listing.item_active || listing.stock===0;
   const price=platformMoney(listing.price_cents);
   const theme=['indigo','gold','rose','cyan','green','violet'].includes(listing.theme)?listing.theme:'indigo';
+  const quantity=xiShopQuantity(listing);
   return `<article class="shop-listing rarity-${esc(rarity.className)} ${platformGradeClass(listing)} shop-theme-${esc(theme)} ${featured?'shop-listing-featured':listing.placement==='special'?'shop-listing-special':''} ${listing.glow?'shop-listing-glow':''} ${disabled?'shop-listing-disabled':''}" ${xiCustomFxAttrs(listing)}>${platformGradeTag(listing)}
     <div class="shop-listing-visual"><span class="shop-listing-rings"></span>${listing.badge_text?`<span class="shop-listing-badge">${esc(listing.badge_text)}</span>`:''}
       ${listing.is_box?'<span class="shop-listing-box-mark">✦ CAJA SORPRESA</span>':''}
       <div class="shop-listing-image">${platformImageMarkup(listing.image_url,listing.name)}</div>
     </div>
     <div class="shop-listing-information"><span class="shop-listing-rarity">${esc(rarity.label.toUpperCase())}</span><h3>${esc(listing.name)}</h3><p>${esc(listing.description || 'Objeto de XIFRE')}</p>
-      <div class="shop-listing-bottom"><div><small>PRECIO</small><strong>${esc(price)}</strong>${listing.stock!==null?`<span class="shop-listing-stock">${listing.stock} disponibles</span>`:''}</div><button type="button" data-shop-buy="${esc(listing.id)}" ${disabled?'disabled':''} class="shop-buy-button">${disabled?'No disponible':'Comprar ahora'}</button></div>
+      <div class="shop-listing-bottom"><div><small>PRECIO / UNIDAD</small><strong>${esc(price)}</strong>${listing.stock!==null?`<span class="shop-listing-stock">${listing.stock} disponibles</span>`:''}</div><div class="shop-purchase-controls"><div class="shop-quantity-stepper" aria-label="Cantidad para comprar"><button type="button" data-shop-qty-step="-1" data-shop-qty-id="${esc(listing.id)}" aria-label="Quitar una unidad">‹</button><output aria-live="polite">${quantity}</output><button type="button" data-shop-qty-step="1" data-shop-qty-id="${esc(listing.id)}" aria-label="Añadir una unidad">›</button></div><span class="shop-purchase-total">Total: <strong>${esc(platformMoney(Number(listing.price_cents)*quantity))}</strong></span><button type="button" data-shop-buy="${esc(listing.id)}" ${disabled?'disabled':''} class="shop-buy-button">${disabled?'No disponible':'Comprar '+quantity}</button></div></div>
     </div>
   </article>`;
 }
@@ -6669,19 +6696,21 @@ async function platformBuyShopItem(id) {
   if(!currentUser || !isValidUuid(id) || platformShopBuying.has(String(id)))return;
   const listing=platformShopListings.find(row=>String(row.id)===String(id));
   if(!listing || !listing.active || listing.stock===0)return;
-  if(platformWalletBalance<Number(listing.price_cents))return toast('Necesitas más saldo para comprar este objeto.','info');
+  const quantity=xiShopQuantity(listing);
+  if(platformWalletBalance<Number(listing.price_cents)*quantity)return toast('No tienes suficiente saldo para todas esas unidades.','info');
   platformShopBuying.add(String(id));
-  const requestId=platformPurchaseRequestIds.get(String(id)) || (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`);
-  platformPurchaseRequestIds.set(String(id),requestId);
+  const key=String(id)+':'+quantity;
+  const requestId=platformPurchaseRequestIds.get(key) || xiBankUuid();
+  platformPurchaseRequestIds.set(key,requestId);
   platformSetWalletUI(platformWalletBalance);
   try {
-    const {data,error}=await supabase.rpc('xifre_shop_purchase',{p_listing_id:id,p_request_id:requestId});
+    const {data,error}=await supabase.rpc('xifre_shop_purchase_bulk',{p_listing_id:id,p_quantity:quantity,p_request_id:requestId});
     if(error)throw error;
-    platformPurchaseRequestIds.delete(String(id));
+    platformPurchaseRequestIds.delete(key);
     platformSetWalletUI(data?.balance_cents);
     await Promise.all([platformLoadBoxMeta(),platformLoadShop()]);
     await platformRefreshInventory();
-    toast('¡Compra completada! Ya tienes el objeto en tu inventario.','success');
+    toast('¡Compra completada! '+quantity+' unidad'+(quantity===1?'':'es')+' en tu inventario.','success');
   }catch(error){toast(friendlyError(error),'error');}
   finally {platformShopBuying.delete(String(id));platformSetWalletUI(platformWalletBalance);}
 }
@@ -6811,6 +6840,8 @@ async function platformOpenBox(instanceId) {
     prize.image_url=paths.get(prize.image_path)||'';
     closeModal('item-details-modal');
     openModal('box-opening-modal');
+    $('#xi-box-triple-reels')?.classList.add('hidden');
+    $('#box-reel-window')?.classList.remove('hidden');
     $('#box-opening-result')?.classList.add('hidden');
     $('#box-opening-done')?.classList.add('hidden');
     platformResetBoxCelebration();
@@ -6860,6 +6891,8 @@ function platformFinishBoxOpening() {
   if(platformBoxSpinTimer)clearTimeout(platformBoxSpinTimer);
   platformBoxSpinToken++;
   platformResetBoxCelebration();
+  $('#xi-box-triple-reels')?.classList.add('hidden');
+  $('#box-reel-window')?.classList.remove('hidden');
   closeModal('box-opening-modal');
   platformSetApp('inventory');
   platformSetInventoryTab('collection');
@@ -6977,6 +7010,7 @@ async function platformLoadMarket(withInventory=false) {
     const img=(r)=>({...r,image_url:urls.get(r.image_path)||''});
     await Promise.all([platformLoadItemFeatures(),xiLoadCustomCatalog()]);
     if(!currentUser || String(currentUser.id)!==owner || generation!==platformSessionGeneration)return;
+    await xiMembershipLoadItemLabels([...all,...mine].map(r=>r.inventory_instance_id).filter(Boolean));
     platformMarketListings=all.map(row=>platformHydrateItem(img(row)));
     platformMarketMyListings=mine.map(row=>platformHydrateItem(img(row)));
     if(results[2])platformMarketInventory=inv.map(row=>platformHydrateItem(img(row))).filter(row=>!xiBankIsCoin(row));
@@ -7002,10 +7036,13 @@ function platformMarketListingHTML(listing,{mine=false}={}) {
   const owner=String(currentUser?.id||'')===String(listing.seller_id);
   const rarity=platformRarity(listing);
   const status=listing.status;
+  const mark=xiMemLabels.get(String(listing.inventory_instance_id||''));
+  const label=mark?.exclusive?'<span class="xi-mem-item-mark is-exclusive" style="color:'+xiMemColor(mark.exclusive_color)+'">✦ EXCLUSIVO · '+esc(mark.exclusive_membership)+'</span>':
+   mark?.acquired_from_membership?'<span class="xi-mem-item-mark" style="color:'+xiMemColor(mark.source_color)+'">Obtenido con '+esc(mark.source_membership)+'</span>':'';
   return `<article class="market-listing ${platformRarityMarketClass(listing)} ${platformGradeClass(listing)}${xiCustomCardClass(listing)}" ${xiCustomFxAttrs(listing)}>${platformGradeTag(listing)}
     <div class="market-art">${platformImageMarkup(listing.image_url,listing.name)}</div>
     <span class="market-rarity">${esc(rarity.label.toUpperCase())}</span>
-    <h3 title="${esc(listing.name)}">${esc(listing.name)}</h3>
+    <h3 title="${esc(listing.name)}">${esc(listing.name)}</h3>${label}
     <small class="market-seller">${mine?`Estado: ${esc(status==='active'?'En venta':status==='sold'?'Vendida':'Cancelada')}`:`Vendedor: @${esc(listing.seller_name||'Usuario')}`} · ${esc(xiVariantName(listing))}</small>
     <div class="market-price-row"><strong>${esc(platformMoney(listing.price_cents))}</strong>
       ${mine&&status==='active'?`<button data-market-cancel="${esc(listing.id)}" type="button" class="inventory-secondary-button compact">Retirar</button>`:
@@ -7514,6 +7551,8 @@ function platformBindEvents() {
     }
     const tradeRemove=event.target.closest('[data-trade-remove-group]');
     if(tradeRemove){event.preventDefault();platformToggleTradeItem(tradeRemove.dataset.tradeRemoveGroup,true);return;}
+    const stepQuantity=event.target.closest('[data-shop-qty-step]');
+    if(stepQuantity){event.preventDefault();xiShopStepQuantity(stepQuantity.dataset.shopQtyId,Number(stepQuantity.dataset.shopQtyStep));return;}
     const shopBuy=event.target.closest('[data-shop-buy]');
     if(shopBuy){event.preventDefault();void platformBuyShopItem(shopBuy.dataset.shopBuy);return;}
     const shopEdit=event.target.closest('[data-shop-edit]');
@@ -7595,6 +7634,7 @@ function platformBindEvents() {
   $('#item-open-box-button')?.addEventListener('click',()=>{const id=$('#item-open-box-button')?.dataset.boxInstance;if(id)void platformOpenBox(id);});
   $('#box-opening-done')?.addEventListener('click',platformFinishBoxOpening);
   $('#box-opening-close')?.addEventListener('click',()=>{if(!platformBoxOpeningBusy)platformFinishBoxOpening();});
+  xiMembershipBind();
   $('#platform-version-form')?.addEventListener('submit' , event => void platformSaveDisplayVersion(event));
   $('#release-admin-form')?.addEventListener('submit', event => void platformSaveRelease(event));
   $('#release-editor-reset')?.addEventListener('click', platformResetReleaseEditor);
@@ -7642,12 +7682,13 @@ function xiBankShowPanel(type){
  $$('.xi-bank-actions [data-xi-bank-action]').forEach(x=>x.classList.toggle('active',x.dataset.xiBankAction===type));
  const host=$('#xi-bank-panel'),body=$('#xi-bank-panel-content');
  host?.classList.remove('hidden');
- const titles={bizum:'Enviar un Bizum',withdraw:'Convertir dinero en una moneda',deposit:'Depositar dinero físico'};
+ const titles={bizum:'Enviar un Bizum',withdraw:'Convertir dinero en una moneda',deposit:'Depositar dinero físico',memberships:'Gestionar membresías'};
  setText('xi-bank-panel-title',titles[type]||'Banco');setText('xi-bank-feedback','');
  if(!body)return;
  if(type==='bizum') body.innerHTML=`<form id="xi-bank-bizum-form" class="xi-bank-form"><p class="xi-bank-hint">Envía dinero virtual a otro usuario de XIFRE. La transferencia es inmediata y no tiene comisiones.</p><label>Buscar por usuario o @<input id="xi-bank-username" type="search" maxlength="30" placeholder="Username o @usuario" autocomplete="off" required></label><div id="xi-bank-user-results" class="xi-bank-user-results"></div><div id="xi-bank-selected" class="xi-bank-selected hidden"></div><label>Cantidad (€)<input id="xi-bank-send-amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="0.50" required></label><button class="xi-bank-submit" type="submit">Continuar · Enviar Bizum</button></form>`;
  else if(type==='withdraw')body.innerHTML=`<form id="xi-bank-withdraw-form" class="xi-bank-form"><p class="xi-bank-hint">Elige una cantidad. Se descontará de tu cuenta y aparecerá como una moneda individual en tu inventario. Puedes intercambiar esa moneda con un amigo y él podrá depositarla.</p><label>Cantidad a convertir (€)<input id="xi-bank-withdraw-amount" type="number" min="0.01" step="0.01" max="1000000" placeholder="1.00" required></label><p id="xi-bank-mint-info" class="xi-bank-hint" aria-live="polite">Se permite una moneda cada 2 minutos. Varias acuñaciones rápidas pueden activar una pausa única de 10 minutos.</p><button class="xi-bank-submit" type="submit">Convertir en moneda</button></form>`;
  else if(type==='deposit')body.innerHTML=`<p class="xi-bank-hint">Elige una moneda de tu inventario. Al depositarla, desaparecerá y su importe volverá a tu saldo. Las monedas incluidas en un intercambio activo no están disponibles.</p><div id="xi-bank-deposit-options"></div>`;
+ else if(type==='memberships'){body.innerHTML='<p class="xi-bank-hint">Cancela renovaciones manteniendo tus ventajas hasta el vencimiento.</p><div id="xi-bank-member-panel"></div>';void xiMembershipLoadMine();}
  if(type==='deposit')xiBankRenderCoins();
  if(type==='withdraw')void xiBankFetchMintStatus();
 }
@@ -7683,7 +7724,7 @@ function xiBankRenderCoins(){
 }
 function xiBankRenderHistory(){
  const host=$('#xi-bank-history');if(!host)return;
- const names={activity:'Actividad en XIFRE',shop:'Compra en Tienda',admin:'Ajuste de saldo',market:'Mercado',instant:'Venta instantánea',bank_transfer:'Bizum',bank_withdraw:'Conversión a moneda',bank_deposit:'Depósito de moneda',plaza:'Premio de La Plaza'};
+ const names={activity:'Actividad en XIFRE',shop:'Compra en Tienda',admin:'Ajuste de saldo',market:'Mercado',instant:'Venta instantánea',bank_transfer:'Bizum',bank_withdraw:'Conversión a moneda',bank_deposit:'Depósito de moneda',plaza:'Premio de La Plaza',membership:'Cuota de membresía'};
  host.innerHTML=xiBankHistory.length?xiBankHistory.map(m=>{const v=Number(m.delta_cents||0),date=new Date(m.created_at);return `<div class="xi-bank-history-row"><span class="xi-bank-history-icon">${v>=0?'↙':'↗'}</span><span><strong>${esc(m.transfer_label||names[m.reason]||'Movimiento')}</strong><small>${esc(Number.isFinite(date.getTime())?date.toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'')}</small></span><b class="${v>=0?'positive':''}">${v>=0?'+':'−'}${esc(xiBankEur(Math.abs(v)))}</b></div>`;}).join(''):'<p>Aún no hay movimientos.</p>';
 }
 async function xiBankLoad(force=false){
@@ -8744,6 +8785,559 @@ function xiDecorSeriesBind(){
   const button=event.target.closest('[data-xi-decor-equip]');
   if(button){event.preventDefault();void xiDecorEquip(button.dataset.xiDecorEquip);}
  });
+}
+
+/* ==============================================================
+   XIFRE ALPHA 1.18 · tienda múltiple y membresías de XIFRE
+   Todo saldo, condición de prueba, cobro y caja x3 se valida en RPC.
+   ============================================================== */
+function xiShopMaxQuantity(listing){
+  return Math.max(1,Math.min(99,listing?.stock===null?99:Number(listing?.stock||1)));
+}
+function xiShopQuantity(listing){
+  return Math.max(1,Math.min(xiShopMaxQuantity(listing),Number(xiShopQuantities.get(String(listing?.id))||1)));
+}
+function xiShopStepQuantity(id,change){
+  const listing=platformShopListings.find(row=>String(row.id)===String(id));
+  if(!listing || platformShopBuying.has(String(id)))return;
+  const qty=Math.max(1,Math.min(xiShopMaxQuantity(listing),xiShopQuantity(listing)+(change>0?1:-1)));
+  xiShopQuantities.set(String(id),qty);
+  platformSetWalletUI(platformWalletBalance);
+}
+let xiMemCatalog=[];
+let xiMemMine=[];
+let xiMemAdminEditingId=null;
+let xiMemPurchaseId=null;
+let xiMemPurchaseTrial=false;
+let xiMemPendingRequest=null;
+let xiMemBusy=false;
+let xiMemLoadVersion=0;
+let xiMemSearchTimer=null;
+let xiMemGrantRecipient=null;
+const xiMemUserBadges=new Map();
+const xiMemLabels=new Map();
+function xiMemDate(value){
+ const t=new Date(value);
+ return Number.isFinite(t.getTime())?t.toLocaleString('es-ES',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+}
+function xiMemRelative(hours){
+ const end=new Date(Date.now()+Number(hours||0)*3600000);
+ return xiMemDate(end.toISOString());
+}
+function xiMemColor(value,fallback='#f6c65b'){
+ return /^#[0-9a-fA-F]{6}$/.test(String(value||''))?String(value):fallback;
+}
+function xiMemCss(mem){
+ return '--mem-main:'+xiMemColor(mem.primary_color)+';--mem-second:'+xiMemColor(mem.secondary_color,'#f59d36')+
+ ';--mem-badge:'+xiMemColor(mem.badge_color,'#ffd776')+';--mem-back:'+xiMemColor(mem.background_color,'#1f1a33')+';';
+}
+function xiMemPeriod(mem){
+ const days=Math.max(1,Number(mem.period_days)||1);
+ return days%30===0?(days/30)+' mes'+(days===30?'':'es'):days%7===0?(days/7)+' semana'+(days===7?'':'s'):days+' día'+(days===1?'':'s');
+}
+function xiMemEmblem(mem,showName=true){
+ return '<span class="xi-mem-emblem" style="'+esc(xiMemCss(mem))+'" title="'+esc('Membresía '+(mem.name||''))+'">'+esc(mem.icon||'✦')+(showName?' '+esc(mem.name||'VIP'):'')+'</span>';
+}
+function xiMemHasActive(id){
+ return xiMemMine.some(s=>String(s.membership_id)===String(id) && s.status==='active' && new Date(s.ends_at).getTime()>Date.now());
+}
+function xiMemCanOpen3(){
+ return xiMemMine.some(s=>s.status==='active' && new Date(s.ends_at).getTime()>Date.now() && s.x3_boxes);
+}
+function xiMemBox3Lock(){
+ return xiMemCatalog.find(m=>m.x3_boxes&&m.show_locked_x3&&m.active)||null;
+}
+function xiMemBadgeMarkup(rows){
+ return rows.map(x=>xiMemEmblem(x)).join('');
+}
+async function xiMembershipFetchBadges(ids){
+ if(!supabase||!currentUser)return;
+ const users=[...new Set((ids||[]).map(String))].filter(isValidUuid).slice(0,60);
+ if(!users.length)return;
+ const owner=String(currentUser.id),session=platformSessionGeneration;
+ const {data,error}=await supabase.rpc('xifre_membership_public_badges',{p_user_ids:users});
+ if(error)throw error;
+ if(String(currentUser?.id)!==owner||session!==platformSessionGeneration)return;
+ for(const id of users)xiMemUserBadges.set(id,[]);
+ for(const row of Array.isArray(data)?data:[]){
+  const id=String(row.user_id);
+  if(xiMemUserBadges.has(id))xiMemUserBadges.get(id).push(row);
+ }
+ xiMembershipRenderOwnBadges();
+}
+function xiMembershipRenderOwnBadges(){
+ const mine=xiMemUserBadges.get(String(currentUser?.id||''))||[];
+ const brand=$('#xi-membership-brand');
+ if(brand)brand.innerHTML=xiMemBadgeMarkup(mine);
+ const own=$('#xi-membership-profile-badges');
+ if(own)own.innerHTML=xiMemBadgeMarkup(mine);
+ const bottom=$('#xi-membership-my-badges');if(bottom)bottom.innerHTML=xiMemBadgeMarkup(mine);
+}
+async function xiMembershipShowUserBadge(userId,targetId){
+ const id=String(userId||''),target=$('#'+targetId);
+ if(!target)return;
+ target.dataset.userId=id;
+ target.innerHTML='';
+ if(!isValidUuid(id))return;
+ try{
+  if(!xiMemUserBadges.has(id))await xiMembershipFetchBadges([id]);
+  if(target.dataset.userId===id)target.innerHTML=xiMemBadgeMarkup(xiMemUserBadges.get(id)||[]);
+ }catch(error){console.warn('MEMBERSHIP BADGES',friendlyError(error));}
+}
+async function xiMembershipLoadMine(){
+ if(!supabase||!currentUser)return;
+ const owner=String(currentUser.id),session=platformSessionGeneration;
+ try{
+  const {data,error}=await supabase.rpc('xifre_membership_my');
+  if(error)throw error;
+  if(String(currentUser?.id)!==owner||session!==platformSessionGeneration)return;
+  xiMemMine=Array.isArray(data)?data:[];
+  xiMembershipRenderBank();
+  await xiMembershipFetchBadges([owner]);
+ }catch(error){console.warn('MEMBERSHIP MINE',error);if(platformActiveApp==='bank')setText('xi-bank-memberships','Membresías no disponibles: '+friendlyError(error));}
+}
+async function xiMembershipRefreshPersonal(){
+ await xiMembershipLoadMine();
+}
+async function xiMembershipLoadShop(){
+ if(!supabase||!currentUser)return;
+ const session=platformSessionGeneration,owner=String(currentUser.id),version=++xiMemLoadVersion;
+ try{
+  const {data,error}=await supabase.rpc('xifre_membership_shop_catalog',{p_admin:platformShopOwner});
+  if(error)throw error;
+  if(String(currentUser?.id)!==owner||session!==platformSessionGeneration||version!==xiMemLoadVersion)return;
+  xiMemCatalog=Array.isArray(data)?data:[];
+  xiMembershipRenderShop();
+  if(platformShopOwner){xiMembershipRenderAdminList();xiMembershipPopulateGrantSelect();}
+  void xiMembershipLoadMine();
+ }catch(error){
+  console.warn('MEMBERSHIPS SHOP',error);
+  const host=$('#xi-membership-shop-list');
+  if(host)host.innerHTML='<p class="shop-empty">Membresías no disponibles. Instala el SQL Alpha 1.18. '+esc(friendlyError(error))+'</p>';
+ }
+}
+async function xiMembershipLoadItemLabels(instanceIds){
+ if(!supabase||!currentUser)return;
+ const ids=[...new Set((instanceIds||[]).map(String))].filter(isValidUuid);
+ const session=platformSessionGeneration,owner=String(currentUser.id);
+ try{
+  const results=[];
+  for(let i=0;i<ids.length;i+=250){
+   const {data,error}=await supabase.rpc('xifre_membership_item_labels',{p_instance_ids:ids.slice(i,i+250)});
+   if(error)throw error;
+   results.push(...(Array.isArray(data)?data:[]));
+  }
+  if(session!==platformSessionGeneration||String(currentUser?.id)!==owner)return;
+  for(const id of ids)xiMemLabels.delete(id);
+  for(const row of results)xiMemLabels.set(String(row.instance_id),row);
+ }catch(error){console.warn('MEMBERSHIP ITEM LABELS',friendlyError(error));}
+}
+function xiMembershipDrawItemLabel(item){
+ const info=xiMemLabels.get(platformItemKey(item));
+ if(!info)return;
+ const node=$('#item-details-extras');if(!node)return;
+ const tags=[];
+ if(info.exclusive && info.exclusive_membership)tags.push('<span class="xi-mem-item-mark is-exclusive" style="color:'+xiMemColor(info.exclusive_color)+'">✦ EXCLUSIVO · '+esc(info.exclusive_membership)+'</span>');
+ if(info.acquired_from_membership && info.source_membership)tags.push('<span class="xi-mem-item-mark" style="color:'+xiMemColor(info.source_color)+'">Obtenido mediante '+esc(info.source_membership)+'</span>');
+ if(tags.length){node.insertAdjacentHTML('beforeend','<div class="item-feature-row"><span>Membresía</span><div>'+tags.join('')+'</div></div>');node.classList.remove('hidden');}
+}
+function xiMembershipReset(){
+ xiMemCatalog=[];xiMemMine=[];xiMemAdminEditingId=null;xiMemPurchaseId=null;
+ xiMemBusy=false;xiMemLoadVersion++;xiMemPendingRequest=null;xiMemGrantRecipient=null;
+ xiMemUserBadges.clear();xiMemLabels.clear();clearTimeout(xiMemSearchTimer);
+ for(const id of ['xi-membership-brand','xi-membership-my-badges','xi-membership-right-badges','xi-membership-member-badges','xi-bank-memberships'])$('#'+id)?.replaceChildren();
+}
+
+function xiMemCard(mem,preview=false){
+ const owned=!preview&&Boolean(mem.owned_subscription_id||xiMemHasActive(mem.id));
+ const offer=!preview&&mem.trial_eligible;
+ const rewards=Array.isArray(mem.rewards)?mem.rewards:[];
+ const rewardText=rewards.reduce((n,x)=>n+Number(x.quantity||0),0);
+ const style=esc(xiMemCss(mem));
+ const cardStyle=['gradient','solid','glass'].includes(mem.card_style)?mem.card_style:'gradient';
+ const trialDeadline=mem.trial_offer_until?'<div class="xi-mem-trial-deadline">Prueba disponible hasta '+esc(xiMemDate(mem.trial_offer_until))+'</div>':'';
+ const trial=offer?'<span>🎁 Prueba gratis '+esc(String(Number(mem.trial_hours)))+' h</span>':'';
+ return '<article class="xi-mem-card" data-card-style="'+cardStyle+'" style="'+style+'">'+
+ '<div class="xi-mem-card-title">'+xiMemEmblem(mem,false)+'<h3>'+esc(mem.name||'Membresía')+'</h3></div>'+
+ '<p class="xi-mem-card-description">'+esc(mem.description||'Beneficios de XIFRE')+'</p>'+
+ '<div class="xi-mem-card-chips">'+(mem.x3_boxes?'<span>✦ Apertura de cajas ×3</span>':'')+
+ (rewardText?'<span>🎁 '+rewardText+' objeto(s) al activar</span>':'')+
+ (mem.billing_mode==='subscription'?'<span>Renovación automática</span>':'<span>Pago único</span>')+trial+'</div>'+
+ '<div class="xi-mem-card-price">'+esc(platformMoney(mem.price_cents))+'<small> / '+esc(xiMemPeriod(mem))+'</small></div>'+
+ (offer?trialDeadline:'')+
+ '<button type="button" '+(preview||owned?'disabled':'data-xi-mem-purchase="'+esc(mem.id)+'"')+'>'+
+ (preview?'Vista previa':owned?'Ya eres miembro':offer?'Ver prueba gratis y detalles':'Ver condiciones y contratar')+'</button></article>';
+}
+function xiMembershipRenderShop(){
+ const host=$('#xi-membership-shop-list');if(!host)return;
+ const visible=xiMemCatalog.filter(x=>x.active);
+ host.innerHTML=visible.length?visible.map(x=>xiMemCard(x)).join(''):'<p class="shop-empty">Próximamente habrá membresías y otros extras.</p>';
+}
+function xiMemConfirmSummary(mem,trial){
+ const days=xiMemPeriod(mem);
+ const rewards=Array.isArray(mem.rewards)?mem.rewards:[];
+ const firstDate=trial?xiMemRelative(Number(mem.trial_hours||0)):xiMemRelative(Number(mem.period_days||1)*24);
+ const service=mem.billing_mode==='subscription'?'Se renovará automáticamente cada '+days+' mientras tengas saldo suficiente.':'Es un pago único. Para continuar después del plazo deberás comprarlo otra vez.';
+ const trialCopy=trial?'La prueba no tendrá coste ahora. Tu primer cobro automático será de '+platformMoney(mem.price_cents)+' el '+firstDate+' si no cancelas antes.':'Se descontarán '+platformMoney(mem.price_cents)+' de tu saldo virtual al confirmar.';
+ const rewardsInfo=rewards.length?'<ul>'+rewards.map(r=>'<li>'+esc(r.quantity)+' × '+esc(r.name)+(r.permanent_exclusive||r.exclusive?' · <b>EXCLUSIVO PERMANENTE</b>':' · procedencia de membresía')+'</li>').join('')+'</ul>':'<p>Esta membresía no incluye objetos de regalo.</p>';
+ return '<h2 id="xi-mem-purchase-title">'+esc(mem.name)+'</h2>'+
+ '<div class="xi-mem-purchase-summary">'+xiMemEmblem(mem)+'<p>'+esc(mem.description||'Membresía de XIFRE')+'</p>'+
+ '<div class="xi-mem-purchase-detail"><span>Precio y duración</span><strong>'+esc(platformMoney(mem.price_cents))+' / '+esc(days)+'</strong></div>'+
+ '<div class="xi-mem-purchase-detail"><span>Modalidad</span><strong>'+(mem.billing_mode==='subscription'?'Suscripción renovable':'Pago único')+'</strong></div>'+
+ '<div class="xi-mem-purchase-detail"><span>Tu saldo actual</span><strong>'+esc(platformMoney(platformWalletBalance))+'</strong></div>'+
+ (mem.trial_eligible?'<label class="xi-mem-purchase-detail"><span>Usar prueba gratuita de '+esc(mem.trial_hours)+' horas</span><input id="xi-mem-try-free" type="checkbox" '+(trial?'checked':'')+'></label>':'')+
+ '<div class="xi-mem-purchase-detail"><span>'+(trial?'Prueba gratis hasta':'Ventajas vigentes hasta')+'</span><strong>'+esc(firstDate)+'</strong></div>'+
+ '<p>'+esc(trialCopy)+'</p><p>'+esc(service)+'</p>'+
+ '<p><b>Cancelación:</b> desde Banco XIFRE. Si cancelas durante la prueba gratis, mantendrás los beneficios hasta que termine, sin que te cobremos después.</p>'+
+ (mem.x3_boxes?'<p>✔ Apertura simultánea de tres cajas del mismo tipo (necesitas tener las tres copias disponibles).</p>':'')+
+ '<strong>Paquete inicial de objetos</strong>'+rewardsInfo+
+ '<p>Esta es una compra con dinero virtual interno de XIFRE y no implica pagos reales ni transferencias bancarias.</p></div>';
+}
+function xiMembershipOpenPurchase(id){
+ const mem=xiMemCatalog.find(x=>String(x.id)===String(id) && x.active);
+ if(!mem)return;
+ if(mem.owned_subscription_id||xiMemHasActive(mem.id))return toast('Ya tienes esa membresía. Gestiona tu suscripción en el Banco.','info');
+ xiMemPurchaseId=String(id);xiMemPurchaseTrial=Boolean(mem.trial_eligible);
+ xiMembershipRenderPurchase();
+ openModal('xi-mem-purchase-modal');
+}
+function xiMembershipRenderPurchase(){
+ const mem=xiMemCatalog.find(x=>String(x.id)===String(xiMemPurchaseId));
+ if(!mem)return;
+ const content=$('#xi-mem-purchase-content');
+ if(content)content.innerHTML=xiMemConfirmSummary(mem,xiMemPurchaseTrial);
+ setText('xi-mem-purchase-feedback','');
+ const button=$('#xi-mem-purchase-confirm');
+ if(button)button.textContent=xiMemPurchaseTrial?'Activar prueba gratuita':'Confirmar '+platformMoney(mem.price_cents);
+}
+async function xiMembershipConfirmPurchase(){
+ const mem=xiMemCatalog.find(x=>String(x.id)===String(xiMemPurchaseId));
+ if(!mem||xiMemBusy||!currentUser)return;
+ if(!xiMemPurchaseTrial && platformWalletBalance<Number(mem.price_cents))return setText('xi-mem-purchase-feedback','Saldo insuficiente para la compra.');
+ xiMemBusy=true;
+ const button=$('#xi-mem-purchase-confirm');if(button)button.disabled=true;
+ try{
+  const key=String(currentUser.id)+':'+mem.id+':'+xiMemPurchaseTrial;
+  const requestId=xiMemPendingRequest?.key===key?xiMemPendingRequest.id:xiBankUuid();
+  xiMemPendingRequest={key,id:requestId};
+  const {data,error}=await supabase.rpc('xifre_membership_purchase',{p_membership_id:mem.id,p_use_trial:xiMemPurchaseTrial,p_request_id:requestId});
+  if(error)throw error;
+  xiMemPendingRequest=null;
+  closeModal('xi-mem-purchase-modal');
+  platformSetWalletUI(data?.balance_cents);
+  await Promise.all([xiMembershipLoadShop(),platformRefreshInventory(),xiBankLoad()]);
+  toast(xiMemPurchaseTrial?'Prueba gratuita activada hasta '+xiMemDate(data?.ends_at):'Membresía activada hasta '+xiMemDate(data?.ends_at),'success');
+ }catch(error){setText('xi-mem-purchase-feedback',friendlyError(error));}
+ finally{xiMemBusy=false;if(button)button.disabled=false;}
+}
+function xiMembershipRenderBank(){
+ const active=xiMemMine.filter(s=>s.status==='active' && new Date(s.ends_at).getTime()>Date.now());
+ const hostMarkup=active.length?active.map(s=>{
+  const recurring=!s.granted_by_admin && (s.billing_mode==='subscription'||s.is_trial);
+  const canResume=recurring && s.cancel_at_end;
+  const meta=s.is_trial?'PRUEBA GRATUITA':s.granted_by_admin?'CONCESIÓN ADMINISTRATIVA':s.billing_mode==='one_time'?'PAGO ÚNICO':'SUSCRIPCIÓN';
+  return '<article class="xi-bank-member-row"><div class="xi-bank-member-row-main">'+
+   '<strong>'+xiMemEmblem(s)+' '+esc(meta)+'</strong>'+
+   '<small>Ventajas hasta '+esc(xiMemDate(s.ends_at))+'</small>'+
+   (s.cancel_at_end||!recurring?'<small>No habrá renovación automática. Conservarás los beneficios hasta esa fecha.</small>':
+   '<small>Próximo cobro: '+esc(platformMoney(s.price_cents))+' el '+esc(xiMemDate(s.next_charge_at))+'</small>')+
+   '</div><div class="xi-bank-member-row-actions">'+
+   (canResume?'<button type="button" data-xi-mem-resume="'+esc(s.id)+'">Reactivar renovación</button>':
+    recurring&&!s.cancel_at_end?'<button type="button" data-xi-mem-cancel="'+esc(s.id)+'">Cancelar suscripción</button>':'')+
+   '</div></article>';
+ }).join(''):'<p class="xi-bank-hint">No tienes membresías activas. Puedes verlas en Tienda → Extras.</p>';
+ if($('#xi-bank-memberships'))$('#xi-bank-memberships').innerHTML=hostMarkup;
+ if($('#xi-bank-member-panel'))$('#xi-bank-member-panel').innerHTML=hostMarkup;
+}
+async function xiMembershipCancel(id,resume=false){
+ const sub=xiMemMine.find(s=>s.id===String(id));if(!sub||xiMemBusy)return;
+ if(!await askConfirm(resume?'Reactivar renovación':'Cancelar suscripción',
+ resume?'¿Reactivar la renovación automática de '+sub.name+' cuando termine el periodo actual?':
+ '¿Cancelar los próximos cobros de '+sub.name+'? Seguirás teniendo sus ventajas hasta el '+xiMemDate(sub.ends_at)+'.',resume?'Reactivar':'Cancelar suscripción'))return;
+ xiMemBusy=true;
+ try{
+  const {error}=await supabase.rpc('xifre_membership_cancel',{p_subscription_id:id,p_resume:resume});
+  if(error)throw error;
+  await Promise.all([xiMembershipLoadMine(),xiMembershipLoadShop()]);
+  toast(resume?'Renovación reactivada.':'Renovación cancelada. Tus beneficios continúan hasta el vencimiento.','success');
+ }catch(error){toast(friendlyError(error),'error');}
+ finally{xiMemBusy=false;}
+}
+
+function xiMembershipPopulateGrantSelect(){
+ const select=$('#xi-mem-grant-membership');if(!select)return;
+ const previous=select.value;
+ select.innerHTML='<option value="">Selecciona una membresía</option>'+
+  xiMemCatalog.map(m=>'<option value="'+esc(m.id)+'">'+esc(m.name)+(m.active?'':' · OCULTA')+'</option>').join('');
+ if(xiMemCatalog.some(m=>m.id===previous))select.value=previous;
+}
+function xiMembershipRenderAdminList(){
+ const host=$('#xi-mem-admin-list');if(!host)return;
+ host.innerHTML=xiMemCatalog.length?xiMemCatalog.map(m=>
+  '<div class="xi-mem-admin-row"><span><strong>'+xiMemEmblem(m)+'</strong><small>'+esc(platformMoney(m.price_cents))+' / '+esc(xiMemPeriod(m))+
+  ' · '+(m.active?'Publicada':'Oculta')+'</small></span><button type="button" class="inventory-secondary-button compact" data-xi-mem-edit="'+esc(m.id)+'">Editar</button></div>'
+ ).join(''):'<p class="xi-bank-hint">Todavía no has creado ninguna membresía.</p>';
+}
+function xiMembershipDraftRewards(){
+ return [...document.querySelectorAll('#xi-mem-rewards-list .xi-mem-reward-row')].map(row=>({
+  item_id:row.querySelector('select')?.value||'',
+  quantity:Number(row.querySelector('input[type=number]')?.value||1),
+  exclusive:Boolean(row.querySelector('input[type=checkbox]')?.checked)
+ }));
+}
+function xiMembershipRewardsRender(rewards=[]){
+ const host=$('#xi-mem-rewards-list');if(!host)return;
+ host.innerHTML=rewards.map((reward,i)=>{
+  const valid=platformAdminItems.filter(item=>item.active && !item.is_box && !xiBankIsCoin(item));
+  const options='<option value="">Selecciona un objeto...</option>'+valid.map(item=>'<option value="'+esc(item.id)+'"'+(String(item.id)===String(reward.item_id)?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  return '<div class="xi-mem-reward-row" data-index="'+i+'"><label>Objeto<select class="xi-mem-reward-select" required>'+options+'</select></label>'+
+   '<label>Copias<input type="number" min="1" max="25" step="1" value="'+esc(reward.quantity||1)+'"></label>'+
+   '<label class="xi-mem-exclusive-toggle"><input type="checkbox" '+(reward.exclusive||reward.permanent_exclusive?'checked':'')+
+   (reward.permanent_exclusive?' disabled title="La marca exclusiva es permanente"':'')+'> EXCLUSIVO</label>'+
+   '<button type="button" class="xi-mem-remove-reward" data-xi-mem-remove-reward="'+i+'" title="Quitar del paquete">×</button></div>';
+ }).join('');
+ host.querySelectorAll('.xi-mem-reward-select').forEach(select=>xiAdminSearchableSelect(select,'Buscar objeto para el paquete…'));
+}
+function xiMembershipReadAdminForm(){
+ const name=$('#xi-mem-name')?.value.trim()||'';
+ if(!name)throw new Error('Escribe un nombre.');
+ const unit=$('#xi-mem-period-unit')?.value;
+ const multiplier=unit==='month'?30:unit==='week'?7:1;
+ const period=Number($('#xi-mem-period')?.value)*multiplier;
+ if(!Number.isInteger(period)||period<1||period>36500)throw new Error('Duración fuera del límite.');
+ const trial=$('#xi-mem-trial-on')?.checked;
+ const trialHours=trial?Number($('#xi-mem-trial-hours')?.value):0;
+ const offerHours=trial?Number($('#xi-mem-trial-offer-hours')?.value):0;
+ if(!Number.isInteger(trialHours)||trialHours<0||trialHours>8760||
+   !Number.isInteger(offerHours)||offerHours<0||offerHours>8760)throw new Error('Prueba o plazo inválido.');
+ const rewards=xiMembershipDraftRewards().map(r=>{
+  if(!isValidUuid(r.item_id)||!Number.isInteger(r.quantity)||r.quantity<1||r.quantity>25)throw new Error('Revisa los objetos y cantidades del paquete.');
+  return r;
+ });
+ if(new Set(rewards.map(r=>r.item_id)).size!==rewards.length)throw new Error('Un objeto no puede aparecer dos veces en el mismo paquete.');
+ const config={name,description:$('#xi-mem-description')?.value.trim()||'',
+  icon:$('#xi-mem-icon')?.value.trim()||'✦',
+  primary_color:$('#xi-mem-primary')?.value,secondary_color:$('#xi-mem-secondary')?.value,
+  badge_color:$('#xi-mem-badge')?.value,background_color:$('#xi-mem-background')?.value,
+  card_style:$('#xi-mem-card-style')?.value,billing_mode:$('#xi-mem-billing')?.value,
+  price_cents:platformMoneyToCents($('#xi-mem-price')?.value),
+  period_days:period,trial_hours:trialHours,trial_offer_hours:offerHours,
+  restart_trial:Boolean($('#xi-mem-trial-restart')?.checked),active:Boolean($('#xi-mem-active')?.checked),
+  x3_boxes:Boolean($('#xi-mem-x3')?.checked),show_locked_x3:Boolean($('#xi-mem-show-locked')?.checked)};
+ return {config,rewards};
+}
+function xiMembershipPreviewAdmin(){
+ const form=$('#xi-membership-admin-form');if(!form)return;
+ const trial=$('#xi-mem-trial-on')?.checked;
+ $('#xi-mem-trial-settings')?.classList.toggle('hidden',!trial);
+ const unit=$('#xi-mem-period-unit')?.value;
+ const days=Math.max(1,Math.floor(Number($('#xi-mem-period')?.value||1)*(unit==='week'?7:unit==='month'?30:1)));
+ const c=Number(String($('#xi-mem-price')?.value||0))*100;
+ const mem={name:$('#xi-mem-name')?.value.trim()||'Tu membresía',icon:$('#xi-mem-icon')?.value||'✦',
+ description:$('#xi-mem-description')?.value.trim()||'Describe aquí las ventajas de la membresía.',
+ primary_color:$('#xi-mem-primary')?.value,secondary_color:$('#xi-mem-secondary')?.value,
+ badge_color:$('#xi-mem-badge')?.value,background_color:$('#xi-mem-background')?.value,
+ card_style:$('#xi-mem-card-style')?.value,billing_mode:$('#xi-mem-billing')?.value,
+ price_cents:Number.isFinite(c)?Math.max(0,Math.round(c)):0,period_days:days,
+ trial_hours:trial?Number($('#xi-mem-trial-hours')?.value||0):0,
+ x3_boxes:$('#xi-mem-x3')?.checked,rewards:xiMembershipDraftRewards().filter(r=>r.item_id)};
+ const host=$('#xi-mem-live-card');if(host)host.innerHTML=xiMemCard(mem,true);
+}
+function xiMembershipResetAdmin(){
+ const form=$('#xi-membership-admin-form');form?.reset();xiMemAdminEditingId=null;
+ if($('#xi-mem-admin-title'))setText('xi-mem-admin-title','Crear membresía');
+ if($('#xi-mem-save'))setText('xi-mem-save','Guardar membresía');
+ $('#xi-mem-trial-restart').checked=false;
+ setText('xi-mem-admin-feedback','');
+ xiMembershipRewardsRender([]);
+ xiMembershipPreviewAdmin();
+}
+async function xiMembershipEditAdmin(id){
+ if(!platformShopOwner)return;
+ const mem=xiMemCatalog.find(m=>m.id===String(id));if(!mem)return;
+ if(!platformAdminItems.length)await platformLoadAdminData();
+ xiMemAdminEditingId=String(id);
+ const set=(key,value)=>{const node=$('#xi-mem-'+key);if(node)node.value=String(value??'');};
+ const check=(key,value)=>{const node=$('#xi-mem-'+key);if(node)node.checked=Boolean(value);};
+ set('name',mem.name);set('icon',mem.icon);set('description',mem.description);
+ set('primary',mem.primary_color);set('secondary',mem.secondary_color);
+ set('badge',mem.badge_color);set('background',mem.background_color);
+ set('card-style',mem.card_style);set('billing',mem.billing_mode);
+ set('price',(Number(mem.price_cents)/100).toFixed(2));
+ const unit=mem.period_days%30===0?'month':mem.period_days%7===0?'week':'day';
+ set('period-unit',unit);set('period',mem.period_days/(unit==='month'?30:unit==='week'?7:1));
+ check('active',mem.active);check('trial-on',mem.trial_hours>0);
+ set('trial-hours',mem.trial_hours||168);set('trial-offer-hours',24);
+ check('trial-restart',false);check('x3',mem.x3_boxes);check('show-locked',mem.show_locked_x3);
+ xiMembershipRewardsRender(mem.rewards||[]);
+ setText('xi-mem-admin-feedback','La marca EXCLUSIVO, una vez aplicada a un objeto, es permanente.');
+ setText('xi-mem-admin-title','Editar '+mem.name);
+ setText('xi-mem-save','Guardar cambios');
+ xiMembershipPreviewAdmin();
+ $('#xi-membership-admin-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function xiMembershipSaveAdmin(event){
+ event.preventDefault();if(!platformShopOwner||xiMemBusy)return;
+ xiMemBusy=true;const button=$('#xi-mem-save');if(button)button.disabled=true;
+ try{
+  const {config,rewards}=xiMembershipReadAdminForm();
+  const {error}=await supabase.rpc('xifre_admin_membership_save',{p_id:xiMemAdminEditingId,p_config:config,p_rewards:rewards});
+  if(error)throw error;
+  xiMembershipResetAdmin();
+  await xiMembershipLoadShop();
+  toast('Membresía guardada correctamente.','success');
+ }catch(error){setText('xi-mem-admin-feedback','Error: '+friendlyError(error));}
+ finally{xiMemBusy=false;if(button)button.disabled=false;}
+}
+function xiMembershipSearchGrant(value){
+ clearTimeout(xiMemSearchTimer);xiMemGrantRecipient=null;
+ const q=String(value||'').trim().replace(/^@+/,'').slice(0,35);
+ const host=$('#xi-mem-grant-results');
+ if(!host)return;
+ if(q.length<2){host.textContent='Escribe al menos 2 letras.';return;}
+ host.textContent='Buscando usuarios…';
+ const owner=String(currentUser?.id||'');
+ xiMemSearchTimer=setTimeout(async()=>{
+  const {data,error}=await supabase.rpc('xifre_admin_search_users',{p_query:q});
+  if(String(currentUser?.id)!==owner||$('#xi-mem-grant-search')?.value?.replace(/^@+/,'').trim()!==q)return;
+  if(error){host.textContent=friendlyError(error);return;}
+  const matches=Array.isArray(data)?data:[];
+  host.innerHTML=matches.length?matches.map(u=>'<button type="button" data-xi-mem-grant-user="'+esc(u.id)+
+   '" data-xi-mem-grant-name="'+esc(u.username)+'">'+esc(u.username)+' · @'+esc(u.email_handle||u.username)+'</button>').join(''):'No hay coincidencias.';
+ },280);
+}
+async function xiMembershipGrantAdmin(event){
+ event.preventDefault();if(!platformShopOwner||xiMemBusy)return;
+ const id=$('#xi-mem-grant-membership')?.value,user=xiMemGrantRecipient;
+ if(!isValidUuid(id)||!isValidUuid(user?.id))return setText('xi-mem-grant-feedback','Selecciona una membresía y un usuario.');
+ const unit=$('#xi-mem-grant-unit')?.value;
+ const hours=Number($('#xi-mem-grant-time')?.value)*(unit==='week'?168:unit==='day'?24:1);
+ if(!Number.isInteger(hours)||hours<1||hours>87600)return setText('xi-mem-grant-feedback','El tiempo máximo permitido es 10 años.');
+ const mem=xiMemCatalog.find(m=>m.id===id);
+ if(!await askConfirm('Entregar membresía','¿Dar '+(mem?.name||'esta membresía')+' a @'+user.name+' durante '+hours+' horas sin cobrar saldo?', 'Entregar'))return;
+ xiMemBusy=true;
+ const button=$('#xi-mem-grant-submit');if(button)button.disabled=true;
+ try{
+  const {data,error}=await supabase.rpc('xifre_admin_membership_grant',{p_membership_id:id,p_user_id:user.id,p_hours:hours});
+  if(error)throw error;
+  setText('xi-mem-grant-feedback','Entregado a @'+user.name+' hasta '+xiMemDate(data.ends_at)+'. Objetos entregados: '+Number(data.delivered||0)+'.');
+  toast('Membresía entregada a @'+user.name+'.','success');
+ }catch(error){setText('xi-mem-grant-feedback',friendlyError(error));}
+ finally{xiMemBusy=false;if(button)button.disabled=false;}
+}
+
+function xiMembershipShowBox3(item){
+ const button=$('#xi-item-open-box3');if(!button)return;
+ const ids=platformInventoryItems.filter(row=>platformBoxIdFor(row)===platformBoxIdFor(item)&&platformBoxInstances.has(platformItemKey(row))&&!row.reserved).map(platformItemKey);
+ const unlocked=xiMemCanOpen3(),locked=xiMemBox3Lock();
+ if(!unlocked&&!locked){button.classList.add('hidden');return;}
+ button.classList.remove('hidden');button.classList.toggle('is-locked',!unlocked);
+ button.dataset.box3Instances=ids.slice(0,3).join(',');
+ button.dataset.box3Membership=locked?.name||'membresía correspondiente';
+ button.disabled=unlocked&&ids.length<3;
+ button.textContent=!unlocked?'🔒 Abrir 3 cajas · Necesitas '+locked.name:
+  ids.length<3?'✦ Abrir ×3 · Necesitas 3 copias libres':'✦ Abrir 3 cajas a la vez';
+}
+async function xiMembershipOpenBox3(){
+ const button=$('#xi-item-open-box3');
+ if(!button||platformBoxOpeningBusy||!currentUser)return;
+ if(!xiMemCanOpen3())return toast('Necesitas la membresía '+button.dataset.box3Membership+' para abrir tres cajas.','info');
+ const ids=String(button.dataset.box3Instances||'').split(',').filter(isValidUuid);
+ if(ids.length!==3)return toast('Necesitas 3 cajas iguales y libres.','info');
+ platformBoxOpeningBusy=true;platformBoxSpinToken++;
+ const token=platformBoxSpinToken;button.disabled=true;
+ try{
+  const item=platformInventoryItems.find(row=>platformItemKey(row)===ids[0]);
+  const drops=await platformGetBoxDrops(platformBoxIdFor(item));
+  if(!drops.length)throw new Error('La caja no tiene premios configurados.');
+  const {data,error}=await supabase.rpc('xifre_membership_box_open3',{p_instance_ids:ids});
+  if(error)throw error;
+  if(!Array.isArray(data)||data.length!==3||data.some(r=>!r.item_id))throw new Error('Respuesta de tres premios incompleta. Comprueba tu inventario.');
+  const prizes=data.map(r=>({...r}));
+  const urls=await platformSignImagePaths(prizes.map(r=>r.image_path));
+  prizes.forEach(r=>r.image_url=urls.get(r.image_path)||'');
+  closeModal('item-details-modal');openModal('box-opening-modal');
+  $('#box-reel-window')?.classList.add('hidden');
+  $('#xi-box-triple-reels')?.classList.remove('hidden');
+  $('#box-opening-result')?.classList.add('hidden');$('#box-opening-done')?.classList.add('hidden');
+  platformResetBoxCelebration();
+  setText('box-opening-title','¡Abriendo tres cajas!');
+  setText('box-opening-hint','Los tres premios se asignan en una única operación del servidor.');
+  const host=$('#xi-box-triple-reels'),targetIndex=36;
+  host.innerHTML=prizes.map((prize,n)=>{
+   const rolls=Array.from({length:42},(_,i)=>i===targetIndex?prize:platformPickCosmeticDrop(drops));
+   return '<section class="xi-box3-column"><span class="xi-box3-label">CAJA '+(n+1)+'</span><div class="box-reel-window"><div class="box-reel-strip">'+
+    rolls.map((row,i)=>'<div class="box-reel-card rarity-'+esc(platformRarity(row).className)+' '+(i===targetIndex?'box-winning-card':'')+'"><span>'+
+    (row.hidden?'<span class="box-secret-shadow">?</span>':platformImageMarkup(row.image_url,row.name))+'</span><strong>'+esc(row.hidden?'Premio oculto':row.name)+'</strong><small>'+esc(platformRarity(row).label)+'</small></div>').join('')+
+    '</div><span class="box-reel-marker"></span></div></section>';
+  }).join('');
+  await Promise.all([platformLoadBoxMeta(),platformRefreshInventory()]);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+   if(token!==platformBoxSpinToken)return;
+   host.querySelectorAll('.xi-box3-column').forEach((col,i)=>{
+    const strip=col.querySelector('.box-reel-strip'),target=strip?.querySelectorAll('.box-reel-card')[targetIndex],frame=col.querySelector('.box-reel-window');
+    if(!target||!frame)return;
+    const dx=-(target.offsetLeft+target.offsetWidth/2-frame.clientWidth/2);
+    strip.style.transition='transform '+(4050+i*100)+'ms cubic-bezier(.10,.75,.12,1)';
+    strip.style.transform='translate3d('+dx+'px,0,0)';
+   });
+  }));
+  platformBoxSpinTimer=setTimeout(()=>{
+   if(token!==platformBoxSpinToken)return;
+   platformBoxOpeningBusy=false;
+   setText('box-opening-title','¡Tres premios conseguidos!');
+   const result=$('#box-opening-result');
+   result.innerHTML='<div class="xi-box3-results">'+prizes.map(prize=>{
+    const rarity=platformRarity(prize);
+    return '<article><div class="box-result-visual rarity-'+esc(rarity.className)+'">'+platformImageMarkup(prize.image_url,prize.name)+
+    '</div><small class="box-result-rarity">'+esc(rarity.label)+'</small><strong>'+esc(prize.name)+'</strong><small>Valor '+esc(platformFormatValue(prize.value))+'</small></article>';
+   }).join('')+'</div>';
+   result.classList.remove('hidden');$('#box-opening-done')?.classList.remove('hidden');
+   setText('box-opening-hint','Los tres objetos se han añadido a tu inventario.');
+  },4530);
+ }catch(error){platformBoxOpeningBusy=false;platformResetBoxCelebration();toast(friendlyError(error),'error');void platformLoadBoxMeta();void platformRefreshInventory();}
+ finally{button.disabled=false;}
+}
+
+function xiMembershipBind(){
+ $('#xi-membership-admin-form')?.addEventListener('input',xiMembershipPreviewAdmin);
+ $('#xi-membership-admin-form')?.addEventListener('change',xiMembershipPreviewAdmin);
+ $('#xi-membership-admin-form')?.addEventListener('submit',event=>void xiMembershipSaveAdmin(event));
+ $('#xi-mem-reset')?.addEventListener('click',xiMembershipResetAdmin);
+ $('#xi-mem-add-reward')?.addEventListener('click',async()=>{
+  if(!platformAdminItems.length)await platformLoadAdminData();
+  xiMembershipRewardsRender([...xiMembershipDraftRewards(),{item_id:'',quantity:1,exclusive:false}]);xiMembershipPreviewAdmin();
+ });
+ $('#xi-mem-grant-search')?.addEventListener('input',event=>xiMembershipSearchGrant(event.target.value));
+ $('#xi-mem-grant-form')?.addEventListener('submit',event=>void xiMembershipGrantAdmin(event));
+ $('#xi-mem-purchase-back')?.addEventListener('click',()=>closeModal('xi-mem-purchase-modal'));
+ $('#xi-mem-purchase-confirm')?.addEventListener('click',()=>void xiMembershipConfirmPurchase());
+ $('#xi-item-open-box3')?.addEventListener('click',()=>void xiMembershipOpenBox3());
+ $('#xi-mem-purchase-content')?.addEventListener('change',event=>{
+  if(event.target.id==='xi-mem-try-free'){xiMemPurchaseTrial=Boolean(event.target.checked);xiMembershipRenderPurchase();}
+ });
+ document.addEventListener('click',event=>{
+  const purchase=event.target.closest('[data-xi-mem-purchase]');
+  if(purchase){event.preventDefault();xiMembershipOpenPurchase(purchase.dataset.xiMemPurchase);return;}
+  const edit=event.target.closest('[data-xi-mem-edit]');
+  if(edit){event.preventDefault();void xiMembershipEditAdmin(edit.dataset.xiMemEdit);return;}
+  const remove=event.target.closest('[data-xi-mem-remove-reward]');
+  if(remove){
+   event.preventDefault();const rows=xiMembershipDraftRewards();
+   rows.splice(Number(remove.dataset.xiMemRemoveReward),1);xiMembershipRewardsRender(rows);xiMembershipPreviewAdmin();return;
+  }
+  const choose=event.target.closest('[data-xi-mem-grant-user]');
+  if(choose){
+   event.preventDefault();xiMemGrantRecipient={id:choose.dataset.xiMemGrantUser,name:choose.dataset.xiMemGrantName};
+   setText('xi-mem-grant-selected','Usuario seleccionado: @'+xiMemGrantRecipient.name);
+   $('#xi-mem-grant-results').innerHTML='Usuario seleccionado.';return;
+  }
+  const cancel=event.target.closest('[data-xi-mem-cancel]');
+  if(cancel){event.preventDefault();void xiMembershipCancel(cancel.dataset.xiMemCancel);return;}
+  const resume=event.target.closest('[data-xi-mem-resume]');
+  if(resume){event.preventDefault();void xiMembershipCancel(resume.dataset.xiMemResume,true);}
+ });
+ xiMembershipResetAdmin();
 }
 
 async function init() {
